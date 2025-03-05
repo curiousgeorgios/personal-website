@@ -36,7 +36,7 @@ const getImageClass = (photo: any) => {
 };
 
 export default function Home() {
-  const [activeSection, setActiveSection] = useState("interests")
+  const [activeSection, setActiveSection] = useState("currently")
   const [activeGallery, setActiveGallery] = useState("travel")
   const [isLoaded, setIsLoaded] = useState(false)
   const [isHighResImageLoading, setIsHighResImageLoading] = useState(false)
