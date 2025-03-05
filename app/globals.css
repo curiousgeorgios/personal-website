@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 68, 64, 60;
+  --background-rgb: 250, 249, 246;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+  font-feature-settings: "ss01", "ss03";
+}
+
+@layer base {
+  a {
+    @apply transition-colors;
+  }
+}
+
+/* Noise texture */
+.bg-noise {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='filmNoise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='discrete' tableValues='0 0.5 1'/%3E%3CfeFuncG type='discrete' tableValues='0 0.5 1'/%3E%3CfeFuncB type='discrete' tableValues='0 0.5 1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23filmNoise)'/%3E%3C/svg%3E");
+  opacity: 0.2;
+}
+
+/* Custom cursor styles have been removed to restore the default cursor */
+
+/* Simple Masonry Layout */
+.grid-masonry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* Horizontal images take up 2/3 width */
+.grid-masonry .horizontal {
+  width: calc(66.66% - 0.67rem);
+  aspect-ratio: 16/9;
+}
+
+/* Vertical images take up 1/3 width */
+.grid-masonry .vertical {
+  width: calc(33.33% - 0.67rem);
+  aspect-ratio: 3/4;
+}
+
+/* Square images take up 1/3 width */
+.grid-masonry .square {
+  width: calc(33.33% - 0.67rem);
+  aspect-ratio: 1/1;
+}
+
+/* Default styling for all grid items */
+.grid-masonry .grid-item {
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 1rem;
+  flex-grow: 1;
+}
+
+.grid-masonry img {
+  border-radius: 0.5rem;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.grid-masonry > div:hover img {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .grid-masonry .horizontal {
+    width: calc(50% - 0.5rem);
+  }
+  
+  .grid-masonry .vertical,
+  .grid-masonry .square {
+    width: calc(50% - 0.5rem);
+  }
+}
+
+@media (max-width: 640px) {
+  .grid-masonry .horizontal,
+  .grid-masonry .vertical,
+  .grid-masonry .square {
+    width: 100%;
+    aspect-ratio: 16/9;
+  }
+}
+
+/* Animation delay utilities for loading indicators */
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
