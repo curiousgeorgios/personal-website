@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { SectionContent } from "@/components/sections/SectionContent"
 import { SectionNavigation } from "@/components/sections/SectionNavigation"
-import { PhotoGallery } from "@/components/gallery/PhotoGallery" 
+import { PhotoGallery } from "@/components/Gallery/PhotoGallery" 
 import { BackgroundEffects } from "@/components/layout/BackgroundEffects"
 import { HeaderLogo } from "@/components/layout/HeaderLogo"
 import { AudioPlayerWrapper } from "@/components/audio/AudioPlayerWrapper"
