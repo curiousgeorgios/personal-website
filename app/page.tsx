@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { SectionContent } from "@/components/sections/SectionContent"
 import { SectionNavigation } from "@/components/sections/SectionNavigation"
-import { PhotoGallery } from "@/components/Gallery/PhotoGallery" 
 import { BackgroundEffects } from "@/components/layout/BackgroundEffects"
 import { HeaderLogo } from "@/components/layout/HeaderLogo"
 import { AudioPlayerWrapper } from "@/components/audio/AudioPlayerWrapper"
@@ -11,11 +10,9 @@ import { useAudioTracks } from "@/hooks/useAudioTracks"
 
 // Define possible section types for better type safety
 type SectionType = "currently" | "previously" | "best" | "spare" | "interests" | "connect"
-type GalleryType = "travel" | "art" | "moments"
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState<SectionType>("currently")
-  const [activeGallery, setActiveGallery] = useState<GalleryType>("travel")
   const audioTracks = useAudioTracks()
 
   return (
@@ -41,14 +38,7 @@ export default function Home() {
 
           {/* Content area */}
           <div className="md:w-2/3 lg:w-3/4 mt-8 md:mt-0">
-            {activeSection === "interests" ? (
-              <PhotoGallery 
-                activeGallery={activeGallery}
-                setActiveGallery={setActiveGallery}
-              />
-            ) : (
-              <SectionContent section={activeSection} />
-            )}
+            <SectionContent section={activeSection} />
           </div>
         </div>
       </main>

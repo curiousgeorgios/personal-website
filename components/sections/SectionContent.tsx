@@ -8,11 +8,11 @@ type SectionType = "currently" | "previously" | "best" | "spare" | "interests" |
 
 // Define section contents
 const sections: Record<SectionType, ReactNode> = {
-  currently: "building onestack.cloud, running digitalnachos.com.au, learning new things",
-  previously: "finance and policy, management consulting, swe @ various startups",
+  currently: "building w/ Ania at shecreatesmgmt.com, running/scaling digitalnachos.com.au, learning new things",
+  previously: "finance and policy, management consulting, swe @ various startups, founded (and built) onestack.cloud",
   best: "working (i.e. hacking away) together with amazing people",
   spare: "you'll find me at a local bakery/cafe (probably after a run) or on a tennis court",
-  interests: "bit of everything but mainly coffee ☕️, running 🏃‍♂️, tennis 🎾 and coding 💻",
+  interests: "bit of everything but mainly coffee ☕️, running 🏃‍♂️, tennis 🎾 coding 💻 and design 🎨",
   connect: (
     <>
       <a href="mailto:hello@curiousgeorge.dev" className="underline hover:text-amber-300 transition-colors">
@@ -35,6 +35,15 @@ const sections: Record<SectionType, ReactNode> = {
         className="underline hover:text-amber-300 transition-colors"
       >
         telegram
+      </a>
+      |{" "}
+      <a
+        href="https://www.instagram.com/curious.georgios/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline hover:text-amber-300 transition-colors"
+      >
+        instagram
       </a>
     </>
   ),
