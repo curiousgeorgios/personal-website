@@ -1,21 +1,34 @@
-"use client"
+"use client";
 
-import { ReactNode } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { ReactNode } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 // Define possible section types for better type safety
-type SectionType = "currently" | "previously" | "best" | "spare" | "interests" | "connect"
+type SectionType =
+  | "currently"
+  | "previously"
+  | "best"
+  | "spare"
+  | "interests"
+  | "connect";
 
 // Define section contents
 const sections: Record<SectionType, ReactNode> = {
-  currently: "building w/ Ania at shecreatesmgmt.com, running/scaling digitalnachos.com.au, learning new things",
-  previously: "finance and policy, management consulting, swe @ various startups, founded (and built) onestack.cloud",
+  currently:
+    "scaling digitalnachos.com.au, looking for cool people to build things with (reach out if you're interested), always learning",
+  previously:
+    "founded (and built) onestack.cloud, blocksolveinfrastructure.com, dev/data @ various startups, shecreatesmgmt.com, finance and policy, management consulting @ KPMG",
   best: "working (i.e. hacking away) together with amazing people",
-  spare: "you'll find me at a local bakery/cafe (probably after a run) or on a tennis court",
-  interests: "bit of everything but mainly coffee ☕️, running 🏃‍♂️, tennis 🎾 coding 💻 and design 🎨",
+  spare:
+    "you'll find me at a local bakery/cafe (probably after a run) or on a tennis court",
+  interests:
+    "bit of everything but mainly coffee ☕️, running 🏃‍♂️, tennis 🎾 coding 💻 and design 🎨",
   connect: (
     <>
-      <a href="mailto:hello@curiousgeorge.dev" className="underline hover:text-amber-300 transition-colors">
+      <a
+        href="mailto:hello@curiousgeorge.dev"
+        className="underline hover:text-amber-300 transition-colors"
+      >
         email
       </a>{" "}
       |{" "}
@@ -35,7 +48,7 @@ const sections: Record<SectionType, ReactNode> = {
         className="underline hover:text-amber-300 transition-colors"
       >
         telegram
-      </a>
+      </a>{" "}
       |{" "}
       <a
         href="https://www.instagram.com/curious.georgios/"
@@ -47,10 +60,10 @@ const sections: Record<SectionType, ReactNode> = {
       </a>
     </>
   ),
-}
+};
 
 interface SectionContentProps {
-  section: SectionType
+  section: SectionType;
 }
 
 export function SectionContent({ section }: SectionContentProps) {
@@ -67,5 +80,5 @@ export function SectionContent({ section }: SectionContentProps) {
         <p className="text-sm md:text-base">{sections[section]}</p>
       </motion.div>
     </AnimatePresence>
-  )
-} 
+  );
+}
