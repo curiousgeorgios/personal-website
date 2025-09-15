@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import MetaPixel from "../components/MetaPixel"
+import { PostHogProvider } from "../components/PostHogProvider"
 
 const inter = Inter({ subsets: ["latin"], weight: ["100", "200", "300", "400", "500"] })
 
@@ -25,11 +26,11 @@ export default function RootLayout({
       
       
       <body className={inter.className}>
-        <MetaPixel />
-        {children}
+        <PostHogProvider>
+          <MetaPixel />
+          {children}
+        </PostHogProvider>
       </body>
     </html>
   )
 }
-
-
