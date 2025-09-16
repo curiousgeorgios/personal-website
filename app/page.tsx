@@ -9,7 +9,7 @@ import { AudioPlayerWrapper } from "@/components/audio/AudioPlayerWrapper"
 import { useAudioTracks } from "@/hooks/useAudioTracks"
 
 // Define possible section types for better type safety
-type SectionType = "currently" | "previously" | "best" | "spare" | "interests" | "connect"
+type SectionType = "currently" | "previously" | "best" | "spare" | "interests" | "moodboard" | "connect"
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState<SectionType>("currently")

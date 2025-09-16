@@ -3,7 +3,7 @@
 import { motion } from "framer-motion"
 
 // Define possible section types for better type safety
-type SectionType = "currently" | "previously" | "best" | "spare" | "interests" | "connect"
+type SectionType = "currently" | "previously" | "best" | "spare" | "interests" | "moodboard" | "connect"
 
 // Define section navigation items
 const sectionLabels: Record<string, SectionType> = {
@@ -12,6 +12,7 @@ const sectionLabels: Record<string, SectionType> = {
   "I'm at my best when": "best",
   "In my spare time": "spare",
   "Interests": "interests",
+  "Moodboard": "moodboard",
   "Let's connect": "connect",
 }
 

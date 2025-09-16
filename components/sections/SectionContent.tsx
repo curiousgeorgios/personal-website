@@ -10,6 +10,7 @@ type SectionType =
   | "best"
   | "spare"
   | "interests"
+  | "moodboard"
   | "connect";
 
 // Define section contents
@@ -23,6 +24,18 @@ const sections: Record<SectionType, ReactNode> = {
     "you'll find me at a local bakery/cafe (probably after a run) or on a tennis court",
   interests:
     "bit of everything but mainly coffee ☕️, running 🏃‍♂️, tennis 🎾 coding 💻 and design 🎨",
+  moodboard: (
+    <div className="w-full max-w-4xl">
+      <iframe
+        style={{ border: "1px solid rgba(0, 0, 0, 0.1)" }}
+        width="100%"
+        height="450"
+        src="https://embed.figma.com/board/3sNbsAI1C6tHmUTab4I6vO/Moodboard?node-id=0-1&embed-host=share"
+        allowFullScreen
+        className="rounded-lg shadow-lg"
+      />
+    </div>
+  ),
   connect: (
     <>
       <a
