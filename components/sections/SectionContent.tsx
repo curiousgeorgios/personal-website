@@ -15,10 +15,77 @@ type SectionType =
 
 // Define section contents
 const sections: Record<SectionType, ReactNode> = {
-  currently:
-    "scaling digitalnachos.com.au, looking for cool people to build things with (reach out if you're interested), always learning",
-  previously:
-    "founded (and built) onestack.cloud, blocksolveinfrastructure.com, dev/data @ various startups, shecreatesmgmt.com, finance and policy, management consulting @ KPMG",
+  currently: (
+    <ul className="space-y-1 text-sm md:text-base">
+      <li>
+        • scaling{" "}
+        <a
+          href="https://digitalnachos.com.au"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          digitalnachos.com.au
+        </a>
+      </li>
+      <li>
+        • building{" "}
+        <a
+          href="https://linear.gratis"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          linear.gratis
+        </a>
+      </li>
+      <li>
+        • looking for cool people to build things with (reach out if you're
+        interested)
+      </li>
+      <li>• always learning</li>
+    </ul>
+  ),
+  previously: (
+    <ul className="space-y-1 text-sm md:text-base">
+      <li>
+        • founded (and built){" "}
+        <a
+          href="https://onestack.cloud"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          onestack.cloud
+        </a>
+      </li>
+      <li>
+        •{" "}
+        <a
+          href="https://blocksolveinfrastructure.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          blocksolveinfrastructure.com
+        </a>
+      </li>
+      <li>• dev/data @ various startups</li>
+      <li>
+        •{" "}
+        <a
+          href="https://shecreatesmgmt.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          shecreatesmgmt.com
+        </a>
+      </li>
+      <li>• finance and policy</li>
+      <li>• management consulting @ KPMG</li>
+    </ul>
+  ),
   best: "working (i.e. hacking away) together with amazing people",
   spare:
     "you'll find me at a local bakery/cafe (probably after a run) or on a tennis court",
@@ -90,7 +157,7 @@ export function SectionContent({ section }: SectionContentProps) {
         transition={{ duration: 0.5 }}
         className="min-h-[200px]"
       >
-        <p className="text-sm md:text-base">{sections[section]}</p>
+        <div className="text-sm md:text-base">{sections[section]}</div>
       </motion.div>
     </AnimatePresence>
   );
