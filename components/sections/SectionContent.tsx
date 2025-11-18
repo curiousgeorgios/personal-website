@@ -43,7 +43,40 @@ const sections: Record<SectionType, ReactNode> = {
         • looking for cool people to build things with (reach out if you're
         interested)
       </li>
-      <li>• always learning</li>
+      <li>
+        • helping{" "}
+        <a
+          href="https://runningforresilience.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          R4R
+        </a>{" "}
+        to scale through technology
+      </li>
+      <li>
+        • making canberra the best place in the world (see{" "}
+        <a
+          href="https://canberra.events"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          canberra.events
+        </a>{" "}
+        for more and follow{" "}
+        <a
+          href="https://www.instagram.com/project.canberra"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          @project.canberra
+        </a>{" "}
+        on instagram)
+      </li>
+      <li>• enjoying life to the fullest and always learning</li>
     </ul>
   ),
   previously: (
