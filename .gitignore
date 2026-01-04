@@ -26,6 +26,10 @@ yarn-error.log*
 .open-next
 .wrangler
 
+# generated audio assets (created by prebuild script)
+/public/audio/manifest.json
+/public/audio/artwork/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

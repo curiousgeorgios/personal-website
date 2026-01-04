@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/generate-audio-manifest.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "cf:build": "npx opennextjs-cloudflare build && node scripts/patch-worker.mjs",
+    "cf:build": "node scripts/generate-audio-manifest.mjs && npx opennextjs-cloudflare build && node scripts/patch-worker.mjs",
     "cf:preview": "npx opennextjs-cloudflare preview",
     "cf:deploy": "npm run cf:build && npx wrangler deploy"
   },

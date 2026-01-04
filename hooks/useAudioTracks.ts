@@ -31,15 +31,15 @@ export function useAudioTracks(): Track[] {
     'dublon - debris.mp3'
   ];
 
-  // Fetch audio tracks from API
+  // Fetch audio tracks from static manifest
   useEffect(() => {
     const fetchAudioTracks = async () => {
       try {
-        // First, fetch all available tracks without ordering
-        const response = await fetch('/api/audio');
+        // Fetch the pre-generated manifest (created at build time)
+        const response = await fetch('/audio/manifest.json');
 
         if (!response.ok) {
-          throw new Error('Failed to fetch audio tracks');
+          throw new Error('Failed to fetch audio manifest');
         }
 
         // Get all available tracks
