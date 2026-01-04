@@ -9,7 +9,7 @@
     "lint": "next lint",
     "cf:build": "npx opennextjs-cloudflare build",
     "cf:preview": "npx opennextjs-cloudflare preview",
-    "cf:deploy": "npx opennextjs-cloudflare deploy"
+    "cf:deploy": "npm run cf:build && npx wrangler deploy"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "latest",

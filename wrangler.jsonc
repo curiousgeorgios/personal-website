@@ -6,5 +6,8 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
+  },
+  "build": {
+    "command": "npm install && npm run cf:build"
   }
 }
