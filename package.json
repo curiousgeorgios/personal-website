@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "cf:build": "npx opennextjs-cloudflare build",
+    "cf:preview": "npx opennextjs-cloudflare preview",
+    "cf:deploy": "npx opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "latest",
@@ -48,7 +51,7 @@
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "music-metadata": "^11.0.0",
-    "next": "14.2.16",
+    "next": "14.2.35",
     "next-themes": "^0.4.4",
     "posthog-js": "^1.266.0",
     "posthog-node": "^5.8.4",
@@ -65,11 +68,13 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.14.7",
     "@types/node": "^22",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "postcss": "^8",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.53.0"
   }
 }
