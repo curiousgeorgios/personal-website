@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "cf:build": "npx opennextjs-cloudflare build",
+    "cf:build": "npx opennextjs-cloudflare build && node scripts/patch-worker.mjs",
     "cf:preview": "npx opennextjs-cloudflare preview",
     "cf:deploy": "npm run cf:build && npx wrangler deploy"
   },
