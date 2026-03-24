@@ -53,6 +53,15 @@ const sections: Record<SectionType, ReactNode> = {
         >
           R4R
         </a>{" "}
+        and{" "}
+        <a
+          href="https://www.with-me.co/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-300 transition-colors"
+        >
+          WITH-ME
+        </a>{" "}
         to scale through technology
       </li>
       <li>
@@ -64,17 +73,8 @@ const sections: Record<SectionType, ReactNode> = {
           className="underline hover:text-amber-300 transition-colors"
         >
           canberra.events
-        </a>{" "}
-        for more and follow{" "}
-        <a
-          href="https://www.instagram.com/project.canberra"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:text-amber-300 transition-colors"
-        >
-          @project.canberra
-        </a>{" "}
-        on instagram)
+        </a>
+        )
       </li>
       <li>• enjoying life to the fullest and always learning</li>
     </ul>
