@@ -8,6 +8,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // GitHub's runner renders WebGL in software, so parallel scene specs starve each other of CPU and wall-clock timing checks fail
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "github" : "list",
   use: { baseURL: remote ?? "http://localhost:4331", trace: "retain-on-failure" },
   projects: [
