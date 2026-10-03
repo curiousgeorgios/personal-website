@@ -44,7 +44,7 @@ Recorded so reviewers know they are deliberate (each is also noted in the task t
 - **The hint keeps the spec's full sentence** in every state (spec 5.4), even while the poster shows and there are no arrows on screen. Hiding its first clause would change George's copy and, at 375px, shift the page when the scene arrives. Listed for George as a choice.
 - **The red `›` in the list** marks the record in view only while a scene is attached.
 - **Phone framing** (measured in a probe at 375 × 320): crop to x −3.35 to 6.25, y −0.9 to 3.4, z −2.0 to 2.7, view direction (0, 0.45, 1), canvas aspect 375 / 320. The cover is about 95px tall, so the side-by-side layout stays and the crate does not move in front of the turntable.
-- **Deploys purge the cached home page** by tag from CI (ADR-0009, filed as Proposed until George signs it off; Task 12). The `version_metadata` binding is not added: the purge already guarantees edge-cached HTML never outlives the hashed scene loader for more than a moment, and the runner is inline anyway.
+- **Deploys purge the cached home page** by tag from CI (ADR-0010, filed as Proposed until George signs it off; Task 12). The `version_metadata` binding is not added: the purge already guarantees edge-cached HTML never outlives the hashed scene loader for more than a moment, and the runner is inline anyway.
 - **The 50ms long-task budget is measured locally** (`SCENE_PERF=1`, Task 11) and reported, not gated in CI, because CI renders WebGL in software. Listed for George.
 - **Media is cached by browsers, not at the edge.** The adapter adds `Cloudflare-CDN-Cache-Control: no-store` to routes without a cache hint, which includes `/media`; `Cache-Control: public, max-age=31536000, immutable` still lets browsers keep every file. Fine at this traffic.
 - **Covers and slugs are stable keys** (`audio/simple-things.mp3`, `covers/simple-things.webp`). Admin uploads in plan 3 use random keys as spec 7 says.
@@ -117,7 +117,7 @@ tests/e2e/deck-phone.spec.ts           create
 tests/e2e/scene-perf.spec.ts           create: opt-in (SCENE_PERF=1)
 tests/e2e/logbook.spec.ts              modify: the turntable row now has records
 tests/e2e/budgets.spec.ts              modify: scene chunk measured separately
-docs/adr/0009-purge-cached-home-page-after-deploys.md   create
+docs/adr/0010-purge-cached-home-page-after-deploys.md   create
 docs/adr/README.md, roadmap, plan 1 follow-ups, spec 6.1 and 13, README.md   modify
 ```
 
@@ -5088,10 +5088,10 @@ git commit -m "feat: deck posters, phone framing checks and scene budgets"
 
 ### Task 12: deploy purge, launch steps and docs
 
-Purges the cached home page after every deploy (ADR-0009), keeps test hooks out of production, records the decisions this plan made and closes the plan 1 follow-ups it took on.
+Purges the cached home page after every deploy (ADR-0010), keeps test hooks out of production, records the decisions this plan made and closes the plan 1 follow-ups it took on.
 
 **Files:**
-- Create: `docs/adr/0009-purge-cached-home-page-after-deploys.md`
+- Create: `docs/adr/0010-purge-cached-home-page-after-deploys.md`
 - Modify: `.github/workflows/ci.yml`, `README.md`, `docs/superpowers/specs/2026-10-03-personal-site-redesign-design.md`, `docs/superpowers/plans/2026-10-03-redesign-roadmap.md`, `docs/superpowers/plans/2026-10-03-plan-1-followups.md`
 
 **Interfaces:**
@@ -5110,7 +5110,7 @@ In `.github/workflows/ci.yml`, in the `deploy` job, add directly after `- run: b
 and add directly after the `- run: bunx wrangler deploy` step (and its `env`):
 
 ```yaml
-      # Edge-cached HTML must never outlive the hashed scene loader it points at (ADR-0009)
+      # Edge-cached HTML must never outlive the hashed scene loader it points at (ADR-0010)
       - name: Purge the cached home page
         run: >-
           curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache"
@@ -5124,12 +5124,12 @@ and add directly after the `- run: bunx wrangler deploy` step (and its `env`):
 Run: `node -e "require('yaml').parse(require('fs').readFileSync('.github/workflows/ci.yml', 'utf8')); console.log('valid yaml')"`
 Expected: `valid yaml`. Then read the whole file once: the check job runs `seed:media --local` after `db:migrate:local` and builds with `build:test`; the deploy job builds with `build`, guards, migrates, deploys, purges, then runs the privacy spec.
 
-- [ ] **Step 2: Write ADR-0009**
+- [ ] **Step 2: Write ADR-0010**
 
-Create `docs/adr/0009-purge-cached-home-page-after-deploys.md`:
+Create `docs/adr/0010-purge-cached-home-page-after-deploys.md`:
 
 ```markdown
-# ADR-0009: Purge the edge-cached home page after every deploy
+# ADR-0010: Purge the edge-cached home page after every deploy
 
 - Status: Proposed
 - Date: 2026-10-04
@@ -5166,7 +5166,7 @@ In `docs/superpowers/specs/2026-10-03-personal-site-redesign-design.md`, make th
 with
 
 ```text
-- Decisions: [ADR-0001](../../adr/0001-logbook-direction-with-wall-labels.md) to [ADR-0008](../../adr/0008-deploy-through-github-actions.md) and [ADR-0009](../../adr/0009-purge-cached-home-page-after-deploys.md)
+- Decisions: [ADR-0001](../../adr/0001-logbook-direction-with-wall-labels.md) to [ADR-0008](../../adr/0008-deploy-through-github-actions.md) and [ADR-0010](../../adr/0010-purge-cached-home-page-after-deploys.md)
 ```
 
 2. In 5.2, replace
@@ -5214,7 +5214,7 @@ The short freshness window means a deploy shows on `/` within minutes without a 
 with
 
 ```text
-Every deploy also purges the `logbook` tag from CI (ADR-0009), so edge-cached HTML never points at a hashed file the new deploy removed; the short freshness window is the fallback.
+Every deploy also purges the `logbook` tag from CI (ADR-0010), so edge-cached HTML never points at a hashed file the new deploy removed; the short freshness window is the fallback.
 ```
 
 6. In 8, replace the whole bullet
@@ -5239,8 +5239,8 @@ add
 
 ```text
 - [ ] Create the R2 bucket (`bunx wrangler r2 bucket create curiousgeorge-media --location oc`) and upload the starting crate (`bun run seed:media --remote`).
-- [ ] Add `CLOUDFLARE_ZONE_ID` to GitHub Actions secrets and give the API token the zone's Cache Purge permission (each deploy purges the cached home page, ADR-0009); after the first deploy, confirm a request to `/` straight after the purge is a cache miss (`cf-cache-status: MISS`).
-- [ ] Sign off ADR-0009 (status Proposed until then).
+- [ ] Add `CLOUDFLARE_ZONE_ID` to GitHub Actions secrets and give the API token the zone's Cache Purge permission (each deploy purges the cached home page, ADR-0010); after the first deploy, confirm a request to `/` straight after the purge is a cache miss (`cf-cache-status: MISS`).
+- [ ] Sign off ADR-0010 (status Proposed until then).
 ```
 
 8. In 11, replace
@@ -5267,7 +5267,7 @@ with
 - [ ] Try the turntable on a real iPhone (once with the ringer switch on silent) and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
 ```
 
-Run: `grep -c "ADR-0009" docs/superpowers/specs/2026-10-03-personal-site-redesign-design.md`
+Run: `grep -c "ADR-0010" docs/superpowers/specs/2026-10-03-personal-site-redesign-design.md`
 Expected: `4`.
 
 - [ ] **Step 4: Update the roadmap and the plan 1 follow-ups**
@@ -5281,7 +5281,7 @@ add the `version_metadata` binding and decide a post-deploy cache purge so edge-
 with
 
 ```text
-purge the cached home page after each deploy (ADR-0009) so edge-cached HTML never references removed `/_astro/*` chunks | 1 | [Done](2026-10-04-plan-2-listening-corner.md) |
+purge the cached home page after each deploy (ADR-0010) so edge-cached HTML never references removed `/_astro/*` chunks | 1 | [Done](2026-10-04-plan-2-listening-corner.md) |
 ```
 
 and replace
@@ -5299,7 +5299,7 @@ GitHub secrets (including `CLOUDFLARE_ZONE_ID` and the token's Cache Purge permi
 In `docs/superpowers/plans/2026-10-03-plan-1-followups.md`, replace the four bullets under `## Plan 2 (listening corner)` with
 
 ```text
-Done in [plan 2](2026-10-04-plan-2-listening-corner.md): the deck runner is inlined and every deploy purges the cached page (ADR-0009, in place of a `version_metadata` binding); 12:xx and daylight-saving cases are in `tests/unit/time.test.ts` beside the lighting tests; `log` runs in the phone project; the three MP3s outside the starting crate are gone and the four in it left `public/` for R2.
+Done in [plan 2](2026-10-04-plan-2-listening-corner.md): the deck runner is inlined and every deploy purges the cached page (ADR-0010, in place of a `version_metadata` binding); 12:xx and daylight-saving cases are in `tests/unit/time.test.ts` beside the lighting tests; `log` runs in the phone project; the three MP3s outside the starting crate are gone and the four in it left `public/` for R2.
 ```
 
 - [ ] **Step 5: Update the README**
@@ -5316,7 +5316,7 @@ bun run dev
 and add these bullets at the end of `## Notes`, replacing the last bullet (`/` is cached…):
 
 ```markdown
-- `/` is cached at the edge for five minutes with background refresh, and every deploy purges it (ADR-0009).
+- `/` is cached at the edge for five minutes with background refresh, and every deploy purges it (ADR-0010).
 - Media: the starting crate lives in `media/` (MP3s and 512px covers from `bun run covers`); `bun run seed:media --local` uploads it to the local R2 store, `--remote` to production (a launch step).
 - Tests run against `bun run build:test`, which compiles in the listening corner's test hooks; `bun run build` never contains them.
 - Posters: `bun run build:test`, then `bun run serve`, then `bun run poster`. Rerun whenever the scene changes.
@@ -5329,6 +5329,6 @@ Run: `bun run check`
 Expected: typecheck 0 errors, all unit tests pass, migrations and media seed apply locally, the test build succeeds and every e2e spec passes (WebGL-dependent WebKit tests may skip; note which).
 
 ```bash
-git add .github/workflows/ci.yml docs/adr/0009-purge-cached-home-page-after-deploys.md docs/superpowers/specs/2026-10-03-personal-site-redesign-design.md docs/superpowers/plans/2026-10-03-redesign-roadmap.md docs/superpowers/plans/2026-10-03-plan-1-followups.md README.md
+git add .github/workflows/ci.yml docs/adr/0010-purge-cached-home-page-after-deploys.md docs/superpowers/specs/2026-10-03-personal-site-redesign-design.md docs/superpowers/plans/2026-10-03-redesign-roadmap.md docs/superpowers/plans/2026-10-03-plan-1-followups.md README.md
 git commit -m "docs: purge the cached page after deploys; record plan 2's decisions"
 ```
