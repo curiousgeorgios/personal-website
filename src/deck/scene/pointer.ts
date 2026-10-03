@@ -46,7 +46,7 @@ export function bindPointer(canvas: HTMLCanvasElement, { deck, stage, journeys, 
     if (!hit) return null;
     const state = deck.getState();
     const index = hit.object.userData.index as number | undefined;
-    if (index !== undefined) return index === state.browsed || index === state.want ? "play" : index < state.browsed ? "prev" : "next";
+    if (index !== undefined) return index === state.browsed ? "play" : index < state.browsed ? "prev" : "next";
     if (stage.crateWalls.includes(hit.object as Mesh)) return "play";
     const onPlatter = state.current !== null ? stage.records[state.current].disc : null;
     if (onPlatter?.visible && hit.object.parent === onPlatter) return "record";

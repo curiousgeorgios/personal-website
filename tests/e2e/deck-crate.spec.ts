@@ -95,6 +95,26 @@ test("browsing while playing, then stopping from the flipped crate, flips back a
   await expectSeated(page);
 });
 
+test("clicking the tipped sleeve of the playing record flips back one step and leaves it playing", async ({ page }) => {
+  await page.locator(".tracks li").first().locator("button").click();
+  await playing(page, 0);
+  await control(page, "next").click();
+  await control(page, "next").click();
+  await settled(page);
+  expect(await deckState(page)).toMatchObject({ browsed: 2, playing: 0 });
+  // Record 0 stands tipped forward in front of the browsed one: reaching back for it flips, it does not toggle
+  const sleeve = await page.evaluate(() => {
+    const p = window.__deckScene!.sleeveAt(0);
+    return window.__deckScene!.toScreen(p.x, p.y, p.z);
+  });
+  await page.mouse.click(sleeve.x, sleeve.y);
+  await expect.poll(async () => (await deckState(page)).browsed).toBe(1);
+  await page.mouse.move(0, 0);
+  await settled(page);
+  expect(await deckState(page)).toMatchObject({ want: 0, current: 0, browsed: 1, playing: 0 });
+  await expectSeated(page);
+});
+
 test("the arrow keys flip while the crate control has focus", async ({ page }) => {
   await control(page, "play").focus();
   await page.keyboard.press("ArrowRight");

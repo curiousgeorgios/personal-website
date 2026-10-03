@@ -17,6 +17,8 @@ export interface SceneHooks {
   toScreen(x: number, y: number, z: number): { x: number; y: number };
   platterAt(): Point;
   coverAt(): Point;
+  /** World position of a record's sleeve centre, wherever it is tipped */
+  sleeveAt(index: number): Point;
   /** On-screen box of the browsed record's sleeve, in client pixels */
   coverRect(): { x: number; y: number; width: number; height: number };
   loseContext(): void;
@@ -60,6 +62,12 @@ export function installHooks({ renderer, stage, tweens, loop, deck }: { renderer
     coverAt: () => {
       const centre = browsed().holder.localToWorld(new Vector3(0, SLEEVE / 2, 0));
       return { x: centre.x, y: centre.y + 0.6, z: centre.z };
+    },
+    sleeveAt: (index) => {
+      const holder = stage.records[index].holder;
+      holder.updateWorldMatrix(true, false);
+      const centre = holder.localToWorld(new Vector3(0, SLEEVE / 2, 0));
+      return { x: centre.x, y: centre.y, z: centre.z };
     },
     coverRect: () => {
       const holder = browsed().holder;
