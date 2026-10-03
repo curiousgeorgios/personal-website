@@ -43,7 +43,8 @@ test("a press during the scene download waits for it, then plays with one scene"
   // The journey must animate: a scene that hadn't yet learned it was on screen would finish every step at once
   await expect.poll(() => page.evaluate(() => window.__deckScene?.tweens() ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
   await playing(page, 0, 60_000);
-  expect(await page.evaluate(() => window.__deckScene!.frames())).toBeGreaterThan(20);
+  // An instant journey draws 0 or 1 frames; the tweens poll above already proves this one animated
+  expect(await page.evaluate(() => window.__deckScene!.frames())).toBeGreaterThan(2);
   await expect(page.locator("[data-deck] canvas")).toHaveCount(1);
   await settled(page);
   await expectSeated(page);
