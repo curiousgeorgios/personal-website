@@ -9,12 +9,14 @@
     "cf-typegen": "wrangler types",
     "fonts": "node scripts/build-fonts.mjs",
     "og": "node scripts/og-image.mjs",
+    "covers": "node scripts/covers.mjs",
+    "seed:media": "node scripts/seed-media.mjs",
     "db:migrate:local": "wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/state",
     "db:migrate:remote": "wrangler d1 migrations apply curiousgeorge-logbook --remote",
     "serve": "wrangler dev -c dist/server/wrangler.json --port 4331 --persist-to .wrangler/state",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run build && bun run test:e2e"
+    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run build && bun run test:e2e"
   },
   "dependencies": {
     "@astrojs/cloudflare": "14.3.3",
@@ -27,6 +29,8 @@
     "@playwright/test": "1.63.0",
     "@types/node": "24.19.1",
     "linkedom": "0.18.13",
+    "music-metadata": "12.0.0",
+    "sharp": "0.35.5",
     "subset-font": "2.9.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
