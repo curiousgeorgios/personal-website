@@ -26,3 +26,50 @@ export async function withoutWebGL(page: Page) {
     });
   });
 }
+
+export const hasWebGL = (page: Page) =>
+  page.evaluate(() => {
+    const probe = document.createElement("canvas");
+    return (probe.getContext("webgl2") ?? probe.getContext("webgl")) !== null;
+  });
+
+/** Scrolls the turntable into view and waits for the scene to take over from the poster */
+export async function openScene(page: Page) {
+  await page.goto("/");
+  await page.locator("[data-deck]").scrollIntoViewIfNeeded();
+  await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 });
+}
+
+/** Waits until no journey runs and nothing in the scene is moving (the spinning platter aside) */
+export async function settled(page: Page, timeout = 30_000) {
+  await expect.poll(() => page.evaluate(() => !window.__deck!.state().busy && window.__deckScene!.tweens() === 0), { timeout }).toBe(true);
+}
+
+/** Every sleeve seated in the crate; only the current record, if any, is out, centred on the platter */
+export async function expectSeated(page: Page) {
+  const { state, offsets } = await page.evaluate(() => ({ state: window.__deck!.state(), offsets: window.__deckScene!.offsets() }));
+  for (const record of offsets) {
+    expect(Math.abs(record.lifted), `sleeve ${record.i} seated`).toBeLessThan(0.001);
+    if (record.i === state.current) {
+      expect(record).toMatchObject({ parent: "platter", visible: true });
+      expect(Math.abs(record.dx), `record ${record.i} centred`).toBeLessThan(0.01);
+      expect(Math.abs(record.dz), `record ${record.i} centred`).toBeLessThan(0.01);
+    } else {
+      expect(record.visible, `record ${record.i} back in its sleeve`).toBe(false);
+    }
+  }
+}
+
+/** Puts the canvas just above the viewport, with the track list still in view */
+export async function scrollDeckAway(page: Page) {
+  await page.evaluate(() => window.scrollBy(0, document.querySelector("[data-deck]")!.getBoundingClientRect().bottom + 4));
+}
+
+/** The record's centre on screen and the on-screen size of 0.9 units: on the vinyl, clear of the 0.48 label, inside the 1.45 edge */
+export const platterOnScreen = (page: Page) =>
+  page.evaluate(() => {
+    const scene = window.__deckScene!;
+    const p = scene.platterAt();
+    const centre = scene.toScreen(p.x, p.y, p.z);
+    return { ...centre, rx: scene.toScreen(p.x + 0.9, p.y, p.z).x - centre.x, ry: scene.toScreen(p.x, p.y, p.z + 0.9).y - centre.y };
+  });

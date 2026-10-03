@@ -3,6 +3,9 @@ import { expect, test } from "@playwright/test";
 
 test("page weight stays inside the budgets", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "measured once, in Chromium");
+  // A short window keeps the turntable out of reach, so this measures only what loads before any interaction;
+  // the scene is measured on its own below
+  await page.setViewportSize({ width: 1280, height: 400 });
   const sizes = { js: 0, css: 0, html: 0, font: 0 };
   let fonts = 0;
   const reads: Promise<void>[] = [];

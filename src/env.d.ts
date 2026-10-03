@@ -8,4 +8,5 @@ interface Window {
     state(): import("./deck/types").DeckState;
     audio(): { paused: boolean; src: string; rate: number };
   };
+  __deckScene?: import("./deck/scene/hooks").SceneHooks;
 }
