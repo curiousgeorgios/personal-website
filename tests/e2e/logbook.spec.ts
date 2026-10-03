@@ -6,7 +6,8 @@ test("renders the seeded logbook", async ({ page }) => {
   await expect(page.locator("#now .line").first()).toContainText("growing digital nachos");
   await expect(page.locator("#now a", { hasText: "with-me" })).toHaveAttribute("href", "https://www.with-me.co/");
   await expect(page.locator("#lately .fact")).toHaveCount(2);
-  await expect(page.locator("#turntable .empty")).toHaveText("nothing on the turntable right now.");
+  await expect(page.locator("#turntable .tracks li")).toHaveCount(4);
+  await expect(page.locator("#turntable .tracks li").first()).toHaveText(/a1\s*simple things - loom room\s*play/);
   await expect(page.locator(".where")).toContainText("last entry 03.10.26");
 });
 

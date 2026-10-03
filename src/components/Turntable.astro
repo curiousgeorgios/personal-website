@@ -1,8 +1,39 @@
 ---
+import "../styles/deck.css";
 import type { Track } from "../lib/logbook";
+
 interface Props {
   records: Track[];
 }
 const { records } = Astro.props;
+const media = (key: string) => `/media/${key}`;
 ---
-{records.length === 0 && <p class="empty">nothing on the turntable right now.</p>}
+{records.length === 0 ? (
+  <p class="empty">nothing on the turntable right now.</p>
+) : (
+  <div class="corner">
+    <div class="deck" data-deck></div>
+    <ol class="tracks" aria-label="records">
+      {records.map((record, index) => (
+        <li>
+          <button
+            type="button"
+            aria-pressed="false"
+            data-index={index}
+            data-src={media(record.audioKey)}
+            data-cover={media(record.coverKey)}
+            data-title={record.title}
+            data-artist={record.artist}
+          >
+            <span class="side mono">{record.side}</span>{" "}
+            <span class="tt">{record.title} <span class="aside">- {record.artist}</span></span>{" "}
+            <span class="st mono">play</span>
+          </button>
+        </li>
+      ))}
+    </ol>
+    <p class="hint mono">flip through the crate with ‹ ›, or pick a track. nothing plays until you do.</p>
+    <p class="sr-only" role="status" aria-live="polite" data-deck-status></p>
+    <audio preload="none" data-deck-audio></audio>
+  </div>
+)}
