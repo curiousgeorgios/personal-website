@@ -71,6 +71,7 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
     invalidate,
     spinTo(target) {
       omegaTarget = target;
+      if (!visible) omega = target; // nobody can see it ease, and tick won't run to do it
       invalidate();
     },
     setScratching(on) {

@@ -101,7 +101,10 @@ export function createDeck({ tracks, audio, announce, now = () => performance.no
     await animate((scene) => scene.load(index, () => want === index));
     if (want !== index) return; // changed their mind on the way: no audio, the loop takes it back
     const ok = await audio.start(tracks[index].src, () => want === index);
-    if (!ok) return fail(index);
+    if (!ok) {
+      if (want === index) fail(index); // a record the visitor has left is not worth reporting
+      return;
+    }
     if (want !== index) return;
     playing = index;
     emit();

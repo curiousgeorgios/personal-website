@@ -125,6 +125,26 @@ describe("deck runner without a scene", () => {
     expect(deck.getState().playing).toBe(1);
   });
 
+  test("a start that fails after the visitor moved on is not reported", async () => {
+    const { deck, audio, said } = setup();
+    // The first start hangs until we say it failed; any later one succeeds
+    let failFirst = () => {};
+    let first = true;
+    audio.start = (src) => {
+      audio.calls.push(`start ${src}`);
+      if (!first) return Promise.resolve(true);
+      first = false;
+      return new Promise<boolean>((resolve) => void (failFirst = () => resolve(false)));
+    };
+    deck.toggle(0);
+    await settle();
+    deck.toggle(1);
+    failFirst();
+    await settle();
+    expect(deck.getState()).toEqual({ want: 1, current: 1, browsed: 1, busy: false, playing: 1, failed: null, scene: false });
+    expect(said).toEqual(["now playing b"]);
+  });
+
   test("when a track ends the record goes back", async () => {
     const { deck, audio, said } = setup();
     deck.toggle(0);

@@ -20,8 +20,12 @@ if (host && list && element && status) {
   const deck = createDeck({
     tracks,
     audio: createAudioPort(element),
+    // Cleared first and set on the next frame, so a repeated message is announced again
     announce: (message) => {
-      status.textContent = message;
+      status.textContent = "";
+      requestAnimationFrame(() => {
+        status.textContent = message;
+      });
     },
   });
   host.deck = deck;
