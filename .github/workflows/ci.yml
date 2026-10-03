@@ -57,6 +57,11 @@ jobs:
       - run: if grep -rq "__deck" dist; then echo "test hooks leaked into the production build"; exit 1; fi
       # All the fallible setup happens before anything touches production
       - run: bunx playwright install --with-deps chromium
+      # A missing zone id would otherwise surface only after production has been deployed
+      - name: Check the cache purge secret is set
+        run: if [ -z "$CLOUDFLARE_ZONE_ID" ]; then echo "CLOUDFLARE_ZONE_ID is not set"; exit 1; fi
+        env:
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
       - run: bun run db:migrate:remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -68,14 +73,14 @@ jobs:
       # Edge-cached HTML must never outlive the hashed scene loader it points at (ADR-0010)
       - name: Purge the cached home page
         run: >-
-          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache"
+          curl -sS --fail-with-body -X POST "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache"
           -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json"
           --data '{"tags":["logbook"]}'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-      # The visitor info's promises, checked against the live site
-      - run: bunx playwright test tests/e2e/privacy.spec.ts --project=chromium
+      # The visitor info's promises and the starting crate's media (a forgotten seed:media shows up here), checked against the live site
+      - run: bunx playwright test tests/e2e/privacy.spec.ts tests/e2e/media-live.spec.ts --project=chromium
         env:
           PLAYWRIGHT_BASE_URL: https://curiousgeorge.dev
           PRIVACY_PATH: /?deploy=${{ github.sha }}
