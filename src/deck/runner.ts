@@ -1,0 +1,217 @@
+import type { AudioPort, Deck, DeckState, DeckTrack, DeckView } from "./types";
+
+/** A second press on the same record within this window is a double-click, not "play, then stop" */
+export const DOUBLE_PRESS_MS = 450;
+/** How long a row says "couldn't play" */
+export const FAILED_MS = 4000;
+/** How long a step waits for a scene that is still loading before going ahead without it */
+export const VIEW_WAIT_MS = 5000;
+
+export interface DeckOptions {
+  tracks: DeckTrack[];
+  audio: AudioPort;
+  announce: (message: string) => void;
+  now?: () => number;
+}
+
+// One runner owns every record movement (spec 5.3). Input only says what the visitor wants; the runner moves the
+// deck there one step at a time and re-checks after every step, so two journeys can never overlap.
+export function createDeck({ tracks, audio, announce, now = () => performance.now() }: DeckOptions): Deck {
+  const clamp = (index: number) => Math.max(0, Math.min(tracks.length - 1, index));
+  let want: number | null = null;
+  let current: number | null = null;
+  let browsed = 0;
+  let running = false;
+  let playing: number | null = null;
+  let failed: number | null = null;
+  let browseWant: number | null = null;
+  let view: DeckView | null = null;
+  let pending: Promise<DeckView | null> | null = null;
+  let failTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastPress = { index: -1, at: -Infinity };
+  const listeners = new Set<(state: DeckState) => void>();
+
+  const getState = (): DeckState => ({ want, current, browsed, busy: running, playing, failed, scene: view !== null });
+
+  function emit() {
+    const state = getState();
+    view?.update(state);
+    for (const listener of listeners) listener(state);
+  }
+
+  // A press during the scene download waits for it, so the first record still makes its journey
+  async function viewForStep(): Promise<DeckView | null> {
+    const waiting = pending;
+    if (waiting) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = await Promise.race([
+        waiting.then(() => false),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(true), VIEW_WAIT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+      // Stop waiting on later steps; the scene still attaches if it turns up
+      if (timedOut && pending === waiting) pending = null;
+    }
+    return view;
+  }
+
+  // A scene that throws is dropped and the runner carries on without it
+  async function animate(step: (scene: DeckView) => Promise<void>) {
+    const scene = await viewForStep();
+    if (!scene) return;
+    try {
+      await step(scene);
+    } catch (error) {
+      console.error("deck: the scene failed, carrying on without it", error);
+      disconnect(scene);
+    }
+  }
+
+  function fail(index: number) {
+    if (want === index) want = null;
+    failed = index;
+    emit();
+    announce(`couldn't play ${tracks[index].title}`);
+    clearTimeout(failTimer);
+    failTimer = setTimeout(() => {
+      failed = null;
+      emit();
+    }, FAILED_MS);
+  }
+
+  async function load(index: number) {
+    current = index;
+    const flip = browsed !== index;
+    browsed = index;
+    emit();
+    if (flip) await animate((scene) => scene.flip(index));
+    await animate((scene) => scene.load(index, () => want === index));
+    if (want !== index) return; // changed their mind on the way: no audio, the loop takes it back
+    const ok = await audio.start(tracks[index].src, () => want === index);
+    if (!ok) return fail(index);
+    if (want !== index) return;
+    playing = index;
+    emit();
+    announce(`now playing ${tracks[index].title}`);
+  }
+
+  async function unload(index: number) {
+    const wasPlaying = playing === index;
+    audio.stop();
+    playing = null;
+    browsed = index; // the scene flips back to the record on its way home
+    emit();
+    if (wasPlaying) announce("stopped");
+    await animate((scene) => scene.unload(index));
+    current = null;
+    emit();
+  }
+
+  async function run() {
+    if (running) return;
+    running = true;
+    emit();
+    try {
+      for (;;) {
+        while (current !== want) {
+          if (current !== null) await unload(current);
+          else if (want !== null) await load(want);
+        }
+        // A flip asked for during the journey; then round again for any press or flip that lands during it
+        const target = browseWant;
+        browseWant = null;
+        if (target === null || target === browsed) break;
+        browsed = target;
+        emit();
+        await animate((scene) => scene.flip(target));
+      }
+    } finally {
+      running = false;
+      emit();
+    }
+  }
+
+  function toggle(index: number) {
+    const i = clamp(index);
+    const at = now();
+    if (i === lastPress.index && at - lastPress.at < DOUBLE_PRESS_MS) return;
+    lastPress = { index: i, at };
+    if (want === i) {
+      want = null;
+    } else {
+      want = i;
+      audio.unlock(tracks[i].src); // inside the press, so WebKit lets the record play when it lands
+      if (failed !== null) {
+        failed = null;
+        clearTimeout(failTimer);
+      }
+    }
+    emit();
+    void run();
+  }
+
+  function browse(index: number) {
+    const i = clamp(index);
+    if (running) {
+      browseWant = i;
+      return;
+    }
+    if (i === browsed) return;
+    browsed = i;
+    emit();
+    view?.flip(i).catch(() => {});
+  }
+
+  function connect(loading: Promise<DeckView | null>) {
+    const settled: Promise<DeckView | null> = loading
+      .catch((error: unknown) => {
+        console.error("deck: the scene failed to load", error);
+        return null;
+      })
+      .then((scene) => {
+        if (pending === settled) pending = null;
+        if (scene) view = scene;
+        emit();
+        return scene;
+      });
+    pending = settled;
+  }
+
+  function disconnect(scene: DeckView) {
+    if (view !== scene) return;
+    view = null;
+    emit();
+  }
+
+  audio.onEnded(() => {
+    if (playing === null || want !== playing) return;
+    want = null;
+    emit();
+    void run();
+  });
+  audio.onError(() => {
+    if (playing === null) return; // a failure before the record lands is start()'s to report
+    const index = playing;
+    playing = null;
+    fail(index);
+    void run();
+  });
+
+  return {
+    tracks,
+    getState,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    toggle,
+    browse,
+    setRate: (rate) => audio.setRate(rate),
+    connect,
+    disconnect,
+  };
+}
