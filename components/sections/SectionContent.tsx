@@ -65,7 +65,7 @@ const sections: Record<SectionType, ReactNode> = {
         to scale through technology
       </li>
       <li>
-        • making canberra the best place in the world (see{" "}
+        • building{" "}
         <a
           href="https://canberra.events"
           target="_blank"
@@ -74,7 +74,7 @@ const sections: Record<SectionType, ReactNode> = {
         >
           canberra.events
         </a>
-        )
+        , a local platform for discovering and hosting things worth leaving the house for
       </li>
       <li>• enjoying life to the fullest and always learning</li>
     </ul>
