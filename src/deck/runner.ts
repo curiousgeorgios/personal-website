@@ -35,8 +35,21 @@ export function createDeck({ tracks, audio, announce, now = () => performance.no
 
   function emit() {
     const state = getState();
-    view?.update(state);
+    if (view) {
+      try {
+        view.update(state);
+      } catch (error) {
+        drop(view, error); // disconnect emits again with scene: false, so don't notify listeners twice
+        return;
+      }
+    }
     for (const listener of listeners) listener(state);
+  }
+
+  // A scene that throws is dropped and the runner carries on without it
+  function drop(scene: DeckView, error: unknown) {
+    console.error("deck: the scene failed, carrying on without it", error);
+    disconnect(scene);
   }
 
   // A press during the scene download waits for it, so the first record still makes its journey
@@ -57,15 +70,13 @@ export function createDeck({ tracks, audio, announce, now = () => performance.no
     return view;
   }
 
-  // A scene that throws is dropped and the runner carries on without it
   async function animate(step: (scene: DeckView) => Promise<void>) {
     const scene = await viewForStep();
     if (!scene) return;
     try {
       await step(scene);
     } catch (error) {
-      console.error("deck: the scene failed, carrying on without it", error);
-      disconnect(scene);
+      drop(scene, error);
     }
   }
 
@@ -161,7 +172,12 @@ export function createDeck({ tracks, audio, announce, now = () => performance.no
     if (i === browsed) return;
     browsed = i;
     emit();
-    view?.flip(i).catch(() => {});
+    const scene = view;
+    if (!scene) return;
+    // Starting from a resolved promise catches a flip that throws synchronously as well as one that rejects
+    Promise.resolve()
+      .then(() => scene.flip(i))
+      .catch((error: unknown) => drop(scene, error));
   }
 
   function connect(loading: Promise<DeckView | null>) {

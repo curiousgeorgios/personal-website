@@ -312,4 +312,52 @@ describe("deck runner with a scene", () => {
     await settle(100);
     expect(seen.at(-1)).toMatchObject({ playing: 2, busy: false, scene: true });
   });
+
+  test("a scene whose update throws is dropped and the list still plays", async () => {
+    const { deck } = setup();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const scene = fakeView(100);
+    scene.view.update = () => {
+      throw new Error("update blew up");
+    };
+    deck.connect(Promise.resolve(scene.view));
+    await settle();
+    expect(deck.getState().scene).toBe(false);
+    expect(error).toHaveBeenCalled();
+    deck.toggle(0);
+    await settle(1000);
+    expect(deck.getState()).toMatchObject({ want: 0, current: 0, playing: 0, busy: false, scene: false });
+    expect(scene.calls).toEqual([]);
+    error.mockRestore();
+  });
+
+  test("an idle flip that rejects drops the scene", async () => {
+    const { deck } = setup();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const scene = fakeView(100);
+    scene.view.flip = () => Promise.reject(new Error("flip rejected"));
+    deck.connect(Promise.resolve(scene.view));
+    await settle();
+    deck.browse(2);
+    await settle();
+    expect(deck.getState()).toMatchObject({ browsed: 2, scene: false });
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  test("an idle flip that throws synchronously drops the scene without throwing out of browse", async () => {
+    const { deck } = setup();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const scene = fakeView(100);
+    scene.view.flip = () => {
+      throw new Error("flip threw");
+    };
+    deck.connect(Promise.resolve(scene.view));
+    await settle();
+    expect(() => deck.browse(2)).not.toThrow();
+    await settle();
+    expect(deck.getState()).toMatchObject({ browsed: 2, scene: false });
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
 });
