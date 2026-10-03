@@ -1,9 +1,10 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { isMediaKey, serveMedia } from "../../src/lib/media";
 
 const BYTES = Uint8Array.from({ length: 2000 }, (_, i) => i % 256);
 
-// Mimics R2: ranges come back as { offset, length }, { offset } or { suffix }; a matching If-None-Match returns no body
+// Mimics R2: ranges come back as { offset, length }, { offset } or { suffix }; a matching If-None-Match returns no body;
+// head finds known keys only
 function fakeBucket(objects: Record<string, string>) {
   return {
     get: vi.fn(async (key: string, options?: { range?: Headers; onlyIf?: Headers }) => {
@@ -34,7 +35,8 @@ function fakeBucket(objects: Record<string, string>) {
       }
       return { ...base, range, body: new Blob([slice]).stream() };
     }),
-  } as unknown as R2Bucket & { get: ReturnType<typeof vi.fn> };
+    head: vi.fn(async (key: string) => (objects[key] ? { key, size: BYTES.length } : null)),
+  } as unknown as R2Bucket & { get: ReturnType<typeof vi.fn>; head: ReturnType<typeof vi.fn> };
 }
 
 const bucket = () => fakeBucket({ "audio/a.mp3": "audio/mpeg", "covers/a.webp": "image/webp" });
@@ -53,6 +55,13 @@ describe("isMediaKey", () => {
 });
 
 describe("serveMedia", () => {
+  // R2 failures are logged on purpose; keep that out of the test output and check it where it matters
+  let errors: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => errors.mockRestore());
+
   test("streams a whole object with its type and long-lived caching", async () => {
     const response = await serveMedia(bucket(), "audio/a.mp3", get());
     expect(response.status).toBe(200);
@@ -82,9 +91,10 @@ describe("serveMedia", () => {
     expect([suffix.status, suffix.headers.get("content-range"), suffix.headers.get("content-length")]).toEqual([206, "bytes 1500-1999/2000", "500"]);
   });
 
-  test("answers a range past the end with 416, uncached", async () => {
+  test("answers a range past the end with 416 and the object's size, uncached", async () => {
     const response = await serveMedia(bucket(), "audio/a.mp3", get({ Range: "bytes=5000-" }));
-    expect([response.status, response.headers.get("content-range"), response.headers.get("cache-control")]).toEqual([416, "bytes */*", "no-store"]);
+    expect([response.status, response.headers.get("content-range"), response.headers.get("cache-control")]).toEqual([416, "bytes */2000", "no-store"]);
+    expect(errors).toHaveBeenCalledWith("media: R2 read failed", "audio/a.mp3", expect.any(Error));
   });
 
   test("returns 304 when the browser's copy is current", async () => {
@@ -101,5 +111,31 @@ describe("serveMedia", () => {
       expect(response.headers.get("cache-control")).toBe("no-store");
     }
     expect(b.get).toHaveBeenCalledTimes(1);
+  });
+
+  test("404s, uncached, when a ranged read throws for an object that is not there", async () => {
+    const b = Object.assign(bucket(), { get: vi.fn().mockRejectedValue(new Error("boom")) });
+    const response = await serveMedia(b, "audio/missing.mp3", get({ Range: "bytes=0-" }));
+    expect([response.status, response.headers.get("cache-control")]).toEqual([404, "no-store"]);
+    expect(b.head).toHaveBeenCalledWith("audio/missing.mp3");
+  });
+
+  test("500s, uncached, when both the read and the check for the object fail", async () => {
+    const b = Object.assign(bucket(), {
+      get: vi.fn().mockRejectedValue(new Error("boom")),
+      head: vi.fn().mockRejectedValue(new Error("still boom")),
+    });
+    const response = await serveMedia(b, "audio/a.mp3", get({ Range: "bytes=0-" }));
+    expect([response.status, response.headers.get("cache-control")]).toEqual([500, "no-store"]);
+    expect(await response.text()).toBe("media unavailable");
+    expect(errors).toHaveBeenCalledWith("media: R2 read failed", "audio/a.mp3", expect.any(Error));
+  });
+
+  test("500s, uncached, when a read without a range throws", async () => {
+    const b = Object.assign(bucket(), { get: vi.fn().mockRejectedValue(new Error("boom")) });
+    const response = await serveMedia(b, "audio/a.mp3", get());
+    expect([response.status, response.headers.get("cache-control")]).toEqual([500, "no-store"]);
+    expect(b.head).not.toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledWith("media: R2 read failed", "audio/a.mp3", expect.any(Error));
   });
 });

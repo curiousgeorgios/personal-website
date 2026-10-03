@@ -10,6 +10,9 @@ export function isMediaKey(key: string): boolean {
 const missing = () =>
   new Response("not found", { status: 404, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
 
+const unavailable = () =>
+  new Response("media unavailable", { status: 500, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+
 type ByteRange = { offset?: number; length?: number; suffix?: number };
 
 export async function serveMedia(bucket: R2Bucket, key: string, request: Request): Promise<Response> {
@@ -18,9 +21,18 @@ export async function serveMedia(bucket: R2Bucket, key: string, request: Request
   try {
     object = await bucket.get(key, { range: request.headers, onlyIf: request.headers });
   } catch (error) {
-    // R2 throws for a range it can't serve, such as one past the end; anything else is a real failure
-    if (!request.headers.has("Range")) throw error;
-    return new Response(null, { status: 416, headers: { "Cache-Control": "no-store", "Content-Range": "bytes */*" } });
+    console.error("media: R2 read failed", key, error);
+    // R2 throws for a range it can't serve, such as one past the end, but also for a real outage. Audio always
+    // sends Range, so a head request tells the two apart: a found object means the range was the problem.
+    if (!request.headers.has("Range")) return unavailable();
+    try {
+      const found = await bucket.head(key);
+      if (!found) return missing();
+      return new Response(null, { status: 416, headers: { "Cache-Control": "no-store", "Content-Range": `bytes */${found.size}` } });
+    } catch (headError) {
+      console.error("media: R2 head failed", key, headError);
+      return unavailable();
+    }
   }
   if (!object) return missing();
   const headers = new Headers();
