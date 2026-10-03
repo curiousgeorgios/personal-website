@@ -484,7 +484,7 @@ git commit -m "feat(db): logbook schema and seed content"
   - `primaryName(source: string): string` (first link text, else the plain text)
   - `formatLogDate(iso: string, precision: "day" | "month"): string` (`"03.10.26"` or `"oct 26"`)
   - `sideFor(index: number): string` (`0 → "a1"` … `5 → "c2"`)
-  - `sydneyTime(now: Date): string` (`"3:17 pm"`)
+  - `sydneyTime(now: Date): string` (`"3:17\u00a0pm"`)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -548,8 +548,8 @@ import { sydneyTime } from "../../src/lib/time";
 
 test("formats Sydney time in lowercase with a non-breaking space", () => {
   // 05:17 UTC on 3 Oct 2026 is 3:17 pm AEST (daylight saving starts on 4 Oct 2026)
-  expect(sydneyTime(new Date("2026-10-03T05:17:00Z"))).toBe("3:17 pm");
-  expect(sydneyTime(new Date("2026-10-02T23:05:00Z"))).toBe("9:05 am");
+  expect(sydneyTime(new Date("2026-10-03T05:17:00Z"))).toBe("3:17\u00a0pm");
+  expect(sydneyTime(new Date("2026-10-02T23:05:00Z"))).toBe("9:05\u00a0am");
 });
 ```
 
@@ -605,7 +605,7 @@ export function sideFor(index: number): string {
 const SYDNEY = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit", timeZone: "Australia/Sydney" });
 
 export function sydneyTime(now: Date): string {
-  return SYDNEY.format(now).replace(/\s?(am|pm)$/i, (_match, period: string) => ` ${period.toLowerCase()}`);
+  return SYDNEY.format(now).replace(/\s?(am|pm)$/i, (_match, period: string) => `\u00a0${period.toLowerCase()}`);
 }
 ```
 
@@ -1553,7 +1553,7 @@ test("renders the seeded logbook", async ({ page }) => {
 test("the Sydney clock fills in without shifting the line", async ({ page }) => {
   await page.goto("/");
   const clock = page.locator("[data-sydney-time]");
-  await expect(clock).toHaveText(/^\d{1,2}:\d{2} (am|pm)$/);
+  await expect(clock).toHaveText(/^\d{1,2}:\d{2}\u00a0(am|pm)$/);
   const width = await clock.evaluate((el) => el.getBoundingClientRect().width);
   const minWidth = await clock.evaluate((el) => parseFloat(getComputedStyle(el).minWidth));
   expect(width).toBeLessThanOrEqual(minWidth + 0.5);
