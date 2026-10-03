@@ -6,3 +6,15 @@ test("formats Sydney time in lowercase with a non-breaking space", () => {
   expect(sydneyTime(new Date("2026-10-03T05:17:00Z"))).toBe("3:17 pm");
   expect(sydneyTime(new Date("2026-10-02T23:05:00Z"))).toBe("9:05 am");
 });
+
+// Built from its code point so the expected strings can't silently turn into ordinary spaces
+const NBSP = String.fromCharCode(160);
+
+test("twelve o'clock reads 12 at noon and just after midnight", () => {
+  expect(sydneyTime(new Date("2026-10-03T02:05:00Z"))).toBe(`12:05${NBSP}pm`);
+  expect(sydneyTime(new Date("2026-10-02T14:30:00Z"))).toBe(`12:30${NBSP}am`);
+});
+
+test("follows daylight saving (AEDT from 4 Oct 2026)", () => {
+  expect(sydneyTime(new Date("2026-10-04T05:17:00Z"))).toBe(`4:17${NBSP}pm`);
+});
