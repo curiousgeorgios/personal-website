@@ -1,10 +1,13 @@
 import type { Deck, DeckView } from "./types";
 import { buildStage, createRenderer } from "./scene/build";
-import { DESKTOP, PHONE, frame } from "./scene/framing";
+import { DESKTOP, PHONE, frame, toCanvas } from "./scene/framing";
 import { installHooks } from "./scene/hooks";
+import { createHud } from "./scene/hud";
 import { createJourneys } from "./scene/journeys";
+import { HUD_ANCHOR } from "./scene/layout";
 import { lightFor } from "./scene/lighting";
 import { createLoop } from "./scene/loop";
+import { bindPointer } from "./scene/pointer";
 import { loadCovers, makeTextures } from "./scene/textures";
 import { createTweens } from "./scene/tween";
 
@@ -25,6 +28,8 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
   const loop = createLoop({ renderer, stage, tweens, reduce, onFrame: () => host.classList.add("live") });
   const journeys = createJourneys(stage, tweens, loop, reduce);
   host.appendChild(canvas);
+  const hud = createHud(host, deck);
+  const pointer = bindPointer(canvas, { deck, stage, journeys, hud });
 
   const resize = () => {
     const width = host.clientWidth;
@@ -32,12 +37,15 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
     if (!width || !height) return;
     renderer.setSize(width, height, false);
     frame(stage.camera, matchMedia(PHONE_WIDTH).matches ? PHONE : DESKTOP, width, height);
+    const anchor = toCanvas(HUD_ANCHOR, stage.camera, width, height);
+    hud.place(anchor.x, anchor.y, width, height);
     loop.invalidate();
   };
   const resizer = new ResizeObserver(resize);
   resizer.observe(host);
   resize();
   journeys.sync(deck.getState());
+  hud.render(deck.getState());
 
   // Off screen, in a hidden tab, under reduced motion or without a context, steps finish at once and nothing renders
   let onScreen = false;
@@ -62,7 +70,8 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
     load: (index, wanted) => journeys.load(index, wanted),
     unload: (index) => journeys.unload(index),
     update: (state) => {
-      if (state.busy) journeys.preview(null);
+      hud.render(state);
+      if (state.busy) pointer.clearPreview();
       // A record that landed while the scene was still arriving: pose it now the runner is idle
       else if (state.current !== null && stage.records[state.current].disc.parent !== stage.platter) journeys.sync(state);
     },
@@ -80,6 +89,7 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
       document.removeEventListener("visibilitychange", visibility);
       host.classList.remove("live");
       canvas.remove();
+      hud.remove();
       deck.disconnect(view);
     },
     { once: true },
