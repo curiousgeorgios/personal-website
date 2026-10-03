@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { deckState, expectSeated, hasWebGL, openScene, playing, settled, withoutWebGL } from "./deck";
+import { deckState, expectSeated, hasWebGL, openScene, playing, settled, SLOW, withoutWebGL } from "./deck";
 
-test.describe.configure({ timeout: 90_000 });
+test.describe.configure({ timeout: 90_000 * SLOW });
 
 const SCENE = /\/_astro\/scene\.[\w-]+\.js$/;
 
@@ -17,7 +17,7 @@ test("the scene loads only after the page has loaded and the row comes near", as
   await page.waitForTimeout(2500); // load, an idle callback and then some
   expect(requested).toEqual([]);
   await page.locator("[data-deck]").scrollIntoViewIfNeeded();
-  await expect(page.locator("[data-deck].live canvas")).toHaveCount(1, { timeout: 60_000 });
+  await expect(page.locator("[data-deck].live canvas")).toHaveCount(1, { timeout: 60_000 * SLOW });
   expect(requested).toHaveLength(1);
   await expect(page.locator("[data-deck] canvas")).toHaveAttribute("aria-hidden", "true");
   await expect(page.locator("[data-deck] .poster")).toBeHidden();
@@ -38,12 +38,11 @@ test("a press during the scene download waits for it, then plays with one scene"
   const row = page.locator(".tracks li").first();
   await row.locator("button").click();
   await expect(row.locator(".st")).toHaveText("cueing");
-  await page.waitForTimeout(500);
   expect((await deckState(page)).playing).toBeNull();
-  release();
+  release(); // as soon as the press is seen, so the scene has nearly all of the runner's wait to mount
   // The journey must animate: a scene that hadn't yet learned it was on screen would finish every step at once
-  await expect.poll(() => page.evaluate(() => window.__deckScene?.tweens() ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
-  await playing(page, 0, 60_000);
+  await expect.poll(() => page.evaluate(() => window.__deckScene?.tweens() ?? 0), { timeout: 30_000 * SLOW }).toBeGreaterThan(0);
+  await playing(page, 0, 60_000 * SLOW);
   // An instant journey draws 0 or 1 frames; the tweens poll above already proves this one animated
   expect(await page.evaluate(() => window.__deckScene!.frames())).toBeGreaterThan(2);
   await expect(page.locator("[data-deck] canvas")).toHaveCount(1);

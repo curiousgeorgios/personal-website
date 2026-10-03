@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { deckState, expectSeated, hasWebGL, openScene, platterOnScreen, playing, settled } from "./deck";
+import { deckState, expectSeated, hasWebGL, LONG_TRACK, openScene, platterOnScreen, playing, settled, SLOW } from "./deck";
 
 // The crate checks from spec 5.5
-test.describe.configure({ timeout: 90_000 });
+test.describe.configure({ timeout: 90_000 * SLOW });
 
 test.beforeEach(async ({ page }) => {
   test.skip(!(await hasWebGL(page)), "no WebGL in this browser here");
@@ -76,22 +76,22 @@ test("hovering the cover lifts it and shades play; clicking it plays", async ({ 
 });
 
 test("browsing while playing, then stopping from the flipped crate, flips back and seats everything", async ({ page }) => {
-  await page.locator(".tracks li").first().locator("button").click();
-  await playing(page, 0);
-  await control(page, "next").click();
-  await control(page, "next").click();
+  await page.locator(".tracks li").nth(LONG_TRACK).locator("button").click();
+  await playing(page, LONG_TRACK);
+  await control(page, "prev").click();
+  await control(page, "prev").click();
   await settled(page);
-  expect(await deckState(page)).toMatchObject({ browsed: 2, playing: 0 });
+  expect(await deckState(page)).toMatchObject({ browsed: 0, playing: LONG_TRACK });
   await expect(control(page, "play")).toHaveAttribute("data-state", "play");
-  await expect(page.locator(".tracks li").nth(2)).toHaveClass(/\bbrowsed\b/);
-  // Stop by clicking the spinning record, so nothing hovers the list back to record 0 first
+  await expect(page.locator(".tracks li").first()).toHaveClass(/\bbrowsed\b/);
+  // Stop by clicking the spinning record, so nothing hovers the list and browses another record first
   const record = await platterOnScreen(page);
   await page.mouse.click(record.x + record.rx, record.y);
   await playing(page, null);
   await page.mouse.move(0, 0);
   await settled(page);
-  expect((await deckState(page)).browsed).toBe(0);
-  expect(await tilts(page)).toEqual([-0.1, -0.112, -0.124, -0.136]);
+  expect((await deckState(page)).browsed).toBe(LONG_TRACK);
+  expect(await tilts(page)).toEqual([0.72, 0.65, -0.1, -0.112]);
   await expectSeated(page);
 });
 
@@ -129,7 +129,7 @@ test("a control press then a list press within 150ms: only the list's record pla
   await control(page, "play").click();
   await page.waitForTimeout(100);
   await page.locator(".tracks li").nth(2).locator("button").click();
-  await playing(page, 2, 60_000);
+  await playing(page, 2, 60_000 * SLOW);
   await page.mouse.move(0, 0);
   await settled(page);
   await expectSeated(page);
@@ -143,7 +143,7 @@ test("a cover click then a list press within 150ms: only the list's record plays
   await page.mouse.click(cover.x, cover.y);
   await page.waitForTimeout(100);
   await page.locator(".tracks li").nth(3).locator("button").click();
-  await playing(page, 3, 60_000);
+  await playing(page, 3, 60_000 * SLOW);
   await page.mouse.move(0, 0);
   await settled(page);
   await expectSeated(page);

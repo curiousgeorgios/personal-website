@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { hasWebGL, openScene, withoutWebGL } from "./deck";
+import { hasWebGL, openScene, SLOW, withoutWebGL } from "./deck";
 
 // Phone framing (spec 5.2), checked at 375px in Chromium: the geometry is the same in every engine
 test.use({ viewport: { width: 375, height: 812 } });
-test.describe.configure({ timeout: 90_000 });
+test.describe.configure({ timeout: 90_000 * SLOW });
 
 test("on a 375px phone the canvas is full bleed, the cover is at least 90px tall and the control fits inside", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "framing, checked once in Chromium");

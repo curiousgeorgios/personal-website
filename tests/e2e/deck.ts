@@ -2,11 +2,17 @@ import { expect, type Page } from "@playwright/test";
 
 // Helpers for the listening corner specs. They read the test hooks, which exist only in `bun run build:test` builds.
 
+/** Every wait and test budget in the scene specs is scaled by this: CI draws WebGL in software (ADR-0009) */
+export const SLOW = process.env.CI ? 2 : 1;
+
+/** The record the specs keep playing: "no bad feelings today" runs 213s, so it can't end mid-test */
+export const LONG_TRACK = 2;
+
 export const deckState = (page: Page) => page.evaluate(() => window.__deck!.state());
 export const audioState = (page: Page) => page.evaluate(() => window.__deck!.audio());
 
 /** Waits until the runner is idle with `index` playing (null: nothing playing) */
-export async function playing(page: Page, index: number | null, timeout = 20_000) {
+export async function playing(page: Page, index: number | null, timeout = 20_000 * SLOW) {
   await expect
     .poll(async () => {
       const state = await deckState(page);
@@ -37,11 +43,11 @@ export const hasWebGL = (page: Page) =>
 export async function openScene(page: Page) {
   await page.goto("/");
   await page.locator("[data-deck]").scrollIntoViewIfNeeded();
-  await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 });
+  await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 * SLOW });
 }
 
 /** Waits until no journey runs and nothing in the scene is moving (the spinning platter aside) */
-export async function settled(page: Page, timeout = 30_000) {
+export async function settled(page: Page, timeout = 30_000 * SLOW) {
   await expect.poll(() => page.evaluate(() => !window.__deck!.state().busy && window.__deckScene!.tweens() === 0), { timeout }).toBe(true);
 }
 
