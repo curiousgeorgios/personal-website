@@ -6,7 +6,7 @@
 
 ## Context
 
-`/` is cached at Cloudflare's edge for five minutes and served stale for up to a day while it refreshes (ADR-0007). The listening corner adds the first hashed file the page depends on: a small scene loader under `/_astro/` that imports the Three.js scene chunk. Workers static assets serve only the current deploy's files, so a page cached before a deploy can point at a loader the new deploy removed. The deck runner is inlined into the HTML for exactly this reason, so playback never depends on a hashed file, but the 3D scene would quietly stay a poster for anyone served that stale page. The options were to version the cache by deploy with the `version_metadata` binding, to keep old assets around, or to purge the cached page when a deploy lands.
+`/` is cached at Cloudflare's edge for five minutes and served stale for up to a day while it refreshes (ADR-0007). The listening corner adds the first hashed file the page depends on: a small scene loader under `/_astro/` that imports the Three.js scene chunk. Workers static assets serve only the current deploy's files, so a page cached before a deploy can point at a loader the new deploy removed. The deck runner is inlined into the HTML for exactly this reason, so playback never depends on a hashed file, but the 3D scene would quietly stay a poster for anyone served that stale page. The options were to version the cache by deploy with the `version_metadata` binding, to keep old assets around or to purge the cached page when a deploy lands.
 
 ## Decision
 
