@@ -17,6 +17,7 @@ bun run dev
 ## Check everything (what CI runs)
 
 ```bash
+bunx playwright install chromium webkit   # once per machine
 bun run check
 ```
 
@@ -24,6 +25,6 @@ bun run check
 
 - Migrations: always `wrangler d1 migrations apply`, never `wrangler d1 execute --file`.
 - Fonts: `bun run fonts` after adding copy with new characters.
-- Open Graph image: `bun run serve`, then `bun run og`.
+- Open Graph image: `bun run build`, then `bun run serve`, then `bun run og`.
 - Deploys happen only from GitHub Actions on `main`, after every check passes; the privacy spec then runs against the live site.
 - `/` is cached at the edge for five minutes with background refresh, so deploys show within minutes.
