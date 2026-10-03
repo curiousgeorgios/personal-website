@@ -1,0 +1,13 @@
+---
+import Notebook from "../layouts/Notebook.astro";
+import Row from "../components/Row.astro";
+Astro.response.headers.set("Cache-Control", "no-store");
+---
+<Notebook title="nothing here · george vlachos" noindex>
+  <main class="book">
+    <Row label="404" id="not-found">
+      <p>nothing written on this page.</p>
+      <p class="home"><a href="/">back to the logbook</a></p>
+    </Row>
+  </main>
+</Notebook>
