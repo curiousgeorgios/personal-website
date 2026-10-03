@@ -14,6 +14,14 @@ export default defineConfig({
   build: { inlineStylesheets: "always" },
   // No syntax highlighting: Shiki's inline styles conflict with the CSP
   markdown: { syntaxHighlight: false },
+  vite: {
+    // Test hooks (window.__deck, window.__deckScene) exist only in builds made with TEST_HOOKS=1 (bun run build:test)
+    define: { __TEST_HOOKS__: JSON.stringify(process.env.TEST_HOOKS === "1") },
+    // Astro inlines a page script below this limit when it has no imports and no dynamic imports. 24KB keeps the
+    // deck runner inside the HTML, so a cached page never needs a hashed file to play a record. Other assets keep
+    // Vite's default, so nothing else becomes a data: URL the CSP would block.
+    build: { assetsInlineLimit: (file, content) => (file.endsWith(".js") ? content.length < 24 * 1024 : undefined) },
+  },
   security: {
     // Astro hashes inline scripts and styles and sends the policy as a response header; bundled files need 'self'
     csp: {

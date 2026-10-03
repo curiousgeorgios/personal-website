@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "build:test": "TEST_HOOKS=1 astro build",
     "typecheck": "astro check",
     "cf-typegen": "wrangler types",
     "fonts": "node scripts/build-fonts.mjs",
@@ -16,7 +17,7 @@
     "serve": "wrangler dev -c dist/server/wrangler.json --port 4331 --persist-to .wrangler/state",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run build && bun run test:e2e"
+    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run build:test && bun run test:e2e"
   },
   "dependencies": {
     "@astrojs/cloudflare": "14.3.3",

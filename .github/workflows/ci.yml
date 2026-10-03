@@ -30,7 +30,7 @@ jobs:
       - run: bun run test:unit
       - run: bun run db:migrate:local
       - run: bun run seed:media --local
-      - run: bun run build
+      - run: bun run build:test
       - run: bun run test:e2e
       - uses: actions/upload-artifact@v7
         if: failure()

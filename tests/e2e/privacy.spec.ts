@@ -24,6 +24,13 @@ test("cookies none, storage empty, every request first party", async ({ page, ba
   const more = page.locator("#log .more");
   if (await more.count()) await more.click();
   await page.waitForLoadState("networkidle");
+  // Play and stop a record when there is one: audio streams first party from /media and sets nothing
+  const track = page.locator(".tracks button").first();
+  if (await track.count()) {
+    await track.click();
+    await page.waitForTimeout(1500);
+    await track.click();
+  }
   await Promise.all(checks);
   expect(setCookies).toEqual([]);
   expect(foreign).toEqual([]);
