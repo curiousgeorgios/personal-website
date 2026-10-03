@@ -46,9 +46,12 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
     tweens.setInstant(reduce || lost || !onScreen || document.hidden);
     loop.setVisible(onScreen && !lost && !document.hidden);
   };
+  let sight = () => {};
+  const sighted = new Promise<void>((resolve) => (sight = resolve));
   const watcher = new IntersectionObserver(([entry]) => {
     onScreen = entry.isIntersecting;
     visibility();
+    sight();
   });
   watcher.observe(host);
   document.addEventListener("visibilitychange", visibility);
@@ -83,5 +86,8 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
   );
 
   if (__TEST_HOOKS__) installHooks({ renderer, stage, tweens, loop, deck });
+  // The runner hands over a held press as soon as the view arrives, so the scene must know whether it can be seen
+  // first (until the observer reports, tweens are instant). The cap covers a background tab, where observers don't run.
+  await Promise.race([sighted, new Promise((resolve) => setTimeout(resolve, 500))]);
   return view;
 }
