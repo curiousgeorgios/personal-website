@@ -1,0 +1,15 @@
+---
+import { formatLogDate } from "../lib/text";
+import type { LogEntry } from "../lib/logbook";
+interface Props {
+  entries: LogEntry[];
+}
+const { entries } = Astro.props;
+---
+<div class="log">
+  <ul>
+    {entries.map((entry) => (
+      <li><time class="d" datetime={entry.precision === "month" ? entry.date.slice(0, 7) : entry.date}>{formatLogDate(entry.date, entry.precision)}</time><span>{entry.text}</span></li>
+    ))}
+  </ul>
+</div>

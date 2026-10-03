@@ -1,0 +1,8 @@
+---
+import type { Track } from "../lib/logbook";
+interface Props {
+  records: Track[];
+}
+const { records } = Astro.props;
+---
+{records.length === 0 && <p class="empty">nothing on the turntable right now.</p>}

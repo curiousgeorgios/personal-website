@@ -1,0 +1,17 @@
+---
+import Inline from "./Inline.astro";
+import type { Item } from "../lib/logbook";
+interface Props {
+  items: Item[];
+}
+const { items } = Astro.props;
+---
+<ul class="lines">
+  {items.map((item) => (
+    <li class="line-item" data-slug={item.slug}>
+      <div class="line">
+        <Inline source={item.text} />{item.aside && <span class="aside"> - {item.aside}</span>}
+      </div>
+    </li>
+  ))}
+</ul>

@@ -1,6 +1,20 @@
 ---
+import { env } from "cloudflare:workers";
 import Notebook from "../layouts/Notebook.astro";
+import Logbook from "../components/Logbook.astro";
+import { loadLogbookSafely } from "../lib/logbook";
+
+const data = await loadLogbookSafely(env.DB);
+if (data) {
+  // Fresh for five minutes at Cloudflare's edge, then served stale while it refreshes in the background.
+  // Admin saves purge the tag globally (plan 3); deploys show within minutes.
+  Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["logbook"] });
+  Astro.response.headers.set("Cache-Control", "no-cache");
+} else {
+  // Never cache the degraded render
+  Astro.response.headers.set("Cache-Control", "no-store");
+}
 ---
 <Notebook>
-  <main class="book"><h1>george vlachos</h1></main>
+  <Logbook data={data} />
 </Notebook>

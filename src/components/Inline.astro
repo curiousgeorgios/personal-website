@@ -1,0 +1,8 @@
+---
+import { parseInline } from "../lib/text";
+interface Props {
+  source: string;
+}
+const parts = parseInline(Astro.props.source);
+---
+{parts.map((part) => (part.kind === "text" ? part.value : <a href={part.href}>{part.text}</a>))}
