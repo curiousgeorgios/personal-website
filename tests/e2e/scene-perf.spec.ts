@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 
 // Spec 11: no scene task over 50ms at 4× CPU throttle. Opt-in, because CI's software WebGL is no guide:
 //   SCENE_PERF=1 bun run test:e2e tests/e2e/scene-perf.spec.ts --project=chromium
+// This check currently fails, on two counts: the environment-map step (PMREM generation takes 66 to 75ms at 4×,
+// about 18ms unthrottled, before the canvas shows) and headless software rendering's readback. Plan 4 decides
+// between precomputing the map and accepting the hitch (see the plan 2 follow-ups); until then a red run here is known.
 test("no scene task blocks the main thread for more than 50ms at 4× CPU throttle", async ({ page, browserName }) => {
   test.skip(process.env.SCENE_PERF !== "1", "opt-in: set SCENE_PERF=1");
   test.skip(browserName !== "chromium", "CPU throttling is Chromium-only");
