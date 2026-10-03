@@ -29,7 +29,7 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
   const journeys = createJourneys(stage, tweens, loop, reduce);
   host.appendChild(canvas);
   const hud = createHud(host, deck);
-  const pointer = bindPointer(canvas, { deck, stage, journeys, hud });
+  const pointer = bindPointer(canvas, { deck, stage, journeys, hud, loop, tweens, reduce });
 
   const resize = () => {
     const width = host.clientWidth;
