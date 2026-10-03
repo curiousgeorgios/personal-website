@@ -40,6 +40,25 @@ test("page weight stays inside the budgets", async ({ page, browserName }) => {
   expect(sizes.font).toBeLessThan(60 * 1024);
 });
 
+test("the scene chunk stays under 190KB gzipped", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "measured once, in Chromium");
+  test.setTimeout(90_000);
+  const scripts = new Map<string, Promise<number>>();
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "script") scripts.set(response.url(), response.body().then((body) => gzipSync(body).length));
+  });
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.goto("/", { waitUntil: "networkidle" });
+  const early = new Set(scripts.keys());
+  await page.locator("[data-deck]").scrollIntoViewIfNeeded();
+  await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 60_000 });
+  const late = [...scripts].filter(([url]) => !early.has(url));
+  const sizes = await Promise.all(late.map(([, size]) => size));
+  console.log("scene (gzipped bytes)", Object.fromEntries(late.map(([url], i) => [new URL(url).pathname, sizes[i]])));
+  expect(late.some(([url]) => /\/_astro\/scene\./.test(url))).toBe(true);
+  expect(sizes.reduce((sum, size) => sum + size, 0)).toBeLessThan(190 * 1024);
+});
+
 test("no layout shift while the page settles", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "layout-shift entries are Chromium-only");
   await page.goto("/");

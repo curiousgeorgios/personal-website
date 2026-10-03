@@ -20,6 +20,8 @@ export interface SceneHooks {
   /** On-screen box of the browsed record's sleeve, in client pixels */
   coverRect(): { x: number; y: number; width: number; height: number };
   loseContext(): void;
+  /** Empties the crate and hides the crate control, for `bun run poster` */
+  poster(): void;
 }
 
 // A test-only window into the scene (spec 5.5). Installed only when __TEST_HOOKS__ is true, so production drops it.
@@ -67,5 +69,13 @@ export function installHooks({ renderer, stage, tweens, loop, deck }: { renderer
       return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
     },
     loseContext: () => renderer.getContext().getExtension("WEBGL_lose_context")?.loseContext(),
+    poster: () => {
+      for (const record of stage.records) {
+        record.holder.visible = false;
+        record.disc.visible = false;
+      }
+      canvas.parentElement?.querySelector<HTMLElement>(".crate-hud")?.style.setProperty("visibility", "hidden");
+      loop.invalidate();
+    },
   };
 }

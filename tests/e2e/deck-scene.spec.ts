@@ -20,6 +20,7 @@ test("the scene loads only after the page has loaded and the row comes near", as
   await expect(page.locator("[data-deck].live canvas")).toHaveCount(1, { timeout: 60_000 });
   expect(requested).toHaveLength(1);
   await expect(page.locator("[data-deck] canvas")).toHaveAttribute("aria-hidden", "true");
+  await expect(page.locator("[data-deck] .poster")).toBeHidden();
 });
 
 test("a press during the scene download waits for it, then plays with one scene", async ({ page }) => {
@@ -56,6 +57,9 @@ test("without WebGL the scene never loads and the list plays and stops every rec
   await page.locator("[data-deck]").scrollIntoViewIfNeeded();
   await page.waitForTimeout(1500);
   await expect(page.locator("[data-deck] canvas")).toHaveCount(0);
+  const poster = page.locator("[data-deck] .poster img");
+  await expect(poster).toBeVisible();
+  await expect.poll(() => poster.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
   const rows = page.locator(".tracks li");
   for (let i = 0; i < (await rows.count()); i++) {
     await rows.nth(i).locator("button").click();

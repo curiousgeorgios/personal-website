@@ -32,6 +32,9 @@ describe("Turntable", () => {
     const status = doc.querySelector("[data-deck-status]")!;
     expect([status.getAttribute("role"), status.getAttribute("aria-live")]).toEqual(["status", "polite"]);
     expect([...doc.querySelectorAll("audio")].map((audio) => audio.getAttribute("preload"))).toEqual(["none"]);
+    const poster = doc.querySelector("[data-deck] .poster img")!;
+    expect([poster.getAttribute("src"), poster.getAttribute("alt"), poster.getAttribute("loading")]).toEqual(["/posters/deck-desktop.webp", "", "lazy"]);
+    expect(doc.querySelector('[data-deck] .poster source[media="(max-width: 680px)"]')?.getAttribute("srcset")).toBe("/posters/deck-phone.webp");
   });
 
   test("shows only the empty line when there are no records", async () => {

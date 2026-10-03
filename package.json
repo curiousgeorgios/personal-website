@@ -12,6 +12,7 @@
     "og": "node scripts/og-image.mjs",
     "covers": "node scripts/covers.mjs",
     "seed:media": "node scripts/seed-media.mjs",
+    "poster": "node scripts/poster.mjs",
     "db:migrate:local": "wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/state",
     "db:migrate:remote": "wrangler d1 migrations apply curiousgeorge-logbook --remote",
     "serve": "wrangler dev -c dist/server/wrangler.json --port 4331 --persist-to .wrangler/state",

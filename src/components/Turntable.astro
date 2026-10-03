@@ -12,7 +12,12 @@ const media = (key: string) => `/media/${key}`;
   <p class="empty">nothing on the turntable right now.</p>
 ) : (
   <div class="corner">
-    <div class="deck" data-deck></div>
+    <div class="deck" data-deck>
+      <picture class="poster">
+        <source media="(max-width: 680px)" srcset="/posters/deck-phone.webp" />
+        <img src="/posters/deck-desktop.webp" alt="" decoding="async" loading="lazy" />
+      </picture>
+    </div>
     <ol class="tracks" aria-label="records">
       {records.map((record, index) => (
         <li>
