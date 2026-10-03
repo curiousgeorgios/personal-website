@@ -53,6 +53,8 @@ jobs:
           bun-version: 1.2.21
       - run: bun install --frozen-lockfile
       - run: bun run build
+      # Test hooks must never reach production
+      - run: if grep -rq "__deck" dist; then echo "test hooks leaked into the production build"; exit 1; fi
       # All the fallible setup happens before anything touches production
       - run: bunx playwright install --with-deps chromium
       - run: bun run db:migrate:remote
@@ -63,6 +65,15 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Edge-cached HTML must never outlive the hashed scene loader it points at (ADR-0010)
+      - name: Purge the cached home page
+        run: >-
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache"
+          -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json"
+          --data '{"tags":["logbook"]}'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
       # The visitor info's promises, checked against the live site
       - run: bunx playwright test tests/e2e/privacy.spec.ts --project=chromium
         env:

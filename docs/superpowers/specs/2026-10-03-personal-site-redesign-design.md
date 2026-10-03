@@ -3,7 +3,7 @@
 - Date: 2026-10-03
 - Owner: George Vlachos
 - Status: Design agreed in brainstorming, revised after critical review; ready for an implementation plan
-- Decisions: [ADR-0001](../../adr/0001-logbook-direction-with-wall-labels.md) to [ADR-0008](../../adr/0008-deploy-through-github-actions.md)
+- Decisions: [ADR-0001](../../adr/0001-logbook-direction-with-wall-labels.md) to [ADR-0010](../../adr/0010-purge-cached-home-page-after-deploys.md)
 - Agreed prototype: [docs/prototypes/2026-10-03-logbook/](../../prototypes/2026-10-03-logbook/) (`logbook.html`, `turntable.js` and two screenshots). It is the visual and behavioural reference. Its asset paths (`/files/...`) pointed at the brainstorming server and will not resolve standalone. Section 5.6 lists prototype bugs that must not be ported.
 
 ## 1. Intent
@@ -114,8 +114,8 @@ Two modules, so playback never depends on WebGL:
 - Rendering is on demand: a frame is drawn only while something is moving or the platter spins, and never while the row is off screen. While only spinning, frames are capped at 30fps. Device pixel ratio is capped at 2 (1.5 on coarse pointers). The candle flickers only during those frames.
 - Framing: the camera fits a set of points to the canvas by binary search, so any aspect works.
   - Desktop: the whole console, shelf and rug, canvas aspect 16:10.8 within the content column.
-  - Phones (under 680px): the canvas is full-bleed (viewport width) and the frame is cropped to the console top (turntable, candle and crate), with the shelf and rug only peeking in at the bottom. Acceptance at 375px wide: the cover is at least 90px tall on screen and the crate control sits fully inside the canvas. If the side-by-side layout cannot reach 90px, the phone layout moves the crate in front of the turntable.
-- Posters: two WebP stills (desktop and phone framing), each under 60KB, rendered in daylight with no record on the platter by a Playwright script (`bun run poster`) that runs locally with WebGL and commits the output. Rerun it whenever the scene changes.
+  - Phones (under 680px): the canvas is full-bleed (viewport width) and the frame is cropped to the console top (turntable, candle and crate), with the shelf and rug only peeking in at the bottom. Acceptance at 375px wide: the cover is at least 90px tall on screen and the crate control sits fully inside the canvas. Measured at about 95px (crop x -3.35 to 6.25, y -0.9 to 3.4, view direction (0, 0.45, 1), canvas 375 × 320), so the crate stays beside the turntable.
+- Posters: two WebP stills (desktop and phone framing), each under 60KB, rendered in daylight with no record on the platter and an empty crate (so they stay true whatever records /admin adds) by a Playwright script (`bun run poster`) that runs locally with WebGL and commits the output. Rerun it whenever the scene changes.
 
 ### 5.3 Playback
 
@@ -136,7 +136,7 @@ Two modules, so playback never depends on WebGL:
   - Arrows are `aria-disabled` (not `disabled`, so focus stays put) at either end and while a record travels. With one record both arrows are disabled. Left and right arrow keys flip when the control has focus. Pressing a button shades it; nothing scales.
   - Without the scene (poster showing), the control is not shown; the list is the interface.
 - 3D input: clicking the visible cover or anywhere on the crate plays (or stops if it is playing); clicking a record in front of or behind it flips one step. Hover previews the click (the cover lifts, the current record starts to tip or the nearest tipped record starts to rise) and highlights the matching control button.
-- Track list under the scene: one row per active record (`<side> <title> - <artist>` and a state: `play`, `cueing` or `playing · stop`). Sides are derived from position (a1, a2, b1, b2, c1, c2). Hover or focus flips the crate to that record; a red `›` marks the record in view; click plays or stops. The row shows `cueing` from the moment it is pressed, including while the scene chunk is still loading.
+- Track list under the scene: one row per active record (`<side> <title> - <artist>` and a state: `play`, `cueing` or `playing · stop`). Sides are derived from position (a1, a2, b1, b2, c1, c2). Hover or focus flips the crate to that record; a red `›` marks the record in view while the scene is attached; click plays or stops. The row shows `cueing` from the moment it is pressed, including while the scene chunk is still loading.
 - Hint line: `flip through the crate with ‹ ›, or pick a track. nothing plays until you do.`
 - Rapid input: a second press on the same record within 450ms is ignored (a double-click plays once); flips use keyed tweens so fast repeated flips retarget instead of stacking; flips requested during a journey apply when the runner is idle.
 - Easter egg (mouse and pen; touch keeps scrolling the page): dragging the spinning record more than 6px scratches it. The platter follows the pointer around its centre and the playback rate follows the angular speed (clamped 0.25 to 2.5 so Firefox never mutes, `preservesPitch` off). Release spins back up and eases the rate back to 1 over 420ms; the click that follows a scratch is suppressed. A plain click on the record stops it.
@@ -173,7 +173,7 @@ The behaviour checks run during brainstorming become Playwright tests against th
 
 Astro 7 route caching with the Cloudflare provider (`cache: { provider: cacheCloudflare() }` from `@astrojs/cloudflare/cache`), which turns on Cloudflare's Worker cache in front of the Worker:
 
-- `/` calls `Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["logbook"] })`. Responses carry `Cloudflare-CDN-Cache-Control` and a `Cache-Tag`, so visitors are served from Cloudflare's cache and stale copies are refreshed in the background. The short freshness window means a deploy shows on `/` within minutes without a purge step.
+- `/` calls `Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["logbook"] })`. Responses carry `Cloudflare-CDN-Cache-Control` and a `Cache-Tag`, so visitors are served from Cloudflare's cache and stale copies are refreshed in the background. Every deploy also purges the `logbook` tag from CI (ADR-0010), so edge-cached HTML never points at a hashed file the new deploy removed; the short freshness window is the fallback.
 - Stylesheets are always inlined (`build.inlineStylesheets: "always"`), so a cached page never references a hashed file that a later deploy removed.
 - Admin writes call `context.cache.invalidate({ tags: ["logbook"] })`, which purges the tag globally, so changes show on the next visit everywhere.
 - D1 is read once per render with a single `DB.batch()`. The D1 database is created with location hint `oc`.
@@ -222,7 +222,7 @@ D1 schema in numbered migrations under `migrations/`, applied with `wrangler d1 
 Seed:
 
 - A numbered seed migration with the current site's content and the prototype's lines. Lines that were Claude's guesses are listed on the launch checklist (section 13).
-- A one-off script (`bun run seed:media`) extracts cover art from the existing MP3s' ID3 tags (`music-metadata`), converts it to 512px WebP, uploads tracks and covers with `wrangler r2 object put --remote` and inserts the four prototype records (simple things, nyc in 1940, no bad feelings today, light it up). The MP3s then leave `public/`.
+- The four prototype records (simple things, nyc in 1940, no bad feelings today, light it up) are seeded by the migration `0003_records.sql`, so local, CI and production D1 get them through `migrations apply`. Their MP3s and 512px WebP covers (made once from the MP3s' ID3 art with `music-metadata` and sharp by `bun run covers`) live in `media/`; `bun run seed:media --local` uploads them to the local R2 store and `--remote` to production. The MP3s left `public/`.
 
 ## 9. Snapshots (ADR-0002)
 
@@ -257,7 +257,7 @@ Measured with Lighthouse CLI, mobile preset (simulated 4G, 4× CPU), median of 5
 - HTML for `/`: under 30KB gzipped. CSS: under 15KB gzipped.
 - Fonts: two woff2 files under 60KB total, preloaded.
 - Largest contentful paint under 1.5s; cumulative layout shift under 0.01; interaction to next paint under 200ms.
-- Scene chunk (Three.js plus scene code, loaded after `load` and only near the row): measured and recorded at build; target under 190KB gzipped. No scene task over 50ms at 4× CPU throttle.
+- Scene chunk (Three.js plus scene code, loaded after `load` and only near the row): measured and recorded at build; target under 190KB gzipped. No scene task over 50ms at 4× CPU throttle, measured locally with `SCENE_PERF=1` (CI renders WebGL in software, so it is reported there, not gated).
 - Covers: 512px WebP under 40KB each. Posters: under 60KB each. Snapshots: 480px variant under 30KB, 960px under 70KB.
 - Audio streams with range requests; nothing preloads.
 
@@ -293,7 +293,7 @@ Keep and fix:
 - `.gitignore`: drop the Next.js, OpenNext and audio-manifest entries; keep `.superpowers/` and `.playwright-mcp/`; add Astro's `dist/` and `.astro/`.
 - `wrangler.jsonc`: keep the Worker name `personal-website`; replace `main`, `assets` and `build`; bump `compatibility_date`; add the D1, R2, Images and service bindings and vars for the Access team domain and AUD. Enable Workers Logs on both Workers.
 
-Deployment (ADR-0008): GitHub Actions on every push to `main` runs typecheck, unit tests, the build, Playwright (Chromium and WebKit), the budget check and the privacy smoke test; only if all pass does it run `wrangler d1 migrations apply DB --remote` and deploy both Workers. Workers Builds is disconnected so nothing deploys unchecked. Pull requests run the same checks without deploying.
+Deployment (ADR-0008): GitHub Actions on every push to `main` runs typecheck, unit tests, the build, Playwright (Chromium and WebKit), the budget check and the privacy smoke test; only if all pass does it run `wrangler d1 migrations apply DB --remote` and deploy both Workers. Workers Builds is disconnected so nothing deploys unchecked. Pull requests run the same checks without deploying. In CI, Playwright runs on one worker, because GitHub's runners draw WebGL in software and parallel workers break the timing checks (ADR-0009).
 
 Launch checklist (only George can do these):
 
@@ -306,7 +306,10 @@ Launch checklist (only George can do these):
 - [ ] Turn on "Cookieless server hash mode" in PostHog.
 - [ ] Apply the zone settings in section 10.
 - [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets and disconnect Workers Builds.
-- [ ] Try the turntable on a real iPhone and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
+- [ ] Before the first deploy, create the R2 bucket (`bunx wrangler r2 bucket create curiousgeorge-media --location oc`) and upload the starting crate (`bun run seed:media --remote`); the deploy applies the records migration, whose rows point at those files.
+- [ ] Add `CLOUDFLARE_ZONE_ID` to GitHub Actions secrets and give the API token the zone's Cache Purge permission (each deploy purges the cached home page, ADR-0010); after the first deploy, confirm a request to `/` straight after the purge is a cache miss (`cf-cache-status: MISS`).
+- [ ] Sign off ADR-0010 (status Proposed until then).
+- [ ] Try the turntable on a real iPhone (once with the ringer switch on silent) and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
 
 ## 14. Testing
 

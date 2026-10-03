@@ -4,10 +4,7 @@ Plan 1 (foundation) finished on `redesign/logbook` with every task review and th
 
 ## Plan 2 (listening corner)
 
-- Keep the deck runner inline so the playback path never depends on a hashed `/_astro/*` file. Add the `version_metadata` binding and decide a post-deploy cache purge, because edge-cached HTML (5 minutes fresh, a day stale-while-revalidate) can otherwise reference chunks a newer deploy removed. Also in the roadmap.
-- Add 12:xx and daylight-saving (AEDT, from 4 Oct 2026) cases to `tests/unit/time.test.ts` alongside the time-of-day lighting.
-- Add `log` to the phone project's `testMatch` when extending it for the turntable.
-- Delete the three MP3s in `public/audio/` that are not part of the starting crate once the four move to R2.
+Done in [plan 2](2026-10-04-plan-2-listening-corner.md): the deck runner is inlined and every deploy purges the cached page (ADR-0010, in place of a `version_metadata` binding); 12:xx and daylight-saving cases are in `tests/unit/time.test.ts` beside the lighting tests; `log` runs in the phone project; the three MP3s outside the starting crate are gone and the four in it left `public/` for R2.
 
 ## Plan 3 (admin)
 
