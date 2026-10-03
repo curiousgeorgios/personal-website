@@ -24,6 +24,19 @@ test("the pill toggles with the keyboard and several labels can be open", async 
   await expect(page.locator(".line-item.open")).toHaveCount(2);
 });
 
+test("a same-frame open and close leaves the label closed and unstyled", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.evaluate((el) => {
+    const line = el.querySelector<HTMLElement>(".line")!;
+    line.click();
+    line.click();
+  });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "false");
+  await expect(item).not.toHaveClass(/\bopen\b/);
+});
+
 test("links inside a labelled line navigate instead of toggling", async ({ page }) => {
   await page.goto("/");
   const link = page.locator('[data-slug="canberra-events"] a');

@@ -5,6 +5,17 @@ export {};
 const CLOSE_MS = 320;
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+function isOpen(item: HTMLElement) {
+  return item.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
+}
+
+// Queued a frame later for the animation; skipped if the label was closed again in the meantime
+function showOpen(item: HTMLElement) {
+  requestAnimationFrame(() => {
+    if (isOpen(item)) item.classList.add("open");
+  });
+}
+
 function setOpen(item: HTMLElement, open: boolean) {
   const pill = item.querySelector<HTMLButtonElement>(".peek");
   const drawer = item.querySelector<HTMLElement>(".drawer");
@@ -12,7 +23,7 @@ function setOpen(item: HTMLElement, open: boolean) {
   pill.setAttribute("aria-expanded", String(open));
   if (open) {
     drawer.removeAttribute("hidden");
-    requestAnimationFrame(() => item.classList.add("open"));
+    showOpen(item);
     return;
   }
   item.classList.remove("open");
@@ -20,8 +31,6 @@ function setOpen(item: HTMLElement, open: boolean) {
     if (pill.getAttribute("aria-expanded") === "false") drawer.setAttribute("hidden", "until-found");
   }, reduced() ? 0 : CLOSE_MS);
 }
-
-const isOpen = (item: HTMLElement) => item.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
 
 document.querySelectorAll<HTMLElement>(".line-item.labelled").forEach((item) => {
   const line = item.querySelector<HTMLElement>(".line");
@@ -34,7 +43,7 @@ document.querySelectorAll<HTMLElement>(".line-item.labelled").forEach((item) => 
   // Find-in-page revealed a closed label: reflect it as open
   drawer.addEventListener("beforematch", () => {
     item.querySelector(".peek")?.setAttribute("aria-expanded", "true");
-    requestAnimationFrame(() => item.classList.add("open"));
+    showOpen(item);
   });
   item.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !isOpen(item)) return;
