@@ -84,3 +84,16 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
   .entry { grid-template-columns: minmax(0, 1fr); }
 }
 .entry .when { font: 12.5px/1.55 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+/* Records: a small cover beside each, and its controls */
+.admin .count { font: 12.5px/1.55 var(--mono); color: var(--muted); margin-bottom: 10px; }
+.admin h3 + .records-admin { margin-top: 6px; }
+.records-admin + h3 { margin-top: 20px; }
+.records-admin .entry { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.records-admin .cover { width: 40px; height: 40px; margin-top: 4px; border-radius: 3px; object-fit: cover; background: var(--rule); }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (max-width: 680px) {
+  .records-admin .entry { grid-template-columns: 40px minmax(0, 1fr); }
+  .records-admin .controls { grid-column: 2; }
+}

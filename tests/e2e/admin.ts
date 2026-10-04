@@ -1,4 +1,5 @@
 import { expect, type Page, type Response } from "@playwright/test";
+import sharp from "sharp";
 
 // Helpers for the admin specs. They write, so they use the admin server on 4333, whose store is recreated on every run.
 
@@ -31,3 +32,21 @@ export async function submit(page: Page, formId: string, button = "save"): Promi
   ]);
   return response;
 }
+
+/** A file that sniffs as an MP3 (an ID3 tag, then silence). It never plays in these specs. */
+export const mp3 = (size = 64 * 1024) => {
+  const buffer = Buffer.alloc(size);
+  buffer.write("ID3", 0, "latin1");
+  buffer[3] = 4;
+  return { name: "clip.mp3", mimeType: "audio/mpeg", buffer };
+};
+
+/** A real 900 × 600 PNG for the Images binding to crop to a 512px square */
+export const png = async () => ({
+  name: "cover.png",
+  mimeType: "image/png",
+  buffer: await sharp({ create: { width: 900, height: 600, channels: 3, background: { r: 201, g: 74, b: 49 } } }).png().toBuffer(),
+});
+
+/** An SVG dressed up as a PNG */
+export const svg = () => ({ name: "cover.png", mimeType: "image/png", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') });
