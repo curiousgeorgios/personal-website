@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
+    "dev:admin": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro dev",
     "build": "astro build",
-    "build:test": "TEST_HOOKS=1 astro build",
+    "build:test": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro build",
     "typecheck": "astro check",
-    "cf-typegen": "wrangler types",
+    "cf-typegen": "wrangler types --strict-vars=false",
     "fonts": "node scripts/build-fonts.mjs",
     "og": "node scripts/og-image.mjs",
     "covers": "node scripts/covers.mjs",
@@ -23,6 +24,7 @@
   "dependencies": {
     "@astrojs/cloudflare": "14.3.3",
     "astro": "7.3.5",
+    "jose": "6.2.12",
     "three": "0.169.0"
   },
   "devDependencies": {

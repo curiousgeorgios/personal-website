@@ -53,8 +53,8 @@ jobs:
           bun-version: 1.2.21
       - run: bun install --frozen-lockfile
       - run: bun run build
-      # Test hooks must never reach production
-      - run: if grep -rq "__deck" dist; then echo "test hooks leaked into the production build"; exit 1; fi
+      # Test hooks and the admin bypass must never reach production
+      - run: if grep -rqE "__deck|admin-bypass" dist; then echo "test hooks or the admin bypass leaked into the production build"; exit 1; fi
       # All the fallible setup happens before anything touches production
       - run: bunx playwright install --with-deps chromium
       # A missing zone id would otherwise surface only after production has been deployed

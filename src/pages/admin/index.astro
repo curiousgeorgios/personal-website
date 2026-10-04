@@ -1,0 +1,14 @@
+---
+import Notebook from "../../layouts/Notebook.astro";
+import Row from "../../components/Row.astro";
+
+const email = Astro.locals.adminEmail ?? "";
+---
+<Notebook title="admin · george vlachos" noindex>
+  <main class="book admin">
+    <Row label="admin" head>
+      <h1>admin</h1>
+      <p class="where">signed in as {email}</p>
+    </Row>
+  </main>
+</Notebook>
