@@ -43,6 +43,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
   if (admin) {
     secured.headers.set("Cache-Control", "no-store");
+    // Set outright, so a page that ever calls Astro.cache.set can't have the edge serve /admin without the gate
+    secured.headers.set("Cloudflare-CDN-Cache-Control", "no-store");
+    secured.headers.delete("Cache-Tag");
     secured.headers.set("X-Robots-Tag", "noindex");
   }
   return secured;

@@ -1,5 +1,5 @@
 import type { JWTVerifyGetKey } from "jose";
-import { accessKeys, verifyAccessJwt, type AccessConfig } from "./access";
+import { accessKeys, logRefusal, verifyAccessJwt, type AccessConfig } from "./access";
 
 const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
@@ -19,5 +19,13 @@ export async function adminIdentity(
 ): Promise<string | null> {
   const token = request.headers.get("cf-access-jwt-assertion");
   if (!token || !config.teamDomain || !config.audience) return null;
-  return verifyAccessJwt(token, config, keys(config.teamDomain));
+  let keySet: JWTVerifyGetKey;
+  try {
+    keySet = keys(config.teamDomain);
+  } catch (error) {
+    // A team domain that isn't a valid host is a refusal, not a 500 without the admin headers
+    logRefusal(error);
+    return null;
+  }
+  return verifyAccessJwt(token, config, keySet);
 }

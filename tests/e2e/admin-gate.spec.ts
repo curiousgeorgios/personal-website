@@ -10,6 +10,8 @@ test("the admin page is private: no-store, noindex and the signed-in identity", 
   expect(response?.status()).toBe(200);
   const headers = response!.headers();
   expect(headers["cache-control"]).toBe("no-store");
+  // The edge must never cache the admin page: it would be served without the gate
+  expect(headers["cloudflare-cdn-cache-control"]).toBe("no-store");
   expect(headers["x-robots-tag"]).toBe("noindex");
   expect(headers["x-content-type-options"]).toBe("nosniff");
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
@@ -17,7 +19,8 @@ test("the admin page is private: no-store, noindex and the signed-in identity", 
 });
 
 test("a write without this site's origin is refused, with the security headers", async ({ baseURL }) => {
-  const body = new URLSearchParams({ intent: "fact.save", key: "shelf", title: "should not save" });
+  // A body that can't write anything, so a regressed origin check can't touch the seeded store other specs read
+  const body = new URLSearchParams({ intent: "nothing-at-all" });
   for (const path of ["/admin/", "/"]) {
     for (const origin of [null, "https://example.com"]) {
       // Node's fetch sends no Origin unless asked, unlike a browser
@@ -37,4 +40,6 @@ test("a write from this site's origin gets through the gate", async ({ baseURL }
     headers: { Origin: new URL(baseURL!).origin },
   });
   expect(response.status).not.toBe(403);
+  // Not a 500 either: a crash would also pass the line above
+  expect(response.status).toBeLessThan(500);
 });

@@ -1,5 +1,5 @@
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair, type JWTVerifyGetKey } from "jose";
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { adminIdentity, isAdminPath, originAllowed } from "../../src/lib/admin/gate";
 
 const config = { teamDomain: "team.cloudflareaccess.com", audience: "aud-123" };
@@ -15,6 +15,14 @@ beforeAll(async () => {
     .setAudience("aud-123")
     .setExpirationTime("1h")
     .sign(pair.privateKey);
+});
+
+let warn: ReturnType<typeof vi.spyOn>;
+beforeEach(() => {
+  warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const url = new URL("https://curiousgeorge.dev/admin/");
@@ -50,6 +58,15 @@ describe("adminIdentity", () => {
 
   test("refuses a request without a token", async () => {
     expect(await adminIdentity(request("GET"), config, () => keys)).toBeNull();
+  });
+
+  test("refuses, rather than throws, when the team domain isn't a valid host", async () => {
+    // Uses the real key set builder: new URL rejects the host, which must end as a refusal and not a 500
+    const headers = { "Cf-Access-Jwt-Assertion": token };
+    expect(await adminIdentity(request("GET", headers), { teamDomain: "not a host", audience: "aud-123" })).toBeNull();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0][0]).toBe("admin: access token refused");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(token);
   });
 
   test("fails closed until the team domain and audience are set", async () => {

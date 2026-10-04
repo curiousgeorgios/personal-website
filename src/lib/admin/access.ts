@@ -19,12 +19,20 @@ export function accessKeys(teamDomain: string): JWTVerifyGetKey {
   return keys;
 }
 
+/** Workers Logs line for a refused admin request: the jose error code (or the error's name), never the token */
+export function logRefusal(error: unknown): void {
+  const code = (error as { code?: unknown } | null)?.code;
+  const reason = typeof code === "string" ? code : error instanceof Error ? error.name : "unknown";
+  console.warn("admin: access token refused", reason);
+}
+
 /** The signed-in email from a Cloudflare Access JWT, or null unless signature, audience, issuer and expiry all check out */
 export async function verifyAccessJwt(token: string, config: AccessConfig, keys: JWTVerifyGetKey): Promise<string | null> {
   try {
     const { payload } = await jwtVerify(token, keys, { issuer: `https://${config.teamDomain}`, audience: config.audience, algorithms: ["RS256"] });
     return typeof payload.email === "string" && payload.email !== "" ? payload.email : null;
-  } catch {
+  } catch (error) {
+    logRefusal(error);
     return null;
   }
 }
