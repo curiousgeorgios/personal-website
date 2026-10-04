@@ -14,7 +14,7 @@ The GitHub Actions deploy job purges the `logbook` cache tag through the Cloudfl
 
 ## Consequences
 
-The first request after a deploy gets fresh HTML, so the page and its scripts always match. The deploy needs one more secret and one more token permission, both on the launch checklist. If the purge call fails, the job fails after the deploy, visibly in Actions, and the five-minute freshness window still bounds the effect. Local and pull-request runs are unaffected.
+The first request after a deploy gets fresh HTML, so the page and its scripts always match. The deploy needs one more secret and one more token permission, both on the launch checklist. If the purge call fails, the job fails after the deploy, visibly in Actions, and the cached copy keeps being served until it's refreshed: the first request after its five fresh minutes can still get the old copy while the edge refreshes it in the background, so a manual purge is the quick fix. Local and pull-request runs are unaffected.
 
 ## Alternatives considered
 
