@@ -4,6 +4,8 @@ Plan 2 (the listening corner) finished on `redesign/logbook` with every task rev
 
 ## Plan 3 (admin)
 
+Done in [plan 3](2026-10-04-plan-3-admin.md).
+
 - Records are seeded by migration 0003 and changed through `/admin` from here on. The admin form must keep covers inside the spec 11 budget (512px WebP under 40KB; two of the four starting covers already sit near 40KB) and keep audio and cover keys under the `audio/` and `covers/` prefixes the `/media` route allows.
 
 ## Plan 4 (snapshots, analytics, Lighthouse) and launch

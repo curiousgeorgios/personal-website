@@ -22,6 +22,10 @@ bunx playwright install chromium webkit   # once per machine
 bun run check
 ```
 
+## The admin page
+
+`/admin` sits behind Cloudflare Access. Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "within five minutes" locally, because there's no cache to purge.
+
 ## Notes
 
 - Migrations: always `wrangler d1 migrations apply`, never `wrangler d1 execute --file`.
@@ -34,3 +38,4 @@ bun run check
 - Tests run against `bun run build:test`, which compiles in the listening corner's test hooks; `bun run build` never contains them.
 - Posters: `bun run build:test`, then `bun run serve`, then `bun run poster`. Rerun whenever the scene changes.
 - Scene long tasks (opt-in): `SCENE_PERF=1 bun run test:e2e tests/e2e/scene-perf.spec.ts --project=chromium`. It currently fails, on the environment-map step and on headless software-rendering readback, pending a plan 4 decision (see the plan 2 follow-ups).
+- The admin specs write, so they run against a third server on port 4333 whose store is deleted and migrated afresh on every run, in Chromium only. If a run stops part way, `pkill -f "port 4333"` before the next.

@@ -175,7 +175,7 @@ Astro 7 route caching with the Cloudflare provider (`cache: { provider: cacheClo
 
 - `/` calls `Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["logbook"] })`. Responses carry `Cloudflare-CDN-Cache-Control` and a `Cache-Tag`, so visitors are served from Cloudflare's cache and stale copies are refreshed in the background. Every deploy also purges the `logbook` tag from CI (ADR-0010), so edge-cached HTML never points at a hashed file the new deploy removed; the short freshness window is the fallback.
 - Stylesheets are always inlined (`build.inlineStylesheets: "always"`), so a cached page never references a hashed file that a later deploy removed.
-- Admin writes call `context.cache.invalidate({ tags: ["logbook"] })`, which purges the tag globally, so changes show on the next visit everywhere.
+- Admin writes call `context.cache.invalidate({ tags: ["logbook"] })`, which purges the tag globally, so changes show on the next visit everywhere. If the purge fails (local runs have none), the save still stands and the admin page says the logbook shows it within five minutes.
 - D1 is read once per render with a single `DB.batch()`. The D1 database is created with location hint `oc`.
 - If the D1 read fails, the page renders the static sections only, sets no cache hint and sends `Cache-Control: no-store`, so the degraded render is never cached; any cached copy keeps being served until it is replaced.
 - Cache keys include the query string, so `/ig` visits carrying UTM parameters or `fbclid` are cached per URL. That is acceptable at this site's traffic; each new variant costs one D1 read.
@@ -205,10 +205,10 @@ Every HTML response carries the security headers in section 12.1.
 - One plain server-rendered page with forms (no client framework), in the logbook's type and tokens, usable on a phone:
   - **Now and before:** add, edit, reorder, remove lines. Fields: text (plain text plus links written as `[link text](https://…)`, rendered escaped), aside, slug (unique, used for analytics and element ids). Optional label fields: era, status (`live` or `retired`), made of, label text, kind (`decision` or `lesson`), note, snapshot URL (the page to capture).
   - **Log:** add, edit, delete entries (date, day or month precision, text).
-  - **Lately:** shelf (title, author) and kettle (title, note).
-  - **Records:** add (title, artist, mp3 up to 15MB, cover as JPEG, PNG or WebP), reorder, deactivate, delete. At most 6 active. Uploads go to R2 under random unique keys (`audio/<ulid>.mp3`, `covers/<ulid>.webp`); covers are converted to 512px WebP with the Images binding. SVG and anything that fails type sniffing is rejected.
-  - **Snapshots:** last capture time and status per labelled line, plus a "re-shoot now" button.
-- Every write is a POST under `/admin/` that requires an `Origin` header equal to the site origin (missing or different is rejected), is validated server side (lengths, `https:` URLs, the record cap, sniffed MIME types), re-renders the form with values and messages on error and purges the `/` cache on success.
+  - **Lately:** shelf (title, author) and kettle (title, note). Saving both fields empty hides that half of the row.
+  - **Records:** add (title, artist, mp3 up to 15MB, cover as JPEG, PNG or WebP up to 10MB), edit title and artist, reorder, deactivate, activate and delete (with their files). At most 6 active. Uploads go to R2 under random unique keys (`audio/<ulid>.mp3`, `covers/<ulid>.webp`); covers are converted to a 512px square WebP under 40KB with the Images binding. SVG and anything that fails type sniffing is rejected. A save that fails part way keeps nothing.
+  - **Snapshots:** last capture time and status per labelled line (the statuses are defined in `src/lib/snapshots.ts`), plus a "re-shoot now" button, which arrives with the snapshots Worker in plan 4. Changing a line's page to snapshot clears its old snapshot.
+- Every write is a form POST to `/admin/` with an `intent`. Every request other than GET, HEAD or OPTIONS, anywhere on the site, needs an `Origin` header equal to the site origin; the middleware checks it (Astro's `checkOrigin` is off, so the 403 carries the security headers). Writes are validated server side (lengths, `https:` URLs, links the logbook can show, the record cap, sniffed file types). A failure re-renders the page with status 422 and the failed form open with its values and messages; a success purges the `/` cache and redirects with 303, so a reload never repeats it. An identical repeat of an add (a double tap) counts as already saved.
 
 ## 8. Data
 
@@ -267,6 +267,7 @@ Measured with Lighthouse CLI, mobile preset (simulated 4G, 4× CPU), median of 5
 
 - `Content-Security-Policy`, sent by Astro as a response header (`security.csp`, which adds hashes for inline scripts and styles), with `default-src 'self'`, `img-src 'self' data: blob:`, `media-src 'self' blob:`, `connect-src 'self'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`, and `'self'` allowed for bundled scripts and styles.
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` denying camera, microphone, geolocation and payment.
+- Every request other than GET, HEAD or OPTIONS needs an `Origin` header equal to the site's own; anything else gets a 403 with these headers.
 
 ### 12.2 Accessibility
 
@@ -302,7 +303,8 @@ Launch checklist (only George can do these):
 - [ ] Confirm the shelf and kettle entries.
 - [ ] Confirm licences for the four lo-fi tracks.
 - [ ] Confirm the intro line and `based: sydney and canberra`.
-- [ ] Create the Cloudflare Access application for `/admin*` and share its AUD tag.
+- [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, cookie SameSite Lax or Strict and a session long enough for a phone: when it runs out, a save in progress is lost), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
+- [ ] Check the account can use the Images binding (the admin converts record covers with it).
 - [ ] Turn on "Cookieless server hash mode" in PostHog.
 - [ ] Apply the zone settings in section 10.
 - [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets and disconnect Workers Builds.
@@ -316,7 +318,7 @@ Launch checklist (only George can do these):
 ## 14. Testing
 
 - Playwright (Chromium and WebKit, clock frozen with `page.clock` so the Sydney time and lighting are stable, fixed seed data, stubbed snapshot images): the listening corner suite (section 5.5); labels (open, close, Esc order, focus return, lazy image loading, no snapshot, broken snapshot); log toggle and empty states (no entries, three or fewer, no records); 404 status; redirects (`/ig`, `/jobs/video-editor`); visual checks at 375px and 1280px.
-- Admin: Playwright against a local Worker with the build-time Access bypass, covering each form, the record cap, upload type rejection and the `Origin` check; unit tests for validation and link parsing.
+- Admin: Playwright against a local Worker on port 4333 with the build-time Access bypass and its own store (deleted and migrated afresh on every run), covering each form, the record cap, upload type rejection and the `Origin` check (in Chromium only, because the specs write; a read-only layout check also runs on the phone); unit tests for the Access token checks, validation and link parsing, the store (the real migrations on `node:sqlite`) and the actions (fake R2 and Images bindings).
 - Snapshots Worker: unit tests with a mocked browser for success, timeout-but-shot, navigation error, challenge page and tiny image (keeps the old image).
 - Privacy smoke test against the built site and again after deploy: no `Set-Cookie` header on any response, `document.cookie === ""` and empty storage after interacting with everything, every request goes to the site's own origin and the `/ingest` proxy never forwards a `Cookie` header.
 - Budgets: a script that builds, serves and measures each budget in section 11 and fails the run when one is exceeded.

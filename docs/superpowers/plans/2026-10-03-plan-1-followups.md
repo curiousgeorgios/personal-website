@@ -8,6 +8,8 @@ Done in [plan 2](2026-10-04-plan-2-listening-corner.md): the deck runner is inli
 
 ## Plan 3 (admin)
 
+Done in [plan 3](2026-10-04-plan-3-admin.md).
+
 - Validation: unique `(section, position)` for items; set `updated_at` on every update; log dates as `YYYY-MM-DD` (month precision stored as the first of the month); a label `note` requires a `kind` and vice versa; warn on `)` inside link URLs (the inline parser stops at the first `)`).
 - Define the `snapshot_status` values (plan 4 writes them).
 - Admin tests that write must use their own persisted D1 store (like the empty store on port 4332), because the seed migration is both production content and the e2e fixture and specs run in parallel. Replace seed copy through `/admin`, not by editing `0002_seed.sql`, or several e2e assertions break.
