@@ -310,6 +310,7 @@ Launch checklist (only George can do these):
 - [ ] Add `CLOUDFLARE_ZONE_ID` to GitHub Actions secrets and give the API token the zone's Cache Purge permission (each deploy purges the cached home page, ADR-0010); after the first deploy, confirm a request to `/` straight after the purge is a cache miss (`cf-cache-status: MISS`).
 - [ ] Sign off ADR-0009 (status Proposed until then).
 - [ ] Sign off ADR-0010 (status Proposed until then).
+- [ ] Sign off ADR-0011 (Origin checked in our middleware) and ADR-0012 (an identical repeat of an admin add counts as saved), both Proposed until then.
 - [ ] Try the turntable on a real iPhone (once with the ringer switch on silent) and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
 
 ## 14. Testing
