@@ -45,6 +45,19 @@ describe("Field", () => {
     expect(await Promise.all(["date", "select", "file"].map(attribute))).toEqual([null, null, null]);
   });
 
+  test("plain turns off autocorrect and spellcheck; so does a url field, and nothing else does", async () => {
+    const attributes = async (props: Record<string, unknown>) => {
+      const doc = await render(Field, { form: "f", name: "n", label: "n", ...props });
+      const control = doc.querySelector("input, textarea")!;
+      return [control.getAttribute("autocorrect"), control.getAttribute("spellcheck")];
+    };
+    expect(await attributes({ plain: true })).toEqual(["off", "false"]);
+    expect(await attributes({ plain: true, kind: "textarea" })).toEqual(["off", "false"]);
+    expect(await attributes({ kind: "url" })).toEqual(["off", "false"]);
+    expect(await attributes({})).toEqual([null, null]);
+    expect(await attributes({ kind: "textarea" })).toEqual([null, null]);
+  });
+
   test("a select marks the saved choice", async () => {
     const options = [["", "none"], ["decision", "decision"], ["lesson", "lesson"]];
     const doc = await render(Field, { form: "item-1", name: "label_kind", label: "kind", kind: "select", value: "lesson", options });

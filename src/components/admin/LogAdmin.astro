@@ -21,7 +21,7 @@ const when = (entry: AdminLogEntry) => (entry.precision === "month" ? entry.date
   <input type="hidden" name="intent" value="log.create" />
   <Field form="log-new" name="date" label="date" kind="date" value={fresh.values.date} error={fresh.errors.date} required />
   <Field form="log-new" name="precision" label="shown as" kind="select" value={fresh.values.precision} error={fresh.errors.precision} options={PRECISIONS}
-    hint="a month shows as jun 30, a day as 15.06.30." />
+    hint="month shows just the month and year, like oct 26; day shows the full date, like 04.10.26." />
   <Field form="log-new" name="text" label="entry" kind="textarea" value={fresh.values.text} error={fresh.errors.text} required maxlength={280} />
   <button type="submit" class="button">add</button>
 </form>

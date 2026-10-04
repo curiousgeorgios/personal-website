@@ -19,6 +19,7 @@ const groups = [
 ] as const;
 const full = active.length >= RECORD_CAP;
 const fresh = formState(failure, "record-new", { title: "", artist: "" });
+// An add that just failed on a full crate has already said so in the alert, so the hint below shows only without one
 const cover = (key: string) => `/media/${key}`;
 ---
 <p class="count">{active.length} of {RECORD_CAP} in the crate</p>
@@ -63,7 +64,7 @@ const cover = (key: string) => `/media/${key}`;
   <summary>add a record</summary>
   {fresh.errors.form && <p class="error" role="alert">{fresh.errors.form}</p>}
   {full ? (
-    <p class="hint">the crate holds six records. deactivate one to add another.</p>
+    !fresh.errors.form && <p class="hint">the crate holds six records. deactivate one to add another.</p>
   ) : (
     <form method="post" action="/admin/#record-new" enctype="multipart/form-data" class="admin-form">
       <input type="hidden" name="intent" value="record.create" />

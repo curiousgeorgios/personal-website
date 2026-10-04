@@ -13,19 +13,25 @@ interface Props {
   maxlength?: number;
   hint?: string;
   accept?: string;
+  /** For slugs and addresses: iOS autocorrect and spellcheck would rewrite or split them */
+  plain?: boolean;
 }
 
-const { form, name, label, value = "", error, kind = "text", options = [], required = false, maxlength, hint, accept } = Astro.props;
+const { form, name, label, value = "", error, kind = "text", options = [], required = false, maxlength, hint, accept, plain = false } = Astro.props;
 const id = `${form}-${name}`;
 const describedBy = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(" ") || undefined;
 const control = { id, name, required, "aria-invalid": error ? ("true" as const) : undefined, "aria-describedby": describedBy };
 // iOS capitalises the first letter of a text field; George writes in lowercase, so text, textarea and url turn that off
 const autocapitalize = kind === "text" || kind === "textarea" || kind === "url" ? "none" : undefined;
+// An address is never prose, so a url field is plain whether or not the caller says so
+const literal = plain || kind === "url";
+const autocorrect = literal ? "off" : undefined;
+const spellcheck = literal ? "false" : undefined;
 ---
 <div class:list={["field", { invalid: error }]}>
   <label for={id}>{label}</label>
   {kind === "textarea" ? (
-    <textarea {...control} autocapitalize={autocapitalize} maxlength={maxlength} rows="3">{value}</textarea>
+    <textarea {...control} autocapitalize={autocapitalize} autocorrect={autocorrect} spellcheck={spellcheck} maxlength={maxlength} rows="3">{value}</textarea>
   ) : kind === "select" ? (
     <select {...control}>
       {options.map(([option, text]) => <option value={option} selected={option === value}>{text}</option>)}
@@ -33,7 +39,7 @@ const autocapitalize = kind === "text" || kind === "textarea" || kind === "url" 
   ) : kind === "file" ? (
     <input {...control} type="file" accept={accept} />
   ) : (
-    <input {...control} type={kind} value={value} maxlength={maxlength} autocapitalize={autocapitalize} />
+    <input {...control} type={kind} value={value} maxlength={maxlength} autocapitalize={autocapitalize} autocorrect={autocorrect} spellcheck={spellcheck} />
   )}
   {hint && <p class="hint" id={`${id}-hint`}>{hint}</p>}
   {error && <p class="error" id={`${id}-error`}>{error}</p>}
