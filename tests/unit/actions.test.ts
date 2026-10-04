@@ -25,16 +25,24 @@ function fakeBucket(failOn?: RegExp) {
   return bucket;
 }
 
-// The Images binding: the WebP at each quality has the given size, or the input can't be read
+// The Images binding: the WebP at each quality has the given size, or the input can't be read. It records the options it
+// was given, so the tests can pin the 512px WebP the covers are meant to be.
 function fakeImages(sizeAt: (quality: number) => number | "unreadable") {
   const qualities: number[] = [];
+  const transforms: unknown[] = [];
+  const outputs: unknown[] = [];
   return {
     qualities,
+    transforms,
+    outputs,
     input: () => ({
-      transform() {
+      transform(options: unknown) {
+        transforms.push(options);
         return this;
       },
-      async output({ quality }: { quality: number }) {
+      async output(options: { quality: number }) {
+        const { quality } = options;
+        outputs.push(options);
         qualities.push(quality);
         const size = sizeAt(quality);
         if (size === "unreadable") throw new Error("ImagesError 9412: input is not an image");
@@ -151,6 +159,14 @@ describe("items", () => {
     expect(await submit({ intent: "item.remove", id, section: "now", confirm: "yes" })).toEqual({ ok: true, section: "now" });
     expect(await slugs()).not.toContain("good-people");
   });
+
+  test("removing a line that's already gone counts as removed (a double tap), but a bad id does not", async () => {
+    const id = await idOf("good-people");
+    const remove = { intent: "item.remove", id, section: "now", confirm: "yes" };
+    expect(await submit(remove)).toEqual({ ok: true, section: "now" });
+    expect(await submit(remove)).toEqual({ ok: true, section: "now" });
+    expect(await submit({ ...remove, id: "0" })).toMatchObject({ ok: false, errors: { form: "that line no longer exists" } });
+  });
 });
 
 describe("log", () => {
@@ -161,6 +177,14 @@ describe("log", () => {
     expect((await store.loadAdmin(db)).log[0]).toMatchObject({ date: "2026-11-01", text: "shipped it." });
     expect(await submit({ intent: "log.remove", id })).toMatchObject({ ok: false, form: `log-${id}`, errors: { confirm: "tick the box to remove it" } });
     expect(await submit({ intent: "log.remove", id, confirm: "yes" })).toEqual({ ok: true, section: "log" });
+  });
+
+  test("removing an entry that's already gone counts as removed (a double tap), but a bad id does not", async () => {
+    await submit({ intent: "log.create", date: "2026-10-05", precision: "day", text: "shipped." });
+    const id = String((await store.loadAdmin(db)).log[0].id);
+    expect(await submit({ intent: "log.remove", id, confirm: "yes" })).toEqual({ ok: true, section: "log" });
+    expect(await submit({ intent: "log.remove", id, confirm: "yes" })).toEqual({ ok: true, section: "log" });
+    expect(await submit({ intent: "log.remove", id: "abc", confirm: "yes" })).toMatchObject({ ok: false, errors: { form: "that entry no longer exists" } });
   });
 
   test("the same entry sent twice (a double tap) is saved once", async () => {
@@ -188,6 +212,10 @@ describe("lately", () => {
     expect((await store.loadAdmin(db)).facts).toEqual({ shelf: { title: "piranesi", subtitle: "susanna clarke" }, kettle: null });
   });
 
+  test("an unknown fact is reported for the page, since it has no form to show it on", async () => {
+    expect(await submit({ intent: "fact.save", key: "bogus", title: "x", subtitle: "" })).toEqual({ ok: false, section: null, form: "", errors: { form: "that fact isn't recognised" }, values: {} });
+  });
+
   test("a subtitle without a title comes back on that fact's form", async () => {
     expect(await submit({ intent: "fact.save", key: "shelf", title: "", subtitle: "susanna clarke" })).toMatchObject({ ok: false, form: "fact-shelf", errors: { title: "a title is needed, or clear both to hide it" } });
   });
@@ -200,6 +228,8 @@ describe("records", () => {
     expect(bucket.objects.get(KEYS.coverKey)?.length).toBe(20_000);
     expect(bucket.put).toHaveBeenCalledWith(KEYS.audioKey, expect.anything(), { httpMetadata: { contentType: "audio/mpeg" } });
     expect(bucket.put).toHaveBeenCalledWith(KEYS.coverKey, expect.anything(), { httpMetadata: { contentType: "image/webp" } });
+    expect(images.transforms).toEqual([{ width: 512, height: 512, fit: "cover" }]);
+    expect(images.outputs).toEqual([{ format: "image/webp", quality: 80 }]);
     expect((await store.loadAdmin(db)).records.at(-1)).toMatchObject({ title: "slow morning", artist: "home alone.", ...KEYS, active: true });
   });
 
@@ -260,6 +290,42 @@ describe("records", () => {
     expect(bucket.objects.size).toBe(0);
   });
 
+  test("if the rollback's delete fails too, it's logged and the failure is still reported", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    bucket = fakeBucket(/^covers\//);
+    bucket.delete.mockRejectedValueOnce(new Error("R2 is down"));
+    expect(await submit(record())).toMatchObject({ ok: false, form: "record-new", errors: { form: "couldn't save that record, so nothing was kept. try again." } });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("couldn't delete"), expect.any(Error));
+  });
+
+  // The insert commits, then the connection drops before D1 answers
+  const insertThenThrow = () => {
+    const insert = store.createRecord;
+    vi.spyOn(store, "createRecord").mockImplementation(async (database, meta) => {
+      await insert(database, meta);
+      throw new Error("connection dropped");
+    });
+  };
+
+  test("if the insert throws after the row was written, the record counts as saved and keeps its files", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    insertThenThrow();
+    expect(await submit(record())).toEqual({ ok: true, section: "records" });
+    expect(await store.recordWithAudio(db, KEYS.audioKey)).toBe(true);
+    expect(bucket.delete).not.toHaveBeenCalled();
+    expect([...bucket.objects.keys()].sort()).toEqual([KEYS.audioKey, KEYS.coverKey]);
+  });
+
+  test("if it can't tell whether the row was written, the files are kept and the failure is reported", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    insertThenThrow();
+    vi.spyOn(store, "recordWithAudio").mockRejectedValue(new Error("D1 is down"));
+    expect(await submit(record())).toMatchObject({ ok: false, form: "record-new", errors: { form: "couldn't save that record, so nothing was kept. try again." } });
+    expect(bucket.delete).not.toHaveBeenCalled();
+    expect(bucket.objects.size).toBe(2);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("couldn't check"), expect.any(Error));
+  });
+
   test("the same record sent twice (a double tap) is added once, uploading once", async () => {
     expect(await submit(record())).toEqual({ ok: true, section: "records" });
     expect(await submit(record())).toEqual({ ok: true, section: "records" });
@@ -274,6 +340,7 @@ describe("records", () => {
     });
     expect(await submit(record())).toEqual({ ok: true, section: "records" });
     expect((await store.loadAdmin(db)).records.filter((entry) => entry.title === "slow morning")).toHaveLength(1);
+    expect(bucket.delete).toHaveBeenCalledWith([KEYS.audioKey, KEYS.coverKey]);
     expect(bucket.objects.size).toBe(0);
   });
 
@@ -283,6 +350,7 @@ describe("records", () => {
       return {};
     });
     expect(await submit(record())).toMatchObject({ ok: false, form: "record-new", errors: { form: "the crate holds six records. deactivate one to add another." } });
+    expect(bucket.delete).toHaveBeenCalledWith([KEYS.audioKey, KEYS.coverKey]);
     expect(bucket.objects.size).toBe(0);
     expect(await store.activeRecordCount(db)).toBe(6);
   });
@@ -302,6 +370,21 @@ describe("records", () => {
     expect(await submit({ intent: "record.activate", id: "1" })).toMatchObject({ ok: false, form: "record-1", errors: { form: "the crate holds six records. deactivate one first." } });
   });
 
+  test("activating an active record, or deactivating an inactive one, counts as done (a double tap)", async () => {
+    await addRecords(2);
+    expect(await store.activeRecordCount(db)).toBe(6);
+    expect(await submit({ intent: "record.activate", id: "1" })).toEqual({ ok: true, section: "records" });
+    await store.setRecordActive(db, 1, false);
+    expect(await submit({ intent: "record.deactivate", id: "1" })).toEqual({ ok: true, section: "records" });
+    expect(await store.activeRecordCount(db)).toBe(5);
+  });
+
+  test("a record that's gone can't be activated or deactivated", async () => {
+    for (const intent of ["record.activate", "record.deactivate"]) {
+      expect(await submit({ intent, id: "999" })).toMatchObject({ ok: false, section: null, errors: { form: "that record no longer exists" } });
+    }
+  });
+
   test("moves a record", async () => {
     expect(await submit({ intent: "record.move", id: "2", direction: "up" })).toEqual({ ok: true, section: "records" });
     expect((await store.loadAdmin(db)).records[0].id).toBe(2);
@@ -315,6 +398,12 @@ describe("records", () => {
     expect(await submit({ intent: "record.remove", id: "1", confirm: "yes" })).toEqual({ ok: true, section: "records" });
     expect(await store.getRecord(db, 1)).toBeNull();
     expect(bucket.objects.size).toBe(0);
+  });
+
+  test("removing a record that's already gone counts as removed (a double tap), but a bad id does not", async () => {
+    expect(await submit({ intent: "record.remove", id: "1", confirm: "yes" })).toEqual({ ok: true, section: "records" });
+    expect(await submit({ intent: "record.remove", id: "1", confirm: "yes" })).toEqual({ ok: true, section: "records" });
+    expect(await submit({ intent: "record.remove", id: "-3", confirm: "yes" })).toMatchObject({ ok: false, errors: { form: "that record no longer exists" } });
   });
 });
 

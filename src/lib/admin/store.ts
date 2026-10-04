@@ -319,6 +319,11 @@ export async function recordInCrate(db: D1Database, meta: RecordMeta): Promise<b
   return found !== null;
 }
 
+/** Whether a record row uses this audio key: after a failed add, tells whether the insert landed anyway */
+export async function recordWithAudio(db: D1Database, audioKey: string): Promise<boolean> {
+  return (await db.prepare("SELECT id FROM records WHERE audio_key = ?").bind(audioKey).first()) !== null;
+}
+
 export async function updateRecord(db: D1Database, id: number, meta: RecordMeta): Promise<boolean> {
   return (await db.prepare("UPDATE records SET title = ?, artist = ? WHERE id = ?").bind(meta.title, meta.artist, id).run()).meta.changes > 0;
 }

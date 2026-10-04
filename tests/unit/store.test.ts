@@ -204,6 +204,13 @@ describe("records", () => {
     expect(await store.activeRecordCount(db)).toBe(6);
   });
 
+  test("tells whether a record row uses an audio key", async () => {
+    expect(await store.recordWithAudio(db, record.audioKey)).toBe(false);
+    await store.createRecord(db, record);
+    expect(await store.recordWithAudio(db, record.audioKey)).toBe(true);
+    expect(await store.recordWithAudio(db, "audio/other.mp3")).toBe(false);
+  });
+
   test("deactivated records sort after the active ones", async () => {
     expect(await store.setRecordActive(db, 1, false)).toBe(true);
     expect(await store.activeRecordCount(db)).toBe(3);

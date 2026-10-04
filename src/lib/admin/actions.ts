@@ -120,8 +120,9 @@ async function removeItem(form: FormData, { db }: ActionDeps): Promise<ActionRes
   const id = idOf(form);
   if (id === null) return gone("line");
   if (!confirmed(form)) return fail(sectionOf(form), `item-${id}`, CONFIRM);
+  // A line that's already gone counts as removed: a double tap sends the remove twice
   const section = await store.removeItem(db, id);
-  return section ? { ok: true, section } : gone("line");
+  return { ok: true, section: section ?? sectionOf(form) };
 }
 
 // Log entries
@@ -147,7 +148,9 @@ async function removeLogEntry(form: FormData, { db }: ActionDeps): Promise<Actio
   const id = idOf(form);
   if (id === null) return gone("entry");
   if (!confirmed(form)) return fail("log", `log-${id}`, CONFIRM);
-  return (await store.removeLogEntry(db, id)) ? { ok: true, section: "log" } : gone("entry");
+  // Already gone counts as removed, for a double tap
+  await store.removeLogEntry(db, id);
+  return { ok: true, section: "log" };
 }
 
 // Lately
@@ -155,6 +158,8 @@ async function removeLogEntry(form: FormData, { db }: ActionDeps): Promise<Actio
 async function saveFact(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
   const fields = readFields(form, FACT_FIELDS);
   const checked = checkFact(fields);
+  // An unknown key has no form on the page to show a message on
+  if (!checked.ok && checked.errors.key) return fail(null, "", { form: "that fact isn't recognised" });
   if (!checked.ok) return fail("lately", `fact-${fields.key}`, checked.errors, fields);
   await store.saveFact(db, checked.value.key, checked.value.fact);
   return { ok: true, section: "lately" };
@@ -189,20 +194,38 @@ async function createRecord(form: FormData, deps: ActionDeps): Promise<ActionRes
   if (!webp) return fail("records", "record-new", { cover: "that cover won't shrink under 40KB" }, fields);
 
   const keys = (deps.keys ?? newMediaKeys)();
-  let id: number;
+  const fileKeys = [keys.audioKey, keys.coverKey];
+  const notSaved = () => fail("records", "record-new", { form: "couldn't save that record, so nothing was kept. try again." }, fields);
   try {
     await deps.media.put(keys.audioKey, audio as File, { httpMetadata: { contentType: "audio/mpeg" } });
     await deps.media.put(keys.coverKey, webp, { httpMetadata: { contentType: "image/webp" } });
-    id = await store.createRecord(deps.db, { ...checked.value, ...keys });
   } catch (error) {
     // All or nothing: no row without its files, and no files without their row
-    console.error("admin: saving a record failed", error);
-    await deleteFiles(deps.media, [keys.audioKey, keys.coverKey], "a failed record's files");
-    return fail("records", "record-new", { form: "couldn't save that record, so nothing was kept. try again." }, fields);
+    console.error("admin: storing a record's files failed", error);
+    await deleteFiles(deps.media, fileKeys, "a failed record's files");
+    return notSaved();
+  }
+  let id: number;
+  try {
+    id = await store.createRecord(deps.db, { ...checked.value, ...keys });
+  } catch (error) {
+    console.error("admin: saving a record's row failed", error);
+    // A throw doesn't prove the row wasn't written (it may have committed before the connection dropped), and deleting
+    // the files of a row that exists would break it. So look first, and keep the files if we can't tell.
+    let written: boolean;
+    try {
+      written = await store.recordWithAudio(deps.db, keys.audioKey);
+    } catch (checkError) {
+      console.error("admin: couldn't check whether the record saved, so its files were kept", checkError);
+      return notSaved();
+    }
+    if (written) return { ok: true, section: "records" };
+    await deleteFiles(deps.media, fileKeys, "a failed record's files");
+    return notSaved();
   }
   if (id === 0) {
     // Nothing was added: the same record arrived while this one uploaded (a double tap), or the crate filled meanwhile
-    await deleteFiles(deps.media, [keys.audioKey, keys.coverKey], "an unneeded record's files");
+    await deleteFiles(deps.media, fileKeys, "an unneeded record's files");
     return (await store.recordInCrate(deps.db, checked.value)) ? { ok: true, section: "records" } : full;
   }
   return { ok: true, section: "records" };
@@ -225,6 +248,10 @@ async function moveRecord(form: FormData, { db }: ActionDeps): Promise<ActionRes
 async function setRecordActive(form: FormData, { db }: ActionDeps, active: boolean): Promise<ActionResult> {
   const id = idOf(form);
   if (id === null) return gone("record");
+  const record = await store.getRecord(db, id);
+  if (!record) return gone("record");
+  // Already in that state counts as done: a double-tapped activate that filled the crate must not read as a refusal
+  if (record.active === active) return { ok: true, section: "records" };
   if (active && (await store.activeRecordCount(db)) >= store.RECORD_CAP) {
     return fail("records", `record-${id}`, { form: "the crate holds six records. deactivate one first." });
   }
@@ -236,7 +263,8 @@ async function removeRecord(form: FormData, { db, media }: ActionDeps): Promise<
   if (id === null) return gone("record");
   if (!confirmed(form)) return fail("records", `record-${id}`, CONFIRM);
   const record = await store.getRecord(db, id);
-  if (!record || !(await store.removeRecord(db, id))) return gone("record");
+  // Already gone counts as removed, for a double tap; whoever removed it deletes its files
+  if (!record || !(await store.removeRecord(db, id))) return { ok: true, section: "records" };
   // The row goes first, so the logbook never points at a missing file
   await deleteFiles(media, [record.audioKey, record.coverKey], "a record's files");
   return { ok: true, section: "records" };
