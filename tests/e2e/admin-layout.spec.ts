@@ -13,7 +13,11 @@ test("the admin page fits a phone: the logbook's order, no sideways scrolling an
   const fontSizes = await page
     .locator(".field input, .field textarea, .field select")
     .evaluateAll((fields) => fields.map((field) => parseFloat(getComputedStyle(field).fontSize)));
+  // An empty list would make Math.min Infinity and pass, so check the page has fields and buttons at all
+  expect(fontSizes.length).toBeGreaterThan(0);
   expect(Math.min(...fontSizes)).toBeGreaterThanOrEqual(16);
   const heights = await page.locator(".button").evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
-  expect(Math.min(...heights)).toBeGreaterThanOrEqual(40);
+  expect(heights.length).toBeGreaterThan(0);
+  // 44px, the CSS floor for .button
+  expect(Math.min(...heights)).toBeGreaterThanOrEqual(44);
 });

@@ -24,7 +24,7 @@ bun run check
 
 ## The admin page
 
-`/admin` sits behind Cloudflare Access. Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "within five minutes" locally, because there's no cache to purge.
+`/admin` sits behind Cloudflare Access. Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "it's on the logbook now" there, because the dev server's cache accepts the purge and does nothing. Against a built Worker under `wrangler dev` (the end-to-end servers on ports 4331 to 4333) there's no cache to purge, so saves say "the logbook shows it within five minutes".
 
 ## Notes
 

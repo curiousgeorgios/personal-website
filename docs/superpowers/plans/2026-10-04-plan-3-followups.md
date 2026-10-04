@@ -12,7 +12,7 @@ What plan 3 (the admin page) found or left for later, by where it belongs.
 ## Later
 
 - A record's files can't be replaced: remove the record and add it again.
-- If deleting a removed record's files fails, the row is already gone and the files stay in R2 (logged as "admin: couldn't delete a record's files").
+- If deleting a record's files fails, the files stay in R2 and only a log line says so ("admin: couldn't delete a record's files" after a removal, "... a failed record's files" or "... an unneeded record's files" after an add). After a removal the row is already gone. And if a record's insert throws and the check for whether it saved also throws, the files are kept on purpose, since deleting the files of a row that exists would break it (logged as "admin: couldn't check whether the record saved, so its files were kept").
 - Reloading the page after a save shows the "saved" line again, because it comes from the address.
 - If D1 fails, `/admin` shows Astro's error page rather than a notebook-style message.
 - A save from a stale page, for a line, entry or record removed elsewhere, that also has a field problem comes back 422 with no message, because its form isn't on the page any more.
