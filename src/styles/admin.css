@@ -83,3 +83,4 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 @media (max-width: 680px) {
   .entry { grid-template-columns: minmax(0, 1fr); }
 }
+.entry .when { font: 12.5px/1.55 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }

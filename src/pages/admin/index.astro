@@ -4,6 +4,7 @@ import Notebook from "../../layouts/Notebook.astro";
 import Row from "../../components/Row.astro";
 import AdminRow from "../../components/admin/AdminRow.astro";
 import ItemsAdmin from "../../components/admin/ItemsAdmin.astro";
+import LogAdmin from "../../components/admin/LogAdmin.astro";
 import LatelyAdmin from "../../components/admin/LatelyAdmin.astro";
 import SnapshotsAdmin from "../../components/admin/SnapshotsAdmin.astro";
 import type { ActionFailure, AdminSection } from "../../lib/admin/actions";
@@ -40,6 +41,7 @@ const notice = (section: AdminSection) => (section === saved ? savedLine : null)
     </Row>
     <AdminRow label="now" id="now" notice={notice("now")}><ItemsAdmin section="now" items={data.now} failure={failure} /></AdminRow>
     <AdminRow label="lately" id="lately" notice={notice("lately")}><LatelyAdmin facts={data.facts} failure={failure} /></AdminRow>
+    <AdminRow label="log" id="log" notice={notice("log")}><LogAdmin entries={data.log} failure={failure} /></AdminRow>
     <AdminRow label="before" id="before" notice={notice("before")}><ItemsAdmin section="before" items={data.before} failure={failure} /></AdminRow>
     <Row label="snapshots" id="snapshots"><SnapshotsAdmin items={[...data.now, ...data.before]} /></Row>
   </main>
