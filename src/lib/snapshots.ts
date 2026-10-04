@@ -14,9 +14,10 @@ const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2
 
 /** One line for the admin page: when the page was last captured, or why the last try failed (a failure keeps the old image) */
 export function describeSnapshot(status: string | null, at: string | null): string {
-  const day = at ? SYDNEY_DAY.format(new Date(at)) : null;
+  const date = at ? new Date(at) : null;
+  const day = date && !Number.isNaN(date.getTime()) ? SYDNEY_DAY.format(date) : null;
   if (!status) return "not captured yet";
   if (status === "ok") return day ? `captured ${day}` : "captured";
-  const reason = status in SNAPSHOT_STATUSES ? SNAPSHOT_STATUSES[status as SnapshotStatus] : status;
+  const reason = Object.hasOwn(SNAPSHOT_STATUSES, status) ? SNAPSHOT_STATUSES[status as SnapshotStatus] : status;
   return day ? `${reason} · last good capture ${day}` : `${reason} · no good capture yet`;
 }

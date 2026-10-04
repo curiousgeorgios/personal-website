@@ -7,6 +7,10 @@ test.each([
   ["challenge", "2026-10-01T17:00:00.000Z", "a bot check blocked it · last good capture 2026-10-02"],
   ["too-small", null, "the capture came out blank · no good capture yet"],
   ["something-new", null, "something-new · no good capture yet"],
+  ["ok", "not a date", "captured"],
+  [null, "not a date", "not captured yet"],
+  ["toString", null, "toString · no good capture yet"],
+  ["ok", null, "captured"],
 ])("%s at %s reads %s", (status, at, expected) => {
   expect(describeSnapshot(status, at)).toBe(expected);
 });

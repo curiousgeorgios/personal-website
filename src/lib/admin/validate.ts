@@ -29,7 +29,7 @@ export const ITEM_FIELDS = ["section", "slug", "text", "aside", "label_status", 
 const LABEL_FIELDS = ["label_era", "label_made_of", "label_text", "label_kind", "label_note", "snapshot_url"] as const;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // Anything shaped like a link, so mistakes can be named (the page's parser only links https: and mailto:, src/lib/text.ts)
-const LINK = /\[([^\]\n]*)\]\(([^)\s]*)\)/g;
+const LINK = /\[([^\]\n]*)\]\(([^)\n]*)\)/g;
 
 export interface ItemLabel {
   status: "live" | "retired";
@@ -51,15 +51,20 @@ export interface ItemInput {
 
 /** What's wrong with a line's links, or null; the inline parser stops a link at its first ")" (plan 1 follow-up) */
 export function linkProblem(text: string): string | null {
-  for (const [, label, href] of text.matchAll(LINK)) {
-    if (label === "") return "a link needs some text between the [ ]";
+  for (const match of text.matchAll(LINK)) {
+    const [fullMatch, label, href] = match;
+    if (label.trim() === "") return "a link needs some text between the [ ]";
     if (href.includes("(")) return "a link's address can't contain brackets";
+    if (/\s/.test(href)) return "a link's address can't contain spaces";
     if (!/^(https:\/\/|mailto:)\S+$/.test(href)) return "links need an https:// or mailto: address";
+    const afterMatch = text[match.index! + fullMatch.length];
+    if (afterMatch === ")") return "a link's address can't contain brackets";
   }
   return null;
 }
 
 function isHttpsUrl(value: string): boolean {
+  if (!/^https:\/\/[^\s/?#]+[^\s]*$/.test(value)) return false;
   try {
     return new URL(value).protocol === "https:";
   } catch {

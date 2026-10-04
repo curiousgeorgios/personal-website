@@ -47,6 +47,10 @@ describe("linkProblem", () => {
     ["a relative link", "[x](/about)", "links need an https:// or mailto: address"],
     ["brackets in the address", "[x](https://en.wikipedia.org/wiki/Foo_(bar))", "a link's address can't contain brackets"],
     ["empty link text", "[](https://example.com)", "a link needs some text between the [ ]"],
+    ["whitespace-only link text", "[ ](https://example.com)", "a link needs some text between the [ ]"],
+    ["space in the address", "[x](https://a.com/b c)", "a link's address can't contain spaces"],
+    ["space before address", "[x]( https://example.com)", "a link's address can't contain spaces"],
+    ["closing paren after the link", "[x](https://a.com)))", "a link's address can't contain brackets"],
   ])("%s", (_name, text, expected) => {
     expect(linkProblem(text)).toBe(expected);
   });
@@ -72,6 +76,14 @@ describe("checkItem", () => {
     expect(checkItem(item({ text: "<b>bold</b> & lépi" })).ok).toBe(true);
   });
 
+  test("accepts a 40-character slug", () => {
+    expect(checkItem(item({ slug: "a".repeat(40) })).ok).toBe(true);
+  });
+
+  test("accepts a 240-character text", () => {
+    expect(checkItem(item({ text: "x".repeat(240) })).ok).toBe(true);
+  });
+
   test.each([
     ["section", { section: "later" }, "choose now or before"],
     ["slug", { slug: "" }, "a slug is needed"],
@@ -90,6 +102,9 @@ describe("checkItem", () => {
     ["label_kind", { label_status: "live", label_note: "x" }, "say whether this is a decision or a lesson"],
     ["snapshot_url", { label_status: "live", snapshot_url: "http://example.com" }, "an https:// address"],
     ["snapshot_url", { label_status: "live", snapshot_url: "not a url" }, "an https:// address"],
+    ["snapshot_url", { label_status: "live", snapshot_url: "https:example.com" }, "an https:// address"],
+    ["snapshot_url", { label_status: "live", snapshot_url: "https:///example.com" }, "an https:// address"],
+    ["snapshot_url", { label_status: "live", snapshot_url: "https://example.com/a b" }, "an https:// address"],
     ["label_text", { label_status: "retired", label_text: "x".repeat(401) }, "400 characters at most"],
   ])("refuses a bad %s (%j)", (field, overrides, message) => {
     expect(refusal(checkItem(item(overrides)), field)).toBe(message);
@@ -172,6 +187,15 @@ describe("checkUpload", () => {
     ["an svg named .png", new File(['<svg xmlns="http://www.w3.org/2000/svg"/>'], "cover.png"), "cover", "covers can be JPEG, PNG or WebP"],
   ] as const)("refuses %s", async (_name, value, kind, message) => {
     expect(await checkUpload(value, kind)).toBe(message);
+  });
+
+  test("accepts files at their limits", async () => {
+    const mp3AtLimit = new Uint8Array(15 * 1024 * 1024);
+    mp3AtLimit.set([0x49, 0x44, 0x33, 4, 0]);
+    expect(await checkUpload(new File([mp3AtLimit], "song.mp3"), "audio")).toBeNull();
+    const pngAtLimit = new Uint8Array(10 * 1024 * 1024);
+    pngAtLimit.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(await checkUpload(new File([pngAtLimit], "cover.png"), "cover")).toBeNull();
   });
 
   test("refuses files over their limits", async () => {

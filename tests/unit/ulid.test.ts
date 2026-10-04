@@ -13,6 +13,11 @@ test("starts with the time, so keys sort by upload time", () => {
   expect(ulid(1_700_000_000_000, zeros) < ulid(1_800_000_000_000, zeros)).toBe(true);
 });
 
+test("encodes the timestamp correctly", () => {
+  expect(ulid(1, zeros)).toMatch(/^0000000001/);
+  expect(ulid(32, zeros)).toMatch(/^0000000010/);
+});
+
 test("two ids from the same millisecond differ", () => {
   expect(ulid(5)).not.toBe(ulid(5));
 });
