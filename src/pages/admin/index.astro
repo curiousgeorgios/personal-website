@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import Notebook from "../../layouts/Notebook.astro";
 import Row from "../../components/Row.astro";
 import AdminRow from "../../components/admin/AdminRow.astro";
+import ItemsAdmin from "../../components/admin/ItemsAdmin.astro";
 import LatelyAdmin from "../../components/admin/LatelyAdmin.astro";
 import SnapshotsAdmin from "../../components/admin/SnapshotsAdmin.astro";
 import type { ActionFailure, AdminSection } from "../../lib/admin/actions";
@@ -37,7 +38,9 @@ const notice = (section: AdminSection) => (section === saved ? savedLine : null)
       <h1>admin</h1>
       <p class="where">signed in as {Astro.locals.adminEmail} · <a href="/">the logbook</a></p>
     </Row>
+    <AdminRow label="now" id="now" notice={notice("now")}><ItemsAdmin section="now" items={data.now} failure={failure} /></AdminRow>
     <AdminRow label="lately" id="lately" notice={notice("lately")}><LatelyAdmin facts={data.facts} failure={failure} /></AdminRow>
+    <AdminRow label="before" id="before" notice={notice("before")}><ItemsAdmin section="before" items={data.before} failure={failure} /></AdminRow>
     <Row label="snapshots" id="snapshots"><SnapshotsAdmin items={[...data.now, ...data.before]} /></Row>
   </main>
 </Notebook>

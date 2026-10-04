@@ -1,0 +1,61 @@
+---
+import ItemFields from "./ItemFields.astro";
+import MoveForm from "./MoveForm.astro";
+import RemoveForm from "./RemoveForm.astro";
+import { formState, itemFields } from "../../lib/admin/form-state";
+import type { ActionFailure } from "../../lib/admin/actions";
+import type { AdminItem } from "../../lib/admin/store";
+import type { Section } from "../../lib/logbook";
+
+interface Props {
+  section: Section;
+  items: AdminItem[];
+  failure: ActionFailure | null;
+}
+
+const { section, items, failure } = Astro.props;
+const newId = `item-new-${section}`;
+const fresh = formState(failure, newId, {
+  section,
+  slug: "",
+  text: "",
+  aside: "",
+  label_status: "",
+  label_era: "",
+  label_made_of: "",
+  label_text: "",
+  label_kind: "",
+  label_note: "",
+  snapshot_url: "",
+});
+---
+{items.length === 0 && <p class="empty">nothing here yet.</p>}
+<ol class="entries">
+  {items.map((item, index) => {
+    const id = `item-${item.id}`;
+    const state = formState(failure, id, itemFields(item));
+    return (
+      <li class="entry" data-slug={item.slug}>
+        <details id={id} open={state.open}>
+          <summary><span class="what">{item.text}</span>{item.labelStatus && <span class="tagged">label</span>}</summary>
+          <form method="post" action={`/admin/#${id}`} class="admin-form">
+            <input type="hidden" name="intent" value="item.update" />
+            <input type="hidden" name="id" value={item.id} />
+            <ItemFields form={id} state={state} />
+            <button type="submit" class="button">save</button>
+          </form>
+          <RemoveForm form={id} intent="item.remove" id={item.id} section={section} confirm="yes, remove this line" error={state.errors.confirm} />
+        </details>
+        <MoveForm intent="item.move" id={item.id} name={item.slug} section={section} first={index === 0} last={index === items.length - 1} />
+      </li>
+    );
+  })}
+</ol>
+<details id={newId} class="add" open={fresh.open}>
+  <summary>add a line to {section}</summary>
+  <form method="post" action={`/admin/#${newId}`} class="admin-form">
+    <input type="hidden" name="intent" value="item.create" />
+    <ItemFields form={newId} state={fresh} />
+    <button type="submit" class="button">add</button>
+  </form>
+</details>
