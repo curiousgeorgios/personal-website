@@ -38,3 +38,12 @@ test("cookies none, storage empty, every request first party", async ({ page, ba
   expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   expect(await page.context().cookies()).toEqual([]);
 });
+
+// Only against a deployed site: the local test build's Access bypass answers /admin/ with the page, by design.
+// Before the Access application exists the Worker itself refuses (403); afterwards Access answers with a redirect to its
+// sign-in. Either way, an anonymous visitor must never get the page.
+test("an anonymous request to /admin/ is never served the page", async ({ request }) => {
+  test.skip(!process.env.PLAYWRIGHT_BASE_URL, "the local test build skips Access");
+  const response = await request.get("/admin/", { maxRedirects: 0 });
+  expect(response.status(), "/admin/ answered an anonymous visitor").not.toBe(200);
+});

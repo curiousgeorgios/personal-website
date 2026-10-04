@@ -22,6 +22,8 @@ test("adds an entry, dated today in Sydney unless changed, newest first on the l
   await openLogbook(page);
   const shown = page.locator("#log li", { hasText: text });
   await expect(shown.locator("time")).toHaveText("15.06.30");
+  // 2030 is later than anything seeded or saved by another spec, so it leads the list
+  await expect(page.locator("#log .log > ul > li").first()).toContainText(text);
   await expect(page.locator(".where")).toContainText("last entry 15.06.30");
 });
 
