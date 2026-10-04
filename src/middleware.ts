@@ -11,8 +11,9 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 };
 
-const refuse = (message: string) =>
-  new Response(message, { status: 403, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+const plain = (message: string, status: number) =>
+  new Response(message, { status, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+const refuse = (message: string) => plain(message, 403);
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const { request, url } = context;
@@ -29,7 +30,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
     else email = await adminIdentity(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD });
     if (email) {
       context.locals.adminEmail = email;
-      response = await next();
+      try {
+        response = await next();
+      } catch (error) {
+        // A page that throws (D1 down, say) would otherwise skip the headers below and leave a blank 500
+        console.error("admin: the page failed to render", error);
+        response = plain("the admin page couldn't load. try again.", 500);
+      }
     } else {
       response = refuse("forbidden");
     }
