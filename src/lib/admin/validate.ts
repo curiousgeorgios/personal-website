@@ -52,13 +52,11 @@ export interface ItemInput {
 /** What's wrong with a line's links, or null; the inline parser stops a link at its first ")" (plan 1 follow-up) */
 export function linkProblem(text: string): string | null {
   for (const match of text.matchAll(LINK)) {
-    const [fullMatch, label, href] = match;
+    const [, label, href] = match;
     if (label.trim() === "") return "a link needs some text between the [ ]";
     if (href.includes("(")) return "a link's address can't contain brackets";
     if (/\s/.test(href)) return "a link's address can't contain spaces";
     if (!/^(https:\/\/|mailto:)\S+$/.test(href)) return "links need an https:// or mailto: address";
-    const afterMatch = text[match.index! + fullMatch.length];
-    if (afterMatch === ")") return "a link's address can't contain brackets";
   }
   return null;
 }

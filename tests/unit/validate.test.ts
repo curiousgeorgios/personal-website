@@ -50,7 +50,7 @@ describe("linkProblem", () => {
     ["whitespace-only link text", "[ ](https://example.com)", "a link needs some text between the [ ]"],
     ["space in the address", "[x](https://a.com/b c)", "a link's address can't contain spaces"],
     ["space before address", "[x]( https://example.com)", "a link's address can't contain spaces"],
-    ["closing paren after the link", "[x](https://a.com)))", "a link's address can't contain brackets"],
+    ["link inside brackets", "(see [x](https://a.com))", null],
   ])("%s", (_name, text, expected) => {
     expect(linkProblem(text)).toBe(expected);
   });
