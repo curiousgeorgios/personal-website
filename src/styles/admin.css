@@ -22,9 +22,9 @@
 }
 
 .admin-form { display: grid; gap: 12px; padding: 12px 0 20px; max-width: 34rem; }
-/* The fragment scroll after a failed post lands here, and the stuck page message (one or two lines) mustn't cover it */
-.admin-form, .admin details { scroll-margin-top: 4.5rem; }
-/* Focus scrolls (tabbing to a control) clear the stuck message too, not only the fragment scroll */
+/* Breathing room above a form the fragment scroll lands on. With a stuck page message showing, scroll-padding clears it
+   (for the fragment scroll and for focus scrolls alike), so the two don't add up. */
+.admin-form, .admin details { scroll-margin-top: 1rem; }
 html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .field { display: grid; gap: 4px; min-width: 0; }
 .field label { font: 12px/1.5 var(--mono); color: var(--muted); }
@@ -69,15 +69,15 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .entries { border-top: 1px solid var(--rule); max-width: 40rem; }
 .entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 4px 0; border-bottom: 1px solid var(--rule); }
 .entry > details { min-width: 0; }
-.entry summary { cursor: pointer; padding: 8px 0; }
+.entry summary { cursor: pointer; padding: 8px 0; min-height: 44px; }
 .entry .tagged { margin-left: 8px; font: 11.5px/1 var(--mono); color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 7px; }
 .move { display: flex; gap: 6px; padding-top: 2px; }
 .add { margin-top: 16px; max-width: 40rem; }
-.add > summary { cursor: pointer; font: 12.5px/1.55 var(--mono); color: var(--muted); padding: 8px 0; }
+.add > summary { cursor: pointer; font: 12.5px/1.55 var(--mono); color: var(--muted); padding: 12px 0; min-height: 44px; }
 .label-fields { border: 0; border-top: 1px solid var(--rule); padding-top: 12px; display: grid; gap: 12px; min-width: 0; }
 .label-fields legend { font: 12px/1.5 var(--mono); color: var(--muted); padding-right: 8px; }
 .remove { border-top: 1px dashed var(--rule); }
-.confirm { display: flex; gap: 10px; align-items: center; font-size: 14.5px; }
+.confirm { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 14.5px; }
 .confirm input { width: 18px; height: 18px; accent-color: var(--error); }
 
 @media (max-width: 680px) {

@@ -5,9 +5,11 @@ import type { FormState } from "../../lib/admin/form-state";
 interface Props {
   form: string;
   state: FormState;
+  /** Edit forms can move a line to the other section. An add form is fixed to its own: a failure reopens the form for the posted section, which has to be the one the browser scrolled to. */
+  chooseSection?: boolean;
 }
 
-const { form, state } = Astro.props;
+const { form, state, chooseSection = true } = Astro.props;
 const { values, errors } = state;
 ---
 <Field form={form} name="text" label="line" kind="textarea" value={values.text} error={errors.text} required maxlength={240}
@@ -15,7 +17,9 @@ const { values, errors } = state;
 <Field form={form} name="aside" label="aside (after the dash)" value={values.aside} error={errors.aside} maxlength={80} />
 <Field form={form} name="slug" label="slug" value={values.slug} error={errors.slug} required maxlength={40}
   hint="lowercase-with-hyphens. used for analytics and the label's id." />
-<Field form={form} name="section" label="section" kind="select" value={values.section} error={errors.section} options={[["now", "now"], ["before", "before"]]} />
+{chooseSection
+  ? <Field form={form} name="section" label="section" kind="select" value={values.section} error={errors.section} options={[["now", "now"], ["before", "before"]]} />
+  : <input type="hidden" name="section" value={values.section} />}
 <fieldset class="label-fields">
   <legend>wall label (optional)</legend>
   <Field form={form} name="label_status" label="status" kind="select" value={values.label_status} error={errors.label_status}

@@ -17,6 +17,9 @@ async function addLine(page: Page, section: "now" | "before", slug: string, text
   await openAdmin(page);
   const form = `item-new-${section}`;
   await page.locator(`#${form} > summary`).click();
+  // An add form is fixed to its own section: with a select, a failure after switching it would reopen the other form
+  await expect(page.locator(`#${form}-section`)).toHaveCount(0);
+  await expect(page.locator(`#${form} input[name="section"]`)).toHaveValue(section);
   await page.locator(`#${form}-text`).fill(text);
   await page.locator(`#${form}-slug`).fill(slug);
   return submit(page, form, "add");
@@ -26,6 +29,9 @@ test("adds a line at the end of now, and the logbook shows its text escaped", as
   expect((await addLine(page, "now", garden, "started a <b>garden</b> club with [friends](https://example.com)")).status()).toBe(303);
   await expectSaved(page, "now");
   expect((await slugs(page, "now")).at(-1)).toBe(garden);
+  // The collapsed line shows the link text only; the textarea inside keeps the raw text
+  await expect(entry(page, garden).locator("summary .what")).toHaveText("started a <b>garden</b> club with friends");
+  await expect(entry(page, garden).locator("textarea[name='text']")).toHaveValue("started a <b>garden</b> club with [friends](https://example.com)");
 
   await openLogbook(page);
   const line = page.locator(`#now li[data-slug="${garden}"] .line`);
@@ -38,6 +44,7 @@ test("a taken slug comes back open, with what was typed", async ({ page }) => {
   expect((await addLine(page, "now", "digital-nachos", "a second digital nachos")).status()).toBe(422);
   await expect(page).toHaveURL(`${ADMIN}/admin/#item-new-now`);
   await expect(page.locator("#item-new-now")).toHaveAttribute("open", "");
+  await expect(page.locator("#item-new-now > [role=alert]")).toHaveText("1 thing to fix below");
   await expect(page.locator("#item-new-now-slug-error")).toHaveText("that slug is taken");
   await expect(page.locator("#item-new-now-slug")).toHaveValue("digital-nachos");
   await expect(page.locator("#item-new-now-text")).toHaveValue("a second digital nachos");
