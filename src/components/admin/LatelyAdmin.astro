@@ -22,8 +22,8 @@ const FACTS = [
     const id = `fact-${key}`;
     const state = formState(failure, id, factFields(key, facts[key]));
     return (
-      <form method="post" action={`/admin/#${id}`} id={id} class="admin-form">
-        <h3>{heading}</h3>
+      <form method="post" action={`/admin/#${id}`} id={id} class="admin-form" aria-labelledby={`${id}-heading`}>
+        <h3 id={`${id}-heading`}>{heading}</h3>
         <input type="hidden" name="intent" value="fact.save" />
         <input type="hidden" name="key" value={key} />
         <Field form={id} name="title" label="title" value={state.values.title} error={state.errors.title} maxlength={80} />

@@ -26,6 +26,25 @@ describe("Field", () => {
     expect(doc.querySelector(".field")!.classList.contains("invalid")).toBe(true);
   });
 
+  test("a hint alone is the control's whole description", async () => {
+    const doc = await render(Field, { form: "fact-shelf", name: "title", label: "title", hint: "clear both to hide it" });
+    expect(doc.querySelector("input")!.getAttribute("aria-describedby")).toBe("fact-shelf-title-hint");
+  });
+
+  test("with neither a hint nor a message, the control describes nothing", async () => {
+    const doc = await render(Field, { form: "fact-shelf", name: "title", label: "title" });
+    expect(doc.querySelector("input")!.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  test("text, textarea and url controls keep iOS from capitalising; the rest don't say", async () => {
+    const attribute = async (kind: string) => {
+      const doc = await render(Field, { form: "f", name: "n", label: "n", kind, options: [["a", "a"]] });
+      return doc.querySelector("input, textarea, select")!.getAttribute("autocapitalize");
+    };
+    expect(await Promise.all(["text", "textarea", "url"].map(attribute))).toEqual(["none", "none", "none"]);
+    expect(await Promise.all(["date", "select", "file"].map(attribute))).toEqual([null, null, null]);
+  });
+
   test("a select marks the saved choice", async () => {
     const options = [["", "none"], ["decision", "decision"], ["lesson", "lesson"]];
     const doc = await render(Field, { form: "item-1", name: "label_kind", label: "kind", kind: "select", value: "lesson", options });

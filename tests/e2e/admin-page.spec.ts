@@ -60,10 +60,27 @@ test("clearing both fields hides that half of lately", async ({ page }) => {
   await expect(page.locator("#lately")).not.toContainText("in the kettle");
 });
 
-test("a write the page can't place gets a message at the top and saves nothing", async ({ page }) => {
-  const response = await page.request.post(`${ADMIN}/admin/`, { form: { intent: "drop.tables" }, headers: { Origin: ADMIN } });
+test("a write the page can't place shows its message stuck at the top, in view, with the form the browser scrolled to below it", async ({ page }) => {
+  // A phone-sized window, so the second form starts below the fold and the fragment scroll has somewhere to go
+  await page.setViewportSize({ width: 390, height: 600 });
+  await openAdmin(page);
+  // Send what a stale or tampered page would: an action the server doesn't know
+  await page.route(`${ADMIN}/admin/`, (route) =>
+    route.request().method() === "POST" ? route.continue({ postData: "intent=drop.tables" }) : route.continue(),
+  );
+  const response = await submit(page, "fact-kettle");
   expect(response.status()).toBe(422);
   expect(response.headers()["cache-control"]).toBe("no-store");
-  // Astro escapes the apostrophe
-  expect(await response.text()).toMatch(/class="error page-error"[^>]*>that action isn(&#39;|')t recognised</);
+  await expect(page).toHaveURL(`${ADMIN}/admin/#fact-kettle`);
+
+  const banner = page.locator(".page-error");
+  await expect(banner).toHaveText("that action isn't recognised");
+  await expect(banner).toHaveAttribute("role", "alert");
+  // The browser scrolled down to the form; the message came with it, stuck to the top, and the form isn't under it
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect(banner).toBeInViewport();
+  const bannerBox = (await banner.boundingBox())!;
+  expect(bannerBox.y).toBe(0);
+  const formBox = (await page.locator("#fact-kettle").boundingBox())!;
+  expect(formBox.y).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
 });

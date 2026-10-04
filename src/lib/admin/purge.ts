@@ -7,7 +7,8 @@ export async function purgeLogbook(cache: { invalidate(options: { tags: string[]
     await cache.invalidate({ tags: ["logbook"] });
     return true;
   } catch (error) {
-    console.error("admin: couldn't purge the cached home page", error);
+    // One line: local runs fail this way on every save, and a stack would bury the rest of the log
+    console.error("admin: couldn't purge the cached home page", error instanceof Error ? error.message : String(error));
     return false;
   }
 }

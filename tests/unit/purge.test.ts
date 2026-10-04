@@ -10,6 +10,6 @@ test("purges the logbook tag and says it did", async () => {
 test("a purge that fails is reported, not thrown (local runs have no purge)", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   expect(await purgeLogbook({ invalidate: async () => Promise.reject(new TypeError("cache.purge is not a function")) })).toBe(false);
-  expect(error).toHaveBeenCalled();
+  expect(error).toHaveBeenCalledWith("admin: couldn't purge the cached home page", "cache.purge is not a function");
   error.mockRestore();
 });

@@ -5,44 +5,23 @@ import Row from "../../components/Row.astro";
 import AdminRow from "../../components/admin/AdminRow.astro";
 import LatelyAdmin from "../../components/admin/LatelyAdmin.astro";
 import SnapshotsAdmin from "../../components/admin/SnapshotsAdmin.astro";
-import { runAction, type ActionFailure, type ActionResult, type AdminSection } from "../../lib/admin/actions";
-import { purgeLogbook } from "../../lib/admin/purge";
+import type { ActionFailure, AdminSection } from "../../lib/admin/actions";
 import { loadAdmin } from "../../lib/admin/store";
+import { submitForm } from "../../lib/admin/submit";
 import "../../styles/admin.css";
 
 const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records"];
-const UNREADABLE: ActionFailure = { ok: false, section: null, form: "", errors: { form: "that form couldn't be read. try again." }, values: {} };
-const UNEXPECTED: ActionFailure = { ok: false, section: null, form: "", errors: { form: "couldn't save that. try again." }, values: {} };
 
 // Every write (spec 7). Success redirects with 303 (post, redirect, get), so a reload never repeats a write; a failure
-// renders the page again below with status 422 and the failed form open.
+// renders the page again below with its status (422, or 500 when something unexpected broke) and the failed form open.
 let failure: ActionFailure | null = null;
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData().catch(() => null);
-  let result: ActionResult;
-  let status = 422;
-  if (!form) {
-    result = UNREADABLE;
-  } else {
-    try {
-      const work = runAction(form, { db: env.DB, media: env.MEDIA, images: env.IMAGES });
-      // A double tap cancels the first request, and the runtime may cut a cancelled request's work off part way
-      // through a write; waitUntil lets it finish. The catch only keeps waitUntil quiet: the await below reports it.
-      Astro.locals.cfContext.waitUntil(work.catch(() => {}));
-      result = await work;
-    } catch (error) {
-      // Something unexpected (a lost connection, two edits racing for one slug): still answer with the page, as a 500
-      console.error("admin: a save failed unexpectedly", error);
-      result = UNEXPECTED;
-      status = 500;
-    }
-  }
-  if (result.ok) {
-    const purged = await purgeLogbook(Astro.cache);
-    return Astro.redirect(`/admin/?saved=${result.section}${purged ? "" : "&later=1"}#${result.section}`, 303);
-  }
-  failure = result;
-  Astro.response.status = status;
+  const deps = { db: env.DB, media: env.MEDIA, images: env.IMAGES };
+  const outcome = await submitForm(form, deps, Astro.cache, (promise) => Astro.locals.cfContext.waitUntil(promise));
+  if ("redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
+  failure = outcome.failure;
+  Astro.response.status = outcome.status;
 }
 
 const data = await loadAdmin(env.DB);
@@ -52,10 +31,11 @@ const notice = (section: AdminSection) => (section === saved ? savedLine : null)
 ---
 <Notebook title="admin · george vlachos" noindex>
   <main class="book admin">
+    {/* First in the page and stuck to the top: every form posts to its own #id, so the browser scrolls past the head row */}
+    {failure && failure.section === null && <p class="page-error" role="alert">{failure.errors.form}</p>}
     <Row label="admin" head>
       <h1>admin</h1>
       <p class="where">signed in as {Astro.locals.adminEmail} · <a href="/">the logbook</a></p>
-      {failure && failure.section === null && <p class="error page-error" role="alert">{failure.errors.form}</p>}
     </Row>
     <AdminRow label="lately" id="lately" notice={notice("lately")}><LatelyAdmin facts={data.facts} failure={failure} /></AdminRow>
     <Row label="snapshots" id="snapshots"><SnapshotsAdmin items={[...data.now, ...data.before]} /></Row>

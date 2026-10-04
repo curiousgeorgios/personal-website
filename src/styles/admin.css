@@ -2,24 +2,34 @@
 :root {
   /* --red is under 4.5:1 on paper for small text; this darker red is 5.6:1 */
   --error: #a83a24;
+  /* A form control's edge has to be 3:1 against the page (WCAG 1.4.11); --rule is 1.3:1, so it stays for decorative lines. This is 3.3:1 on paper and 3.6:1 on --mat */
+  --field-line: #85857d;
 }
 
 .admin h3 { font: 400 12.5px/1.55 var(--mono); color: var(--muted); }
 .admin .hint { font-size: 14px; color: var(--muted); }
 .admin .error { font-size: 14px; color: var(--error); }
-.admin .page-error { margin-top: 14px; }
+/* A message about the page, not one form: first in the page and stuck to the top, because a failed post reloads at its
+   own form's #id and would scroll it out of sight above the viewport */
+.admin .page-error {
+  position: sticky; top: 0; z-index: 1;
+  font-size: 14px; line-height: 1.5; color: var(--error); background: var(--mat);
+  border: 1px solid var(--error); border-radius: 4px; padding: 10px 14px; margin-bottom: 14px;
+}
 .admin .notice {
   font: 12.5px/1.55 var(--mono); color: var(--ink); background: var(--mat);
   border: 1px solid var(--rule); border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; max-width: 34rem;
 }
 
 .admin-form { display: grid; gap: 12px; padding: 12px 0 20px; max-width: 34rem; }
+/* The fragment scroll after a failed post lands here, and the stuck page message (one or two lines) mustn't cover it */
+.admin-form, .admin details { scroll-margin-top: 4.5em; }
 .field { display: grid; gap: 4px; min-width: 0; }
 .field label { font: 12px/1.5 var(--mono); color: var(--muted); }
 .field input, .field textarea, .field select {
   /* 16px keeps iOS from zooming into a focused field */
   font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink);
-  background: var(--mat); border: 1px solid var(--rule); border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0;
+  background: var(--mat); border: 1px solid var(--field-line); border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0;
 }
 .field textarea { resize: vertical; min-height: 4.6em; }
 .field input[type="file"] { background: transparent; padding: 6px 0; border: 0; }
@@ -27,9 +37,11 @@
 .field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible, .button:focus-visible, .admin summary:focus-visible {
   outline: 1.5px solid var(--ink); outline-offset: 2px;
 }
+/* notebook.css squares every focused button to 3px, which would turn the pill square under the keyboard */
+.button:focus-visible { border-radius: 999px; }
 
 .button {
-  justify-self: start; min-height: 40px; padding: 0 16px; cursor: pointer;
+  justify-self: start; min-height: 44px; padding: 0 16px; cursor: pointer;
   font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat);
   border: 1px solid var(--rule); border-radius: 999px;
 }
