@@ -20,7 +20,7 @@ Each insert checks this in the same SQL statement (`ON CONFLICT (slug) DO NOTHIN
 
 ## Consequences
 
-A double tap, a resent form or two tabs saving the same thing leave one copy and show "saved". A second record with the same title and artist can't be added while the first is in the crate, and the six-record cap can't be passed by two adds at once. Deliberately adding an identical log entry (same date and text) is no longer possible, which is unlikely to matter. The store's add functions return 0 when they add nothing, and the actions decide whether that means "already saved" or a refusal.
+A double tap, a resent form or two tabs saving the same thing leave one copy and show "saved". A second record with the same title and artist can't be added while the first is in the crate, and the six-record cap can't be passed by two adds at once. Activating a record back into the crate is still checked before the update rather than inside it, so two tabs activating different records at the same moment could leave seven active until one is deactivated (the logbook still shows six); for a single admin that was judged not worth the extra SQL. Deliberately adding an identical log entry (same date and text) is no longer possible, which is unlikely to matter. The store's add functions return 0 when they add nothing, and the actions decide whether that means "already saved" or a refusal.
 
 ## Alternatives considered
 
