@@ -126,6 +126,17 @@ describe("items", () => {
     expect(await store.moveItem(db, 999, "up")).toBeNull();
   });
 
+  test("moves a middle line down, and the positions stay 1 to 5", async () => {
+    const canberra = await itemId("canberra-events");
+    expect(await store.moveItem(db, canberra, "down")).toBe("now");
+    expect(await slugs("now")).toEqual(["digital-nachos", "linear-gratis", "canberra-events", "r4r-with-me", "good-people"]);
+    expect((await store.loadAdmin(db)).now.map((item) => item.position)).toEqual([1, 2, 3, 4, 5]);
+    await store.moveItem(db, canberra, "down");
+    await store.moveItem(db, await itemId("digital-nachos"), "down");
+    expect(await slugs("now")).toEqual(["linear-gratis", "digital-nachos", "r4r-with-me", "canberra-events", "good-people"]);
+    expect((await store.loadAdmin(db)).now.map((item) => item.position)).toEqual([1, 2, 3, 4, 5]);
+  });
+
   test("moving swaps with the nearest line across gaps left by removals", async () => {
     await store.removeItem(db, await itemId("linear-gratis"));
     await store.moveItem(db, await itemId("r4r-with-me"), "up");
@@ -150,6 +161,16 @@ describe("log entries", () => {
     expect((await store.loadAdmin(db)).log.map((entry) => entry.id)).not.toContain(id);
     expect(await store.updateLogEntry(db, id, { date: "2026-11-01", precision: "month", text: "x" })).toBe(false);
     expect(await store.removeLogEntry(db, id)).toBe(false);
+  });
+
+  test("the same entry added twice saves once; a different date or different text still adds", async () => {
+    const entry = { date: "2026-10-05", precision: "day" as const, text: "shipped the admin." };
+    expect(await store.createLogEntry(db, entry)).toBeGreaterThan(0);
+    expect(await store.createLogEntry(db, entry)).toBe(0);
+    expect((await store.loadAdmin(db)).log.filter((saved) => saved.text === entry.text)).toHaveLength(1);
+    expect(await store.createLogEntry(db, { ...entry, date: "2026-10-06" })).toBeGreaterThan(0);
+    expect(await store.createLogEntry(db, { ...entry, text: "shipped it twice." })).toBeGreaterThan(0);
+    expect((await store.loadAdmin(db)).log).toHaveLength(5 + 3);
   });
 });
 
@@ -203,6 +224,25 @@ describe("records", () => {
     await store.moveRecord(db, 4, "down");
     expect((await store.loadAdmin(db)).records.map((entry) => entry.id)).toEqual([3, 2, 4, 1]);
     expect(await store.moveRecord(db, 999, "up")).toBe(false);
+  });
+
+  test("moves a middle record down, swapping past a deactivated record in a gap", async () => {
+    expect(await store.moveRecord(db, 2, "down")).toBe(true);
+    expect((await store.loadAdmin(db)).records.map((entry) => [entry.id, entry.position])).toEqual([
+      [1, 1],
+      [3, 2],
+      [2, 3],
+      [4, 4],
+    ]);
+    await store.setRecordActive(db, 3, false);
+    await store.moveRecord(db, 1, "down");
+    // 1 swaps with 2 (the nearest active record), not with the deactivated 3 at position 2
+    expect((await store.loadAdmin(db)).records.map((entry) => [entry.id, entry.position, entry.active])).toEqual([
+      [2, 1, true],
+      [1, 3, true],
+      [4, 4, true],
+      [3, 2, false],
+    ]);
   });
 
   test("edits and removes a record", async () => {
