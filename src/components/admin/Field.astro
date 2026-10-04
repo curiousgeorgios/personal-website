@@ -1,0 +1,38 @@
+---
+interface Props {
+  /** The id of the form this field belongs to, so ids stay unique across the page's many forms */
+  form: string;
+  name: string;
+  label: string;
+  value?: string;
+  error?: string;
+  kind?: "text" | "textarea" | "select" | "date" | "url" | "file";
+  /** For a select: [value, label] pairs */
+  options?: ReadonlyArray<readonly [string, string]>;
+  required?: boolean;
+  maxlength?: number;
+  hint?: string;
+  accept?: string;
+}
+
+const { form, name, label, value = "", error, kind = "text", options = [], required = false, maxlength, hint, accept } = Astro.props;
+const id = `${form}-${name}`;
+const describedBy = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(" ") || undefined;
+const control = { id, name, required, "aria-invalid": error ? ("true" as const) : undefined, "aria-describedby": describedBy };
+---
+<div class:list={["field", { invalid: error }]}>
+  <label for={id}>{label}</label>
+  {kind === "textarea" ? (
+    <textarea {...control} maxlength={maxlength} rows="3">{value}</textarea>
+  ) : kind === "select" ? (
+    <select {...control}>
+      {options.map(([option, text]) => <option value={option} selected={option === value}>{text}</option>)}
+    </select>
+  ) : kind === "file" ? (
+    <input {...control} type="file" accept={accept} />
+  ) : (
+    <input {...control} type={kind} value={value} maxlength={maxlength} />
+  )}
+  {hint && <p class="hint" id={`${id}-hint`}>{hint}</p>}
+  {error && <p class="error" id={`${id}-error`}>{error}</p>}
+</div>

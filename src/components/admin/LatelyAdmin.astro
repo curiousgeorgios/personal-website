@@ -1,0 +1,35 @@
+---
+import Field from "./Field.astro";
+import { factFields, formState } from "../../lib/admin/form-state";
+import type { ActionFailure } from "../../lib/admin/actions";
+import type { AdminData } from "../../lib/admin/store";
+
+interface Props {
+  facts: AdminData["facts"];
+  failure: ActionFailure | null;
+}
+
+const { facts, failure } = Astro.props;
+// Spec 7: the shelf has a title and author, the kettle a title and note
+const FACTS = [
+  { key: "shelf", heading: "on the shelf", subtitle: "author" },
+  { key: "kettle", heading: "in the kettle", subtitle: "note" },
+] as const;
+---
+<p class="hint">clear both fields to hide one.</p>
+<div class="facts-admin">
+  {FACTS.map(({ key, heading, subtitle }) => {
+    const id = `fact-${key}`;
+    const state = formState(failure, id, factFields(key, facts[key]));
+    return (
+      <form method="post" action={`/admin/#${id}`} id={id} class="admin-form">
+        <h3>{heading}</h3>
+        <input type="hidden" name="intent" value="fact.save" />
+        <input type="hidden" name="key" value={key} />
+        <Field form={id} name="title" label="title" value={state.values.title} error={state.errors.title} maxlength={80} />
+        <Field form={id} name="subtitle" label={subtitle} value={state.values.subtitle} error={state.errors.subtitle} maxlength={80} />
+        <button type="submit" class="button">save</button>
+      </form>
+    );
+  })}
+</div>

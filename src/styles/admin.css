@@ -1,0 +1,52 @@
+/* The admin page: the logbook's paper and type, with forms that work on a phone (spec 7) */
+:root {
+  /* --red is under 4.5:1 on paper for small text; this darker red is 5.6:1 */
+  --error: #a83a24;
+}
+
+.admin h3 { font: 400 12.5px/1.55 var(--mono); color: var(--muted); }
+.admin .hint { font-size: 14px; color: var(--muted); }
+.admin .error { font-size: 14px; color: var(--error); }
+.admin .page-error { margin-top: 14px; }
+.admin .notice {
+  font: 12.5px/1.55 var(--mono); color: var(--ink); background: var(--mat);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; max-width: 34rem;
+}
+
+.admin-form { display: grid; gap: 12px; padding: 12px 0 20px; max-width: 34rem; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field label { font: 12px/1.5 var(--mono); color: var(--muted); }
+.field input, .field textarea, .field select {
+  /* 16px keeps iOS from zooming into a focused field */
+  font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink);
+  background: var(--mat); border: 1px solid var(--rule); border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+.field textarea { resize: vertical; min-height: 4.6em; }
+.field input[type="file"] { background: transparent; padding: 6px 0; border: 0; }
+.field.invalid input, .field.invalid textarea, .field.invalid select { border-color: var(--error); }
+.field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible, .button:focus-visible, .admin summary:focus-visible {
+  outline: 1.5px solid var(--ink); outline-offset: 2px;
+}
+
+.button {
+  justify-self: start; min-height: 40px; padding: 0 16px; cursor: pointer;
+  font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat);
+  border: 1px solid var(--rule); border-radius: 999px;
+}
+.button.quiet { background: transparent; }
+.button:disabled { color: var(--faint); cursor: default; }
+.button:active:not(:disabled) { background: #ebe8df; }
+@media (hover: hover) and (pointer: fine) {
+  .button { transition: border-color 200ms ease, background-color 200ms ease; }
+  .button:hover:not(:disabled) { border-color: color-mix(in oklab, var(--ink) 55%, transparent); }
+}
+
+.facts-admin { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; max-width: 40rem; }
+.snapshots { border-top: 1px solid var(--rule); max-width: 40rem; margin-bottom: 10px; }
+.snapshots li { display: grid; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 14.5px; }
+.snapshots .url { color: var(--muted); }
+.snapshots .status { font: 12px/1.5 var(--mono); color: var(--muted); }
+
+@media (max-width: 680px) {
+  .facts-admin { grid-template-columns: 1fr; }
+}

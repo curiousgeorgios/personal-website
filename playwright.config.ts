@@ -15,7 +15,7 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
-    { name: "phone", use: { ...devices["iPhone 13 Mini"] }, testMatch: /(smoke|logbook|labels|layout|log|deck-list)\.spec\.ts/ },
+    { name: "phone", use: { ...devices["iPhone 13 Mini"] }, testMatch: /\/(smoke|logbook|labels|layout|log|deck-list)\.spec\.ts$/ },
   ],
   webServer: remote
     ? undefined
@@ -27,6 +27,15 @@ export default defineConfig({
           url: "http://localhost:4332",
           reuseExistingServer: !process.env.CI,
           timeout: 90_000,
+        },
+        // A third server with its own store for the admin specs, which write: deleted and migrated (with the seed)
+        // afresh on every run, so it's never reused
+        {
+          command:
+            "rm -rf .wrangler/admin && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/admin && wrangler dev -c dist/server/wrangler.json --port 4333 --persist-to .wrangler/admin",
+          url: "http://localhost:4333",
+          reuseExistingServer: false,
+          timeout: 120_000,
         },
       ],
 });

@@ -1,0 +1,16 @@
+---
+import Row from "../Row.astro";
+
+interface Props {
+  label: string;
+  id: string;
+  /** The "saved" line, on the section just saved */
+  notice?: string | null;
+}
+
+const { label, id, notice = null } = Astro.props;
+---
+<Row label={label} id={id}>
+  {notice && <p class="notice" role="status">{notice}</p>}
+  <slot />
+</Row>

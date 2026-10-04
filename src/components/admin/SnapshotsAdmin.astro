@@ -1,0 +1,25 @@
+---
+import { describeSnapshot } from "../../lib/snapshots";
+import type { AdminItem } from "../../lib/admin/store";
+
+interface Props {
+  items: AdminItem[];
+}
+
+// Read-only until plan 4 builds the snapshots Worker and its "re-shoot now" button
+const shots = Astro.props.items.filter((item) => item.snapshotUrl);
+---
+{shots.length === 0 ? (
+  <p class="empty">no lines have a page to snapshot yet. add one in a line's wall label.</p>
+) : (
+  <ul class="snapshots">
+    {shots.map((item) => (
+      <li data-slug={item.slug}>
+        <span class="mono">{item.slug}</span>
+        <span class="url">{item.snapshotUrl}</span>
+        <span class="status">{describeSnapshot(item.snapshotStatus, item.snapshotAt)}</span>
+      </li>
+    ))}
+  </ul>
+)}
+<p class="hint">pages are captured nightly once the snapshots worker is running.</p>
