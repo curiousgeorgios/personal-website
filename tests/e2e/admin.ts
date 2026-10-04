@@ -13,10 +13,10 @@ export async function openAdmin(page: Page) {
   expect(response?.status()).toBe(200);
 }
 
-/** After a save: the redirect lands on the section and says so. Local runs have no cache purge, so they say "within five minutes". */
+/** After a save: the redirect lands on the section and says so. Local runs have no cache purge, so they say the logbook may show the old version for a little while. */
 export async function expectSaved(page: Page, section: string) {
   await expect(page).toHaveURL(new RegExp(`/admin/\\?saved=${section}(&later=1)?#${section}$`));
-  await expect(page.locator(`#${section} .notice`)).toHaveText(/^saved - (it's on the logbook now|the logbook shows it within five minutes)\.$/);
+  await expect(page.locator(`#${section} .notice`)).toHaveText(/^saved - (it's on the logbook now|the logbook may show the old version for a little while)\.$/);
 }
 
 /** The logbook as a visitor would see it now: a fresh query string misses any cached copy (cache keys include it, spec 6.1) */

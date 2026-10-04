@@ -1,6 +1,6 @@
 /**
  * Purges the cached home page, so a save shows on the next visit everywhere (spec 6.1). False when it can't: local
- * runs have no purge, and in production the page still refreshes within its five-minute freshness window.
+ * runs have no purge, and in production the old page can keep showing for a while (the edge serves it stale as it refreshes).
  */
 export async function purgeLogbook(cache: { invalidate(options: { tags: string[] }): Promise<unknown> }): Promise<boolean> {
   try {

@@ -29,7 +29,7 @@ if (Astro.request.method === "POST") {
 
 const data = await loadAdmin(env.DB);
 const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url.searchParams.get("saved")) ?? null);
-const savedLine = Astro.url.searchParams.has("later") ? "saved - the logbook shows it within five minutes." : "saved - it's on the logbook now.";
+const savedLine = Astro.url.searchParams.has("later") ? "saved - the logbook may show the old version for a little while." : "saved - it's on the logbook now.";
 const notice = (section: AdminSection) => (section === saved ? savedLine : null);
 ---
 <Notebook title="admin · george vlachos" noindex>
