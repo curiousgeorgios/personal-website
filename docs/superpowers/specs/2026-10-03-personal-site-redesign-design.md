@@ -305,6 +305,9 @@ Launch checklist (only George can do these):
 - [ ] Confirm the intro line and `based: sydney and canberra`.
 - [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, cookie SameSite Lax or Strict and a session long enough for a phone: when it runs out, a save in progress is lost), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
 - [ ] Check the account can use the Images binding (the admin converts record covers with it).
+- [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).
+- [ ] On the iPhone, save something after the Access session has expired, and check what happens (the page's `form-action 'self'` may block Access's sign-in redirect; if it does, add the team domain to `form-action` or note it in the follow-ups).
+- [ ] Check the Workers plan suits a 15MB upload (`formData()` buffers the whole body; Workers Paid removes the doubt).
 - [ ] Turn on "Cookieless server hash mode" in PostHog.
 - [ ] Apply the zone settings in section 10.
 - [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets and disconnect Workers Builds.
