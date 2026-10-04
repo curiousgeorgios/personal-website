@@ -26,3 +26,20 @@ What plan 3 (the admin page) found or left for later, by where it belongs.
 
 - How long the Access session should last (a week is kinder on a phone; a day is tighter).
 - Whether the Worker should also check the signed-in email against an `ADMIN_EMAIL` var, so `/admin` stays closed even if the Access policy is ever loosened by mistake (the final review recommends yes: it's one comparison and keeps /admin closed if the Access policy is ever loosened).
+
+## Decisions made while building
+
+Calls made during plan 3 without asking George, each easy to undo:
+
+- An identical repeat of an add (a line, a log entry or a record) counts as already saved, and so do removing something already removed and activating a record that's already active. A double-tapped move still moves twice (ADR-0012).
+- The empty-artist message is "the record needs an artist"; "mp3" stays lowercase beside "JPEG, PNG or WebP".
+- The Access check pins RS256, logs why a token was refused (never the token) and refuses a mistyped team domain with a 403; the test-only bypass works only on localhost.
+- Link checks refuse empty or blank link text, brackets and spaces in an address and `http:` links, but allow a link inside a bracketed aside like "(see [x](https://example.com))".
+- A snapshot address must be `https://` with a host and no spaces, because plan 4's Worker will fetch it as typed.
+- Snapshot dates show Sydney's date, since the nightly capture runs at 17:00 UTC.
+- A record insert that throws is checked before its files are deleted, so a record that did save never loses its files.
+- Saves run under `waitUntil` (with the purge), so a double tap that cancels the first request doesn't cut its save off half way.
+- Page-level errors sit in a banner that stays at the top of the screen; something unexpected is a 500 with the same banner.
+- Form fields have 3:1 borders, buttons and summaries are 44px tall, and iOS doesn't capitalise or autocorrect slugs and addresses.
+- An add form keeps its own section (moving a line between sections is done from its edit form).
+- The purge-failure notice says "the logbook may show the old version for a little while", because stale-while-revalidate can serve the old copy for longer than five minutes.
