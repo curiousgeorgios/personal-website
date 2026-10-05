@@ -1,6 +1,6 @@
 # ADR-0011: Check the Origin header in our middleware instead of Astro's built-in check
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-04
 - Authors: George Vlachos
 
@@ -10,11 +10,11 @@ The admin page (ADR-0004) saves through plain form POSTs, and spec 7 requires ev
 
 ## Decision
 
-Astro's `security.checkOrigin` is turned off, and `src/middleware.ts` checks every request that isn't GET, HEAD or OPTIONS, anywhere on the site: a missing `Origin` or one that differs from the request's own origin gets a 403 with `Cache-Control: no-store` and the usual security headers. The rule lives in `originAllowed` in `src/lib/admin/gate.ts`, which is unit-tested, and an end-to-end spec checks both `/admin/` and `/`.
+Astro's `security.checkOrigin` is turned off, and `src/middleware.ts` checks every request that isn't GET, HEAD or OPTIONS, anywhere on the site: a missing `Origin` or one that differs from the request's own origin gets a 403 with `Cache-Control: no-store` and the security headers other than the CSP, which only rendered pages carry (spec 12.1). The rule lives in `originAllowed` in `src/lib/admin/gate.ts`, which is unit-tested, and an end-to-end spec checks both `/admin/` and `/`.
 
 ## Consequences
 
-Every refusal carries the security headers, and one function covers the admin page and any later write route, including plan 4's beacon. The site now owns this check: a future change that turns `checkOrigin` back on would only duplicate it, but one that removes the middleware check would leave writes unprotected. `Referrer-Policy` must stay at `strict-origin-when-cross-origin` (or similar), because under `no-referrer` browsers send `Origin: null` on POSTs and every write would be refused; the header has a comment saying so. Hand-made requests and tests must send `Origin` to write.
+Every refusal carries the security headers, and one function covers the admin page and any later write route, including plan 4's beacon. The site now owns this check: a future change that turns `checkOrigin` back on would only duplicate it, but one that removes the middleware check would leave writes unprotected. `Referrer-Policy` must stay at `strict-origin-when-cross-origin` (or similar), because under `no-referrer` browsers send `Origin: null` on POSTs and every write would be refused; the header has a comment saying so. Hand-made requests and tests must send `Origin` to write. The analytics beacon depends on browsers sending `Origin` with a same-origin `sendBeacon` or `fetch` POST: Chromium and WebKit do (the analytics specs check for the 204), Firefox is checked by hand at launch and an event from a browser that leaves it out is refused and lost.
 
 ## Alternatives considered
 

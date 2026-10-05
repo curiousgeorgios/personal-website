@@ -1,6 +1,6 @@
 # ADR-0009: Run the end-to-end tests on one worker in CI
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-04
 - Authors: George Vlachos
 
@@ -14,7 +14,7 @@ CI runs the end-to-end suite with a single Playwright worker (`workers: process.
 
 ## Consequences
 
-Timing checks such as the 450ms double-press guard and the four-second "couldn't play" window mean the same thing in CI as in a browser, so a red check job is a real failure. The check job, and therefore every deploy, takes longer: about 18 minutes for the end-to-end step instead of about 2. If the suite grows much further, the slow part should be split into its own job rather than parallelised back onto shared cores.
+Timing checks such as the 450ms double-press guard and the four-second "couldn't play" window mean the same thing in CI as in a browser, so a red check job points at the code, not the runner. It is not proof on its own: CI retries a failed test once (`retries: 1`), and plan 4's follow-ups list six specs that still flake under full-suite load but pass alone, so a retry that passes can hide a flake. The check job, and therefore every deploy, takes longer: the end-to-end step took 18.5 minutes on 5 October, against 6 to 11 minutes for the failing two-worker runs of 3 October and under a minute before the scene arrived. If the wait starts to hurt, the suite should be sharded across separate runners (Playwright's `--shard`), each still on one worker with its own CPU, rather than parallelised back onto shared cores; each shard repeats about two minutes of setup.
 
 ## Alternatives considered
 

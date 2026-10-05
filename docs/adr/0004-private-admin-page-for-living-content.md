@@ -14,7 +14,7 @@ Living content is edited through a private `/admin` page protected by Cloudflare
 
 ## Consequences
 
-George can update the site from his phone without opening a laptop or deploying. The site needs a D1 database with migrations (applied with `wrangler d1 migrations apply`), a Cloudflare Access policy, R2 for uploads and server-side validation on every admin write. Public pages read from D1, so they should be cached at the edge and fall back gracefully if D1 is unavailable. The admin page is a new surface to secure and maintain.
+George can update the site from his phone without opening a laptop or deploying. The site needs a D1 database with migrations (applied with `wrangler d1 migrations apply`), a Cloudflare Access policy, R2 for uploads and server-side validation on every admin write. Public pages read from D1, so they should be cached at the edge and fall back gracefully if D1 is unavailable. The admin page is a new surface to secure and maintain. ADR-0016 adds a check of the signed-in email in the Worker, so the Access policy is not the only gate.
 
 ## Alternatives considered
 

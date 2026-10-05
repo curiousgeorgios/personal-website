@@ -3,7 +3,7 @@
 - Date: 2026-10-03
 - Owner: George Vlachos
 - Status: Design agreed in brainstorming, revised after critical review; ready for an implementation plan
-- Decisions: [ADR-0001](../../adr/0001-logbook-direction-with-wall-labels.md) to [ADR-0010](../../adr/0010-purge-cached-home-page-after-deploys.md)
+- Decisions: [ADR-0001](../../adr/0001-logbook-direction-with-wall-labels.md) to [ADR-0016](../../adr/0016-admin-worker-checks-the-signed-in-email.md)
 - Agreed prototype: [docs/prototypes/2026-10-03-logbook/](../../prototypes/2026-10-03-logbook/) (`logbook.html`, `turntable.js` and two screenshots). It is the visual and behavioural reference. Its asset paths (`/files/...`) pointed at the brainstorming server and will not resolve standalone. Section 5.6 lists prototype bugs that must not be ported.
 
 ## 1. Intent
@@ -199,7 +199,7 @@ Every HTML response carries the security headers in section 12.1.
 ## 7. Admin (ADR-0004)
 
 - Cloudflare Access application on `/admin*` (George's identity only), with the Access cookie set to SameSite Lax or Strict.
-- The Worker verifies `Cf-Access-Jwt-Assertion` on every admin request with `jose` (`createRemoteJWKSet` and `jwtVerify`), checking the signature, `aud` (the Access application's AUD tag) and `iss` (the team domain). It returns 403 otherwise.
+- The Worker verifies `Cf-Access-Jwt-Assertion` on every admin request with `jose` (`createRemoteJWKSet` and `jwtVerify`), checking the signature, `aud` (the Access application's AUD tag) and `iss` (the team domain). It then requires the token's `email` to equal the `ADMIN_EMAIL` var (`hello@curiousgeorge.dev`), ignoring case, so `/admin` stays closed if the Access policy is ever loosened (ADR-0016). It returns 403 otherwise.
 - Local and test runs bypass verification only through a build-time constant that production builds cannot contain; the production build fails if it is set.
 - Both Workers set `workers_dev: false` and `preview_urls: false`. The snapshots Worker has no public route.
 - One plain server-rendered page with forms (no client framework), in the logbook's type and tokens, usable on a phone:
@@ -300,7 +300,7 @@ Keep and fix:
 - Favicons and `site.webmanifest` move into `public/` (they sit at the repo root today and are not served). The manifest gets the site name, `theme_color` and `background_color` of `#f3f2ec` and `display: browser`.
 - SEO metadata: title `george vlachos`, a description in George's voice, canonical URL, Open Graph and Twitter tags with a 1200 × 630 image of the logbook, `theme-color` `#f3f2ec`.
 - `.gitignore`: drop the Next.js, OpenNext and audio-manifest entries; keep `.superpowers/` and `.playwright-mcp/`; add Astro's `dist/` and `.astro/`.
-- `wrangler.jsonc`: keep the Worker name `personal-website`; replace `main`, `assets` and `build`; bump `compatibility_date`; add the D1, R2, Images and service bindings and vars for the Access team domain and AUD. Enable Workers Logs on both Workers.
+- `wrangler.jsonc`: keep the Worker name `personal-website`; replace `main`, `assets` and `build`; bump `compatibility_date`; add the D1, R2, Images and service bindings and vars for the Access team domain, AUD and admin email. Enable Workers Logs on both Workers.
 
 Deployment (ADR-0008): GitHub Actions on every push to `main` runs typecheck, unit tests, the build, Playwright (Chromium and WebKit), the budget check and the privacy smoke test; only if all pass does it run `wrangler d1 migrations apply DB --remote` and deploy both Workers. Workers Builds is disconnected so nothing deploys unchecked. Pull requests run the same checks without deploying. In CI, Playwright runs on one worker, because GitHub's runners draw WebGL in software and parallel workers break the timing checks (ADR-0009).
 
@@ -311,7 +311,7 @@ Launch checklist (only George can do these):
 - [ ] Confirm the shelf and kettle entries.
 - [ ] Confirm licences for the four lo-fi tracks.
 - [ ] Confirm the intro line and `based: sydney and canberra`.
-- [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, cookie SameSite Lax or Strict and a session long enough for a phone: when it runs out, a save in progress is lost), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
+- [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, as `hello@curiousgeorge.dev`, the address `ADMIN_EMAIL` names, cookie SameSite Lax or Strict and a session long enough for a phone: when it runs out, a save in progress is lost), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
 - [ ] Check the account can use the Images binding (the admin converts record covers with it).
 - [ ] Check the account can use Browser Rendering (the nightly snapshots and "re-shoot now").
 - [ ] Check the Workers plan suits a 15MB upload (`formData()` buffers the whole body; Workers Paid removes the doubt).
@@ -325,11 +325,7 @@ Launch checklist (only George can do these):
 - [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).
 - [ ] On the iPhone, save something after the Access session has expired, and check what happens (the page's `form-action 'self'` may block Access's sign-in redirect; if it does, add the team domain to `form-action` or note it in the follow-ups).
 - [ ] After the first nightly run (17:00 UTC), check `/admin`'s snapshots section says "captured" for each line and the run's log has no session-closed errors after the first line, then re-shoot one. Time that "re-shoot now" against the deployed pair: browser launch, encoding and storing come on top of the 15s capture cap.
-- [ ] Sign off ADR-0009 (status Proposed until then).
-- [ ] Sign off ADR-0010 (status Proposed until then).
-- [ ] Sign off ADR-0011 (Origin checked in our middleware) and ADR-0012 (an identical repeat of an admin add counts as saved), both Proposed until then.
-- [ ] Sign off ADR-0013 (the analytics proxy holds the PostHog key and forwards only the logbook's events) and ADR-0014 (snapshots under fresh keys, a line moved to one only if its address is unchanged), both Proposed until then.
-- [ ] Sign off ADR-0015 (a modal holds the page still with the scrollbar's measured width, not `scrollbar-gutter`), Proposed until then.
+- [x] ADR-0001 to ADR-0016 are Accepted (signed off on 5 October 2026).
 - [ ] Try the turntable on a real iPhone (once with the ringer switch on silent) and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
 
 ## 14. Testing
