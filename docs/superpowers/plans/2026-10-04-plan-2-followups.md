@@ -14,7 +14,7 @@ Done in [plan 3](2026-10-04-plan-3-admin.md).
 
 ### Scene performance
 
-- **The environment map hitch.** Spec 11 asks for no scene task over 50ms at 4× CPU throttle. Task 11 measured `PMREMGenerator.fromScene` at 66 to 75ms at 4× (about 18ms unthrottled), on the main thread before the canvas shows. `tests/e2e/scene-perf.spec.ts` (opt-in) therefore fails today, on that step and on headless software-rendering readback. Decide between precomputing the map and accepting the hitch (see the questions below), then make that spec pass or retire it. The 50ms budget is measured locally rather than gated in CI; gating it would need a GPU runner, which is George's cost call.
+- **The environment map hitch.** Decided: accept it, done in [plan 5](2026-10-05-plan-5-polish.md) (Task 2, ADR-0017). Spec 11 asks for no scene task over 50ms at 4× CPU throttle. Task 11 measured `PMREMGenerator.fromScene` at 66 to 75ms at 4× (about 18ms unthrottled), on the main thread before the canvas shows. `tests/e2e/scene-perf.spec.ts` (opt-in) therefore fails today, on that step and on headless software-rendering readback. Decide between precomputing the map and accepting the hitch (see the questions below), then make that spec pass or retire it. The 50ms budget is measured locally rather than gated in CI; gating it would need a GPU runner, which is George's cost call.
 - **The shadow map is redrawn every frame while only the platter spins.** Nothing that casts a shadow changes while spinning or scratching (the record's shadow is a disc), yet three redraws the 2048 shadow map at 30fps for the whole of every track (`src/deck/scene/build.ts:72`, `src/deck/scene/loop.ts`). Set `shadowMap.autoUpdate = false` and set `needsUpdate` when tweens run or the loop is dirty. It saves GPU and battery on phones and cuts the per-frame cost under CI's software rendering.
 - Re-measure long tasks and frame times on a real GPU and on a real phone; the Task 11 numbers are from a laptop.
 - Lighthouse LCP, CLS and INP on real devices, including the scene arriving over the poster.
@@ -32,6 +32,8 @@ Done in [plan 3](2026-10-04-plan-3-admin.md).
 - Track licences and how titles and artists are written (for example "home alone."): content, already on the checklist.
 
 ## Questions for George
+
+All six were answered on 5 October 2026 and are done in [plan 5](2026-10-05-plan-5-polish.md): 1, accept the hitch (Task 2, ADR-0017); 2, two hint sentences in one cell (Task 5); 3, posters with one plain sleeve and a night pair (Task 7); 4, a record whose press is undone during the download never leaves the crate (Task 3); 5, the scratch is mouse only (Task 4); 6, each track is a link to its MP3 that the deck makes a play button (Task 6).
 
 These are product calls the reviews could not make.
 
@@ -59,7 +61,7 @@ These are product calls the reviews could not make.
 - The WebGL1 probe; `.live` is re-added every frame; nothing is disposed on context loss; there is no guard in `tick`; there is a window of up to 500ms in which the runner holds a dead view.
 - A throwing tween `apply` repeats on every step.
 - Lighting is fixed at mount, so a visit that crosses 16:00 keeps daylight. The spec is silent and the effect is trivial.
-- Arrow keys ignore `aria-disabled`; the hover preview and hint go stale after a click flip; a pointer cursor shows on inert targets; the `.hint` class name is shared with the track list's hint paragraph.
+- Arrow keys ignore `aria-disabled`; the hover preview and hint go stale after a click flip; a pointer cursor shows on inert targets; the `.hint` class name is shared with the track list's hint paragraph (plan 5 scoped the hint's rules to `.corner > .hint`).
 - Scratching: there is no `Number.isFinite` guard in `setRate`; a re-grab within 420ms fights the release tween; there is no primary-button guard. Held still, the rate holds at its last value, as in the prototype; how that feels is George's call.
 
 ### Markup and styles
@@ -73,5 +75,5 @@ These are product calls the reviews could not make.
 - Task 2's `media-files` test breaks on a stray `.DS_Store`: filter to `.mp3`.
 - The "nothing marked in view" test is vacuous; helper errors are opaque on a build without hooks; list label precedence is untested; the double-click spec asserts only the final state; place and keydown coverage is thin; scratch spec coverage is thin; lighting boundaries are untested.
 - The context-loss spec does not assert that the poster returns; the poster test does not check alpha.
-- `scripts/poster.mjs` uses a fixed 500ms wait, couples to the markup and has no `try`/`finally`.
+- `scripts/poster.mjs` uses a fixed 500ms wait and couples to the markup (plan 5 added the `try`/`finally`).
 - The deploy job's hook guard (`grep -rq "__deck" dist`) would pass if `dist` were missing; that is unreachable, because the build fails first.

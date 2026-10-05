@@ -26,6 +26,8 @@ Done in [plan 4](2026-10-05-plan-4-snapshots-analytics.md).
 
 ## Questions for George
 
+Both answered on 5 October 2026 and done in [plan 5](2026-10-05-plan-5-polish.md) (Task 1, ADR-0016): a 1 month session with the cookie SameSite Lax (dashboard settings, on the launch checklist), `/admin` shows when it ends and the Worker checks the email against `ADMIN_EMAIL`.
+
 - How long the Access session should last (a week is kinder on a phone; a day is tighter).
 - Whether the Worker should also check the signed-in email against an `ADMIN_EMAIL` var, so `/admin` stays closed even if the Access policy is ever loosened by mistake (the final review recommends yes: it's one comparison and keeps /admin closed if the Access policy is ever loosened).
 
