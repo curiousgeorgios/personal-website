@@ -21,3 +21,18 @@ export function describeSnapshot(status: string | null, at: string | null): stri
   const reason = Object.hasOwn(SNAPSHOT_STATUSES, status) ? SNAPSHOT_STATUSES[status as SnapshotStatus] : status;
   return day ? `${reason} · last good capture ${day}` : `${reason} · no good capture yet`;
 }
+
+/** The widths every capture is stored at (spec 9): the hover card and label, phones and dense screens, the closer look */
+export const SNAPSHOT_WIDTHS = [480, 960, 1920] as const;
+export type SnapshotWidth = (typeof SNAPSHOT_WIDTHS)[number];
+export type SnapshotFormat = "avif" | "webp";
+
+/** Where a capture's files live in R2: one fresh base per capture, so a cached page never sees a key change under it */
+export const snapshotBase = (slug: string, id: string) => `snapshots/${slug}-${id}`;
+export const snapshotVariant = (base: string, width: SnapshotWidth, format: SnapshotFormat) => `${base}-${width}.${format}`;
+
+/** The base a variant's key belongs to, or null for anything else under snapshots/ */
+export function variantBase(key: string): string | null {
+  const match = /^(snapshots\/.+)-(?:480|960|1920)\.(?:avif|webp)$/.exec(key);
+  return match ? match[1] : null;
+}
