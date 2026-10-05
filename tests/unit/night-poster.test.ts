@@ -19,7 +19,10 @@ function posterAt(iso: string) {
 }
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 test.each([
   ["2026-10-05T02:00:00Z", false], // 13:00 in Sydney (AEDT)
@@ -42,5 +45,4 @@ test.each([["7 pm"], ["NaN"]])("an hour that doesn't parse (%j) keeps the day po
   } as never);
   // 21:00 in Sydney is night, so only an unreadable hour can leave the day poster
   expect(posterAt("2026-10-05T10:00:00Z")).toEqual(["/posters/deck-phone.webp", "/posters/deck-desktop.webp", false]);
-  vi.restoreAllMocks();
 });
