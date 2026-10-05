@@ -88,11 +88,13 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
   .peek { transition: color 200ms ease, border-color 200ms ease, background-color 200ms ease; }
   .line-item.labelled > .line:hover .peek { color: var(--ink); border-color: color-mix(in oklab, var(--ink) 55%, transparent); background: var(--mat); }
 }
-/* The hover card: the snapshot grows out of the pill on fine pointers, after a 90ms intent delay (spec 4.1) */
+/* The hover card: the snapshot grows out of the pill on fine pointers, after a 90ms intent delay (spec 4.1). Near the page's
+   edge --nudge (labels.ts) slides it back inside by moving its left, which doesn't animate, so a nudge that changes on the
+   hover that shows it never makes the card slide sideways; the transform origin moves with it, so it still grows from the pill */
 .hovercard {
-  position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 5; width: 232px; padding: 7px 7px 8px; pointer-events: none;
+  position: absolute; left: calc(50% + var(--nudge, 0px)); bottom: calc(100% + 10px); z-index: 5; width: 232px; padding: 7px 7px 8px; pointer-events: none;
   background: var(--mat); box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 4px rgba(0, 0, 0, .05), 0 18px 34px -14px rgba(0, 0, 0, .32);
-  opacity: 0; visibility: hidden; transform: translateX(calc(-50% + var(--nudge, 0px))) translateY(6px) scale(.94); transform-origin: calc(50% - var(--nudge, 0px)) 100%;
+  opacity: 0; visibility: hidden; transform: translateX(-50%) translateY(6px) scale(.94); transform-origin: calc(50% - var(--nudge, 0px)) 100%;
   /* Visible only while shown or fading out, so at rest its caption is neither copied nor found by find-in-page */
   transition: opacity 140ms ease, transform 200ms var(--ease-out), visibility 0s linear 140ms;
 }
@@ -103,7 +105,7 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 .hovercard .cap { display: block; margin-top: 6px; font: 11px/1.4 var(--mono); color: var(--muted); text-align: center; }
 @media (hover: hover) and (pointer: fine) {
   .line-item:not(.open):not(.dismissed) > .line:hover .hovercard.ready,
-  .line-item:not(.open):not(.dismissed) .peek:focus-visible + .hovercard.ready { opacity: 1; visibility: visible; transform: translateX(calc(-50% + var(--nudge, 0px))); transition-delay: 90ms; pointer-events: auto; }
+  .line-item:not(.open):not(.dismissed) .peek:focus-visible + .hovercard.ready { opacity: 1; visibility: visible; transform: translateX(-50%); transition-delay: 90ms; pointer-events: auto; }
 }
 @media (hover: none), (pointer: coarse) { .hovercard { display: none; } }
 
@@ -213,6 +215,6 @@ html:has(.closer[open]) { overflow: hidden; } /* closer.ts holds a classic scrol
 
 @media (prefers-reduced-motion: reduce) {
   .drawer, .log .older, .peek .plus, .more .chev { transition: none; }
-  .hovercard { transform: translateX(calc(-50% + var(--nudge, 0px))); transition: opacity 140ms ease, visibility 0s linear 140ms; }
+  .hovercard { transform: translateX(-50%); transition: opacity 140ms ease, visibility 0s linear 140ms; }
   .closer::before { transition: none; }
 }

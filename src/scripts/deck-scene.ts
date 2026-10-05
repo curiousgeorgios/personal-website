@@ -1,3 +1,4 @@
+import { contextOptions } from "../deck/webgl";
 import type { Deck, DeckView } from "../deck/types";
 
 // Loads the 3D scene after the page has loaded, in an idle moment, once the row is within 200px of the viewport
@@ -11,7 +12,8 @@ let booted = false;
 function webgl(): boolean {
   try {
     const probe = document.createElement("canvas");
-    const gl = probe.getContext("webgl2") ?? probe.getContext("webgl");
+    const options = contextOptions(__TEST_HOOKS__);
+    const gl = probe.getContext("webgl2", options) ?? probe.getContext("webgl", options);
     gl?.getExtension("WEBGL_lose_context")?.loseContext();
     return gl !== null;
   } catch {

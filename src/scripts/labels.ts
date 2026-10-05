@@ -72,8 +72,10 @@ function loadCard(item: HTMLElement) {
     delete element.dataset.src;
   }
   // Shown only from here on: without this script the card would be blank, and its "click for the label" untrue. A picture
-  // that won't load removes the card instead (its error listener below)
-  card.querySelector("img")?.decode().then(() => card.classList.add("ready"), () => {});
+  // that won't load removes the card instead (its error listener below); a decode that merely fails still shows the card,
+  // since the data attributes are spent and nothing would show it later
+  const show = () => card.classList.add("ready");
+  card.querySelector("img")?.decode().then(show, show);
 }
 
 const labelled = document.querySelectorAll<HTMLElement>(".line-item.labelled");

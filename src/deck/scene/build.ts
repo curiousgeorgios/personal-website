@@ -39,6 +39,7 @@ import {
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { ARM_LEN, ARM_UP, CRATE, CRATE_SIZE, FLOOR, PIVOT, PLATTER, SHELF_TOP, SLEEVE, slotZ, tiltFor } from "./layout";
+import { contextOptions } from "../webgl";
 import type { Light } from "./lighting";
 import { idle, type Textures } from "./textures";
 
@@ -63,7 +64,7 @@ export interface Stage {
 }
 
 export function createRenderer(): WebGLRenderer {
-  const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
+  const renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power", ...contextOptions(__TEST_HOOKS__) });
   // Device pixel ratio capped at 2, and 1.5 on coarse pointers (spec 5.2)
   renderer.setPixelRatio(Math.min(devicePixelRatio, matchMedia("(pointer: coarse)").matches ? 1.5 : 2));
   renderer.outputColorSpace = SRGBColorSpace;

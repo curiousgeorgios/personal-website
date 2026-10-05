@@ -1,5 +1,11 @@
 import { chromium, expect, test, type Page } from "@playwright/test";
 
+// The 3D scene's first frame can block the main thread for seconds under software WebGL (headless CI), landing just after
+// load, where these tests hover. None of them is about the scene, so it stays out
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/_astro\/scene\.[^/]+\.js$/, (route) => route.abort());
+});
+
 test("clicking a labelled line opens its label in place; Esc closes and returns focus", async ({ page }) => {
   await page.goto("/");
   const item = page.locator('[data-slug="canberra-events"]');
@@ -620,7 +626,6 @@ test("the hover cards never scroll the page sideways", async ({ page, isMobile }
 
 test("a hover card near the page's right edge slides back inside it, still growing out of its pill", async ({ page, isMobile }) => {
   test.skip(isMobile, "no hover cards on a phone");
-  test.setTimeout(90_000); // three loads, and a loaded machine can stall a renderer for seconds after each hover
   for (const width of [800, 830, 860]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
@@ -633,7 +638,7 @@ test("a hover card near the page's right edge slides back inside it, still growi
     const item = page.locator(`[data-slug="${slug}"]`);
     const card = item.locator(".hovercard");
     await item.locator(".peek").hover();
-    await expect(card, `${width}px wide`).toHaveCSS("opacity", "1", { timeout: 15_000 });
+    await expect(card, `${width}px wide`).toHaveCSS("opacity", "1");
     await card.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)).then(() => undefined));
     const box = (await card.boundingBox())!;
     const pill = (await item.locator(".peek").boundingBox())!;
