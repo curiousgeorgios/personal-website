@@ -25,6 +25,26 @@ test("the scene loads only after the page has loaded and the row comes near", as
 
 test("a press during the scene download waits for it, then plays with one scene", async ({ page }) => {
   test.skip(!(await hasWebGL(page)), "no WebGL in this browser here");
+  // The page records what it shows from the start: under load one round trip to the page can outlast the whole journey
+  // (27s, measured at a load average near 300), so asking afterwards can miss it. It keeps each change of the first
+  // row's label, with whether the scene had arrived by then, and the most tweens running on any frame
+  await page.addInitScript(() => {
+    const seen = { labels: [] as string[], mostTweens: 0 };
+    (window as unknown as { seen: typeof seen }).seen = seen;
+    addEventListener("DOMContentLoaded", () => {
+      const label = document.querySelector(".tracks li .st")!;
+      new MutationObserver(() => seen.labels.push(`${label.textContent} ${window.__deck!.state().scene ? "scene" : "no scene"}`)).observe(label, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    });
+    const watch = () => {
+      seen.mostTweens = Math.max(seen.mostTweens, window.__deckScene?.tweens() ?? 0);
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));
   await page.route(SCENE, async (route) => {
@@ -35,15 +55,15 @@ test("a press during the scene download waits for it, then plays with one scene"
   await page.goto("/");
   await page.locator("[data-deck]").scrollIntoViewIfNeeded();
   await asked;
-  const row = page.locator(".tracks li").first();
-  await row.locator("button").click();
-  await expect(row.locator(".st")).toHaveText("cueing");
-  expect((await deckState(page)).playing).toBeNull();
-  release(); // as soon as the press is seen, so the scene has nearly all of the runner's wait to mount
-  // The journey must animate: a scene that hadn't yet learned it was on screen would finish every step at once
-  await expect.poll(() => page.evaluate(() => window.__deckScene?.tweens() ?? 0), { timeout: 30_000 * SLOW }).toBeGreaterThan(0);
+  await page.locator(".tracks li").first().locator("button").click();
+  release(); // as soon as the press is in, so the scene has nearly all of the runner's 5s wait to mount
   await playing(page, 0, 60_000 * SLOW);
-  // An instant journey draws 0 or 1 frames; the tweens poll above already proves this one animated
+  const seen = await page.evaluate(() => (window as unknown as { seen: { labels: string[]; mostTweens: number } }).seen);
+  // Cueing while the scene downloaded, playing only once it had arrived
+  expect(seen.labels).toEqual(["cueing no scene", "playing · stop scene"]);
+  // The journey animated: a scene that hadn't yet learned it was on screen would finish every step at once, leaving no
+  // tween running on any frame. An instant journey draws 0 or 1 frames
+  expect(seen.mostTweens).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.__deckScene!.frames())).toBeGreaterThan(2);
   await expect(page.locator("[data-deck] canvas")).toHaveCount(1);
   await settled(page);
