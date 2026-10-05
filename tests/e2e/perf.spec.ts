@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { hasWebGL, settled } from "./deck";
 
 // Spec 11 on every run: interaction to next paint under 200ms at 4× CPU and layout shift under 0.01 at phone width.
 // INP comes from the Event Timing API (an interaction's latency is its longest event entry), because Lighthouse's
@@ -8,6 +9,14 @@ test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured locally");
 
 async function throttled(page: Page) {
   await page.goto("/", { waitUntil: "load" });
+  // The scene boots in an idle callback once the turntable row is near (long tasks of its own), so let it finish before
+  // throttling: the gates measure the interactions, not the boot. Then back to the top, as a visitor starts.
+  if (await hasWebGL(page)) {
+    await page.locator("[data-deck]").scrollIntoViewIfNeeded();
+    await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 });
+    await settled(page);
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
   await page.evaluate(() => {
     const store = window as unknown as { latencies: Map<number, number> };
     store.latencies = new Map();
@@ -24,6 +33,9 @@ async function throttled(page: Page) {
 
 /** Forgets the interactions so far, so the next reading is of the one about to be made */
 const forget = (page: Page) => page.evaluate(() => (window as unknown as { latencies: Map<number, number> }).latencies.clear());
+
+/** Interactions the browser has counted so far (Event Timing's interactionCount) */
+const interactions = (page: Page) => page.evaluate(() => (performance as unknown as { interactionCount: number }).interactionCount);
 
 /** The slowest interaction so far, once its entries have arrived (after the next paint) */
 const slowest = (page: Page) =>
@@ -64,10 +76,11 @@ test("opening the closer look responds within 200ms at 4× CPU", async ({ page }
   await item.locator(".peek").click();
   await expect(item.locator(".frame img")).toBeVisible();
   await forget(page);
+  const counted = await interactions(page);
   await item.locator(".frame").click();
   const latency = await slowest(page);
   test.info().annotations.push({ type: "inp", description: `opening the closer look: ${latency}ms at 4× CPU` });
-  expect(latency).toBeGreaterThan(0); // the click was measured
+  expect(await interactions(page)).toBeGreaterThan(counted); // the click was measured, even if too quick for an entry
   expect(latency).toBeLessThan(200);
   await expect(page.locator("dialog.closer")).toHaveAttribute("open", "");
 });

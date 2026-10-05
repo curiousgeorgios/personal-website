@@ -16,9 +16,19 @@ function setup() {
     platter: { rotation: { y: 0 } },
     candle: { light: { intensity: 1 }, flame: { scale: { set: () => {} }, rotation: { z: 0 } }, intensity: 1 },
   };
-  let tweening = false;
-  const loop = createLoop({ renderer: renderer as never, stage: stage as never, tweens: { step: () => tweening } as never, reduce: true, onFrame: () => {} });
-  return { loop, renderer, shadows, tween: (on: boolean) => void (tweening = on) };
+  // As the real tweens do: step applies a tween's last pose and reports it done in the same call
+  let running = 0;
+  const tweens = {
+    get count() {
+      return running;
+    },
+    step: () => {
+      if (running > 0) running -= 1;
+      return running > 0;
+    },
+  };
+  const loop = createLoop({ renderer: renderer as never, stage: stage as never, tweens: tweens as never, reduce: true, onFrame: () => {} });
+  return { loop, renderer, shadows, tween: (on: boolean) => void (running = on ? Infinity : 0), tweenFor: (frames: number) => void (running = frames) };
 }
 
 beforeEach(() => {
@@ -50,5 +60,17 @@ test("the shadow map is redrawn for a frame asked for and while tweens run, not 
   loop.invalidate();
   await vi.advanceTimersByTimeAsync(200);
   expect(shadows.slice(before).every((redrawn) => redrawn === true)).toBe(true);
+  loop.stop();
+});
+
+test("the frame a tween ends on still redraws the shadow map, because it draws the final pose", async () => {
+  const { loop, shadows, tweenFor } = setup();
+  loop.setVisible(true);
+  await vi.advanceTimersByTimeAsync(20);
+  const before = shadows.length;
+  tweenFor(3); // three frames: the third applies the final pose and reports the tween done
+  loop.invalidate();
+  await vi.advanceTimersByTimeAsync(200);
+  expect(shadows.slice(before)).toEqual([true, true, true]);
   loop.stop();
 });

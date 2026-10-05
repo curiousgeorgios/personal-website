@@ -30,9 +30,10 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
   let dirty = true;
   let frames = 0;
 
-  // The shadow map is redrawn only when something casting a shadow may have moved: a tween, or a frame asked for.
-  // Spinning, scratching and the candle's flicker change nothing a shadow shows (the record's shadow is a disc), so the
-  // 2048 map isn't redrawn 30 times a second for a whole track (plan 2 follow-up).
+  // The shadow map is redrawn only when something casting a shadow may have moved: a tween, or a frame asked for
+  // (and every scratch move asks for one: pointer.ts invalidates). Spinning and the candle's flicker change nothing a
+  // shadow shows (the record's shadow is a disc), so the 2048 map isn't redrawn 30 times a second for a whole track
+  // (plan 2 follow-up).
   renderer.shadowMap.autoUpdate = false;
 
   function flicker(now: number) {
@@ -48,6 +49,9 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
     if (stopped || !visible) return;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    // Counted before stepping: step applies a tween's final pose and reports it done in the same call, and the frame
+    // that draws that pose still needs its shadow
+    const stepping = tweens.count > 0;
     const tweening = tweens.step(now);
     omega += (omegaTarget - omega) * (1 - Math.exp(-dt * 3.2));
     if (omegaTarget === 0 && Math.abs(omega) < 0.0005) omega = 0;
@@ -56,7 +60,7 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
     const spinningOnly = moving && !tweening && !scratching;
     if (dirty || !spinningOnly || now - lastDraw >= 1000 / SPIN_FPS - 1) {
       if (moving && !reduce) flicker(now);
-      renderer.shadowMap.needsUpdate = dirty || tweening;
+      renderer.shadowMap.needsUpdate = dirty || stepping;
       renderer.render(scene, camera);
       frames += 1;
       lastDraw = now;
