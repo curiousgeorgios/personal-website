@@ -40,7 +40,11 @@ export async function verifyAccessJwt(token: string, config: AccessConfig, keys:
   try {
     const { payload } = await jwtVerify(token, keys, { issuer: `https://${config.teamDomain}`, audience: config.audience, algorithms: ["RS256"], requiredClaims: ["exp"] });
     // ASCII only: a claim with any other character (the Kelvin sign folds to "k" under Unicode lowercasing) is never the admin
-    if (typeof payload.email !== "string" || !/^[\x21-\x7e]+$/.test(payload.email)) return null;
+    if (typeof payload.email !== "string" || !/^[\x21-\x7e]+$/.test(payload.email)) {
+      // A service token, or the Kelvin case: logged like the other refusals, without whatever the claim held
+      console.warn("admin: access token refused", "no usable email");
+      return null;
+    }
     return { email: payload.email, expires: typeof payload.exp === "number" ? payload.exp : null };
   } catch (error) {
     logRefusal(error);

@@ -66,6 +66,17 @@ describe("verifyAccessJwt", () => {
     expect(await verifyAccessJwt(await sign(claims as Claims), config, keys)).toBeNull();
   });
 
+  test.each([
+    ["no email claim", { email: null }],
+    ["an email claim that is a list", { email: ["george@example.com"] }],
+    ["an email claim with a non-ASCII character (the Kelvin sign)", { email: "geor\u212Ae@example.com" }],
+  ])("logs a line, without the address, for %s", async (_name, claims) => {
+    expect(await verifyAccessJwt(await sign(claims as Claims), config, keys)).toBeNull();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith("admin: access token refused", "no usable email");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("george");
+  });
+
   test("refuses a token signed by another key", async () => {
     expect(await verifyAccessJwt(await sign({ key: strangerKey }), config, keys)).toBeNull();
   });
