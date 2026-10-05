@@ -96,3 +96,7 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: https://curiousgeorge.dev
           PRIVACY_PATH: /?deploy=${{ github.sha }}
+      # Spec 11's page budgets on the live site (Lighthouse, mobile, median of five). Over budget is a warning on the
+      # run, not a failed deploy; the interaction and layout budgets are gated in the check job.
+      - run: bun run lighthouse https://curiousgeorge.dev/
+        continue-on-error: true

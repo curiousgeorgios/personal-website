@@ -16,6 +16,7 @@
     "seed:media": "node scripts/seed-media.mjs",
     "seed:snapshots": "node scripts/seed-snapshots.mjs",
     "poster": "node scripts/poster.mjs",
+    "lighthouse": "node scripts/lighthouse.mjs",
     "db:migrate:local": "wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/state",
     "db:migrate:remote": "wrangler d1 migrations apply curiousgeorge-logbook --remote",
     "serve": "wrangler dev -c dist/server/wrangler.json --port 4331 --persist-to .wrangler/state",

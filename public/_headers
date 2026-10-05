@@ -1,0 +1,7 @@
+# Every static file: never sniffed (spec 12.1)
+/*
+  X-Content-Type-Options: nosniff
+
+# The fonts' names aren't hashed, so a month rather than a year
+/fonts/*
+  Cache-Control: public, max-age=2592000
