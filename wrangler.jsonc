@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "curiousgeorge-logbook",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "20080574-8bbc-41c5-899e-543143d10bc7",
       "migrations_dir": "migrations"
     }
   ],
