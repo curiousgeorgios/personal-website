@@ -14,7 +14,7 @@ The PostHog project key is a Worker secret, `POSTHOG_KEY`, and the proxy adds it
 
 ## Consequences
 
-The HTML is smaller and key-free, a changed key needs only `wrangler secret put`, and tests can never send events to PostHog because they never have the key. The proxy is no open relay: the worst a stranger can do is add pageview-shaped noise, the same as visiting the site. Adding a new event means changing the proxy's list as well as the page. The beacon can't be pointed at PostHog directly any more, and PostHog's own SDK features (feature flags, session replay) stay out of reach, which the site doesn't want anyway (ADR-0003).
+The HTML is smaller and key-free, a changed key needs only `wrangler secret put`, and tests never send events to PostHog: local and CI builds have no key, and the checks against the live site switch the beacon off or block it. The proxy is no open relay: the worst a stranger can do is add pageview-shaped noise, the same as visiting the site. Adding a new event means changing the proxy's list as well as the page. The beacon can't be pointed at PostHog directly any more, and PostHog's own SDK features (feature flags, session replay) stay out of reach, which the site doesn't want anyway (ADR-0003).
 
 ## Alternatives considered
 
