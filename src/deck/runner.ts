@@ -11,12 +11,14 @@ export interface DeckOptions {
   tracks: DeckTrack[];
   audio: AudioPort;
   announce: (message: string) => void;
+  /** Called when a record's audio starts (the page counts it as record_played) */
+  played?: (index: number) => void;
   now?: () => number;
 }
 
 // One runner owns every record movement (spec 5.3). Input only says what the visitor wants; the runner moves the
 // deck there one step at a time and re-checks after every step, so two journeys can never overlap.
-export function createDeck({ tracks, audio, announce, now = () => performance.now() }: DeckOptions): Deck {
+export function createDeck({ tracks, audio, announce, played, now = () => performance.now() }: DeckOptions): Deck {
   const clamp = (index: number) => Math.max(0, Math.min(tracks.length - 1, index));
   let want: number | null = null;
   let current: number | null = null;
@@ -109,6 +111,7 @@ export function createDeck({ tracks, audio, announce, now = () => performance.no
     playing = index;
     emit();
     announce(`now playing ${tracks[index].title}`);
+    played?.(index);
   }
 
   async function unload(index: number) {

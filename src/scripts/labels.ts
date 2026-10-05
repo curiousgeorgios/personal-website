@@ -1,3 +1,5 @@
+import type { TrackDetail } from "../lib/track";
+
 export {};
 
 // Wall labels open in place. Closed drawers stay hidden="until-found" so find-in-page can still reach them.
@@ -39,6 +41,10 @@ document.querySelectorAll<HTMLElement>(".line-item.labelled").forEach((item) => 
   line.addEventListener("click", (event) => {
     if ((event.target as HTMLElement).closest("a")) return; // links still navigate
     setOpen(item, !isOpen(item));
+    // Clicks only: a label revealed by find-in-page isn't counted
+    if (isOpen(item) && item.dataset.slug) {
+      document.dispatchEvent(new CustomEvent<TrackDetail>("logbook:track", { detail: { event: "label_opened", properties: { slug: item.dataset.slug } } }));
+    }
   });
   // Find-in-page revealed a closed label: reflect it as open
   drawer.addEventListener("beforematch", () => {

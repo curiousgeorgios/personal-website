@@ -2,6 +2,7 @@ import { createAudioPort } from "../deck/audio";
 import { bindList } from "../deck/list";
 import { createDeck } from "../deck/runner";
 import type { Deck, DeckTrack } from "../deck/types";
+import type { TrackDetail } from "../lib/track";
 
 // The deck runner: no Three.js, no dynamic import, inlined into the page, so playback never depends on a hashed
 // file or on WebGL (spec 5.1). The scene loader finds the runner on the deck host.
@@ -17,6 +18,7 @@ if (host && list && element && status) {
     src: button.dataset.src ?? "",
     cover: button.dataset.cover ?? "",
   }));
+  const ids = [...list.querySelectorAll<HTMLButtonElement>("button[data-index]")].map((button) => Number(button.dataset.id));
   const deck = createDeck({
     tracks,
     audio: createAudioPort(element),
@@ -27,6 +29,8 @@ if (host && list && element && status) {
         status.textContent = message;
       });
     },
+    played: (index) =>
+      document.dispatchEvent(new CustomEvent<TrackDetail>("logbook:track", { detail: { event: "record_played", properties: { record_id: ids[index] } } })),
   });
   host.deck = deck;
   bindList(list, deck);

@@ -19,6 +19,7 @@ describe("Turntable", () => {
     expect(button.getAttribute("type")).toBe("button");
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(button.getAttribute("data-index")).toBe("0");
+    expect(button.getAttribute("data-id")).toBe("1");
     expect(button.getAttribute("data-src")).toBe("/media/audio/simple-things.mp3");
     expect(button.getAttribute("data-cover")).toBe("/media/covers/simple-things.webp");
     expect(button.getAttribute("data-title")).toBe("simple things");

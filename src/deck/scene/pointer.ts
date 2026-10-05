@@ -1,4 +1,5 @@
 import { Raycaster, Vector2, type Mesh, type Object3D } from "three";
+import type { TrackDetail } from "../../lib/track";
 import type { Deck } from "../types";
 import type { Stage } from "./build";
 import type { Hud } from "./hud";
@@ -34,6 +35,7 @@ export function bindPointer(canvas: HTMLCanvasElement, { deck, stage, journeys, 
   const ndc = new Vector2();
   let previewing: Preview = null;
   let suppressClick = false;
+  let found = false;
   let drag: { x0: number; y0: number; angle: number; at: number; live: boolean; rate: number } | null = null;
 
   function pick(event: MouseEvent): Act | null {
@@ -77,6 +79,10 @@ export function bindPointer(canvas: HTMLCanvasElement, { deck, stage, journeys, 
     if (!drag.live) {
       if (Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) < SCRATCH_PX) return;
       drag.live = true;
+      if (!found) {
+        found = true; // counted once per visit
+        document.dispatchEvent(new CustomEvent<TrackDetail>("logbook:track", { detail: { event: "scratch_found" } }));
+      }
       loop.setScratching(true);
       canvas.style.cursor = "grabbing";
     }

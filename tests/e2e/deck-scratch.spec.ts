@@ -23,6 +23,9 @@ test("dragging the spinning record scratches it; letting go plays on at normal s
     (window as unknown as { rates: number[] }).rates = seen;
     const element = document.querySelector<HTMLAudioElement>("audio[data-deck-audio]")!;
     element.addEventListener("ratechange", () => seen.push(element.playbackRate));
+    const events: string[] = [];
+    (window as unknown as { events: string[] }).events = events;
+    document.addEventListener("logbook:track", (event) => events.push(event.detail.event));
   });
   await page.mouse.down();
   for (let step = 1; step <= 12; step++) {
@@ -36,6 +39,8 @@ test("dragging the spinning record scratches it; letting go plays on at normal s
   expect(rates.some((rate) => Math.abs(rate - 1) > 0.05)).toBe(true);
   expect(Math.max(...rates)).toBeLessThanOrEqual(2.5);
   expect(Math.min(...rates)).toBeGreaterThanOrEqual(0.25);
+  // Found the easter egg: counted once, however many times the drag moves
+  expect(await page.evaluate(() => (window as unknown as { events: string[] }).events)).toEqual(["scratch_found"]);
   await expect.poll(async () => (await audioState(page)).rate, { timeout: 3000 * SLOW }).toBe(1);
   // The click that ends a scratch is not a stop
   expect(await deckState(page)).toMatchObject({ want: LONG_TRACK, playing: LONG_TRACK });

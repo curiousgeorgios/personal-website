@@ -183,6 +183,24 @@ describe("deck runner without a scene", () => {
     deck.browse(3);
     expect(heard.at(-1)?.browsed).toBe(2);
   });
+
+  test("tells the page when a record's audio starts, but not when it can't play", async () => {
+    const audio = fakeAudio();
+    const played: number[] = [];
+    const deck = createDeck({ tracks, audio, announce: () => {}, now: () => clock, played: (index) => played.push(index) });
+    deck.toggle(1);
+    await settle();
+    expect(played).toEqual([1]);
+    clock += DOUBLE_PRESS_MS + 1;
+    deck.toggle(1); // stop
+    await settle();
+    expect(played).toEqual([1]);
+    clock += DOUBLE_PRESS_MS + 1;
+    audio.result = false;
+    deck.toggle(2);
+    await settle();
+    expect(played).toEqual([1]);
+  });
 });
 
 describe("deck runner with a scene", () => {

@@ -25,6 +25,7 @@ const media = (key: string) => `/media/${key}`;
             type="button"
             aria-pressed="false"
             data-index={index}
+            data-id={record.id}
             data-src={media(record.audioKey)}
             data-cover={media(record.coverKey)}
             data-title={record.title}

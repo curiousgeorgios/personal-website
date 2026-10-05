@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 test("cookies none, storage empty, every request first party", async ({ page, baseURL }) => {
+  // Against the live site the beacon would count this check as a visit; Global Privacy Control switches it off (the
+  // proxy is checked separately below)
+  if (process.env.PLAYWRIGHT_BASE_URL) {
+    await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "globalPrivacyControl", { get: () => true }));
+  }
   const origin = new URL(baseURL!).origin;
   const setCookies: string[] = [];
   const foreign: string[] = [];
@@ -46,4 +51,14 @@ test("an anonymous request to /admin/ is never served the page", async ({ reques
   test.skip(!process.env.PLAYWRIGHT_BASE_URL, "the local test build skips Access");
   const response = await request.get("/admin/", { maxRedirects: 0 });
   expect(response.status(), "/admin/ answered an anonymous visitor").not.toBe(200);
+});
+
+// An event the logbook never sends is refused by the proxy before anything reaches PostHog, and nothing is set
+test("the analytics proxy answers without a cookie", async ({ request, baseURL }) => {
+  const response = await request.post("/ingest/i/v0/e/", {
+    data: JSON.stringify({ event: "privacy_check", properties: {} }),
+    headers: { Origin: new URL(baseURL!).origin },
+  });
+  expect(response.status()).toBe(400);
+  expect(response.headers()["set-cookie"]).toBeUndefined();
 });
