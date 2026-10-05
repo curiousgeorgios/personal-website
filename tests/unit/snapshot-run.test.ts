@@ -6,23 +6,26 @@ import { sqliteD1 } from "./sqlite-d1";
 const NOW = new Date("2026-10-04T17:00:05.000Z");
 const ID = "01k6d4x3n9e5r2q7w8y0z1a2b3";
 
-// R2 as a map; `uploaded` can be set per object for the sweep
+// R2 as a map; `uploaded` and `customMetadata` can be set per object for the sweep
 function fakeBucket() {
-  const objects = new Map<string, { bytes: Uint8Array; type?: string; uploaded: Date }>();
+  const objects = new Map<string, { bytes: Uint8Array; type?: string; uploaded: Date; customMetadata?: Record<string, string> }>();
   return {
     objects,
-    seed(key: string, uploaded: Date) {
-      objects.set(key, { bytes: new Uint8Array(1), uploaded });
+    seed(key: string, uploaded: Date, customMetadata?: Record<string, string>) {
+      objects.set(key, { bytes: new Uint8Array(1), uploaded, customMetadata });
     },
-    put: vi.fn(async (key: string, bytes: Uint8Array, options?: { httpMetadata?: { contentType?: string } }) => {
-      objects.set(key, { bytes, type: options?.httpMetadata?.contentType, uploaded: NOW });
+    put: vi.fn(async (key: string, bytes: Uint8Array, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }) => {
+      objects.set(key, { bytes, type: options?.httpMetadata?.contentType, uploaded: NOW, customMetadata: options?.customMetadata });
       return {};
     }),
     delete: vi.fn(async (keys: string | string[]) => {
       for (const key of [keys].flat()) objects.delete(key);
     }),
-    list: vi.fn(async ({ prefix }: { prefix?: string }) => ({
-      objects: [...objects].filter(([key]) => key.startsWith(prefix ?? "")).map(([key, object]) => ({ key, uploaded: object.uploaded })),
+    // Like R2, a listing carries custom metadata only when it's asked for
+    list: vi.fn(async ({ prefix, include }: { prefix?: string; cursor?: string; include?: string[] }) => ({
+      objects: [...objects]
+        .filter(([key]) => key.startsWith(prefix ?? ""))
+        .map(([key, object]) => ({ key, uploaded: object.uploaded, ...(include?.includes("customMetadata") && object.customMetadata ? { customMetadata: object.customMetadata } : {}) })),
       truncated: false,
     })),
   };
@@ -38,6 +41,31 @@ const fakeImages = {
     },
   }),
 };
+
+// A D1 whose update that moves a line to a capture rejects, as when the connection drops: `committed` says whether the
+// write went through first (it can do either), and `rereadFails` makes the check of what the line names fail as well
+function flakyDb(real: D1Database, { committed, rereadFails = false }: { committed: boolean; rereadFails?: boolean }): D1Database {
+  const lost = () => new Error("D1_ERROR: Network connection lost.");
+  const failing = (statement: D1PreparedStatement, run: (statement: D1PreparedStatement) => Promise<never>): D1PreparedStatement =>
+    ({ bind: (...values: unknown[]) => failing(statement.bind(...values), run), run: () => run(statement), first: () => run(statement) }) as unknown as D1PreparedStatement;
+  return {
+    prepare(sql: string) {
+      const statement = real.prepare(sql);
+      if (sql.includes("snapshot_status = 'ok'")) {
+        return failing(statement, async (bound) => {
+          if (committed) await bound.run();
+          throw lost();
+        });
+      }
+      if (rereadFails && sql.startsWith("SELECT snapshot_key FROM items WHERE id")) {
+        return failing(statement, async () => {
+          throw lost();
+        });
+      }
+      return statement;
+    },
+  } as unknown as D1Database;
+}
 
 let db: D1Database;
 let bucket: ReturnType<typeof fakeBucket>;
@@ -96,7 +124,7 @@ test("a failed capture keeps the old snapshot and records why", async () => {
   expect(outcomes["digital-nachos"]).toBe("http-error");
   expect(await row("digital-nachos")).toMatchObject({ snapshot_key: "snapshots/digital-nachos-old", snapshot_at: "2026-10-01T17:00:00.000Z", snapshot_status: "http-error" });
   expect([...bucket.objects.keys()].some((key) => key.startsWith("snapshots/digital-nachos-"))).toBe(false);
-  expect(console.error).toHaveBeenCalled();
+  expect(console.error).toHaveBeenCalledWith("snapshots: digital-nachos failed (http-error): status 503");
 });
 
 test("a line given a new address while it was captured keeps what George saved, and the capture's files go", async () => {
@@ -123,6 +151,8 @@ test("one line's unexpected error doesn't stop the others, and the session still
   expect(outcomes["digital-nachos"]).toBe("error");
   expect(outcomes["canberra-events"]).toBe("ok");
   expect(browser.closed).toBe(true);
+  // the error itself is logged, so its stack reaches Workers Logs
+  expect(console.error).toHaveBeenCalledWith("snapshots: digital-nachos errored:", expect.any(Error));
 });
 
 test("re-shoots one line by id, and says when it has no page to snapshot", async () => {
@@ -206,4 +236,82 @@ test("a listing that comes in pages is read to the end before anything is judged
   expect(await sweep(deps())).toBe(0);
   expect(bucket.list).toHaveBeenCalledTimes(2);
   expect(bucket.objects.size).toBe(4);
+});
+
+test("a failed capture of a line given a new address while it was captured records nothing and says it was discarded", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) =>
+    url.includes("canberra.events")
+      ? { status: 503, during: async () => void (await db.prepare("UPDATE items SET snapshot_url = 'https://canberra.events/new' WHERE slug = 'canberra-events'").run()) }
+      : {};
+  expect((await runAll(deps()))["canberra-events"]).toBe("discarded");
+  expect(await row("canberra-events")).toMatchObject({ snapshot_url: "https://canberra.events/new", snapshot_status: null });
+});
+
+test("a failed capture of a line removed while it was captured says it was discarded", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) => (url.includes("linear.gratis") ? { status: 503, during: async () => void (await db.prepare("DELETE FROM items WHERE slug = 'linear-gratis'").run()) } : {});
+  expect((await runAll(deps()))["linear-gratis"]).toBe("discarded");
+});
+
+test("an update that commits and then rejects leaves the line and the files it names alone", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const outcomes = await runAll({ ...deps(), db: flakyDb(db, { committed: true }) });
+  expect(outcomes).toEqual({ "digital-nachos": "error", "canberra-events": "error", "linear-gratis": "error", onestack: "error" });
+  expect(await row("canberra-events")).toMatchObject({ snapshot_key: `snapshots/canberra-events-${ID}`, snapshot_status: "ok" });
+  const files = [...bucket.objects.keys()].filter((key) => key.startsWith(`snapshots/canberra-events-${ID}`));
+  expect(files).toHaveLength(6);
+  expect(bucket.objects.size).toBe(24);
+});
+
+test("an update that rejects before it commits deletes the files, since no line names them", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const outcomes = await runAll({ ...deps(), db: flakyDb(db, { committed: false }) });
+  expect(outcomes["canberra-events"]).toBe("error");
+  expect(await row("canberra-events")).toMatchObject({ snapshot_key: null, snapshot_status: null });
+  expect(bucket.objects.size).toBe(0);
+});
+
+test("when the update rejects and what the line names can't be read either, the files are left for the clean-up", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const outcomes = await runAll({ ...deps(), db: flakyDb(db, { committed: true, rereadFails: true }) });
+  expect(outcomes["canberra-events"]).toBe("error");
+  expect(bucket.objects.size).toBe(24);
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining("canberra-events couldn't check"), expect.any(Error));
+});
+
+test("a clean-up delete that fails is logged, and the capture is still discarded", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) =>
+    url.includes("canberra.events")
+      ? { during: async () => void (await db.prepare("UPDATE items SET snapshot_url = 'https://canberra.events/new' WHERE slug = 'canberra-events'").run()) }
+      : {};
+  bucket.delete.mockRejectedValueOnce(new Error("R2 is down"));
+  expect((await runAll(deps()))["canberra-events"]).toBe("discarded");
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining("canberra-events couldn't delete"), expect.any(Error));
+});
+
+test("a clean-up that fails doesn't lose the outcomes of the run", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  bucket.list.mockRejectedValue(new Error("R2 is down"));
+  expect(await runAll(deps())).toEqual({ "digital-nachos": "ok", "canberra-events": "ok", "linear-gratis": "ok", onestack: "ok" });
+  expect(console.error).toHaveBeenCalledWith("snapshots: clean-up failed:", expect.any(Error));
+});
+
+test("a line given another slug keeps its old capture for a week after the new one, however old the old one is", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const id = (await row("canberra-events"))!.id;
+  const old = "snapshots/canberra-events-01j00000000000000000000000";
+  for (const width of [480, 960, 1920]) {
+    for (const format of ["avif", "webp"]) bucket.seed(`${old}-${width}.${format}`, new Date(NOW.getTime() - 30 * day), { item: String(id) });
+  }
+  await db.prepare("UPDATE items SET slug = 'canberra-nights', snapshot_key = ? WHERE id = ?").bind(old, id).run();
+  expect((await runAll(deps()))["canberra-nights"]).toBe("ok");
+  expect(await row("canberra-nights")).toMatchObject({ snapshot_key: `snapshots/canberra-nights-${ID}` });
+  const left = () => [...bucket.objects.keys()].filter((key) => key.startsWith(old));
+  expect(left()).toHaveLength(6); // replaced just now, though its own upload is a month old
+  const later = new Date(NOW.getTime() + KEEP_SUPERSEDED_MS + 1);
+  expect(await sweep({ ...deps(), now: () => later })).toBe(6);
+  expect(left()).toEqual([]);
+  expect([...bucket.objects.keys()].filter((key) => key.startsWith(`snapshots/canberra-nights-${ID}`))).toHaveLength(6); // the line's own is never deleted
 });
