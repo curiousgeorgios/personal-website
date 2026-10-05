@@ -12,6 +12,8 @@ const cases: [string, string, boolean][] = [
   ["only a background image on the page", "<style>body{margin:0;min-height:100vh;background:linear-gradient(#f4efe6,#d9e4f5)}</style>", true],
   ["only a background image on an element", "<style>div{width:200px;height:200px;background-image:linear-gradient(red,blue)}</style><div></div>", true],
   ["a background image on an element with no box", "<style>div{background-image:linear-gradient(red,blue)}</style><div></div>", false],
+  ["only a background colour on the page", "<style>body{margin:0;min-height:100vh;background:#f4efe6}</style>", false],
+  ["only a background colour on the root", "<style>html{background:#f4efe6}</style>", false],
   ["nothing at all", "", false],
   ["only spaces", "<p>   </p>", false],
 ];

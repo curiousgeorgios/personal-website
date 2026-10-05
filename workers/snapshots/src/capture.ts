@@ -75,7 +75,7 @@ export const SHOWS_SOMETHING = `(() => {
   };
   if ([...document.querySelectorAll("img, svg, canvas, video, picture, iframe, object, embed")].some(shown)) return true;
   const painted = (element) => getComputedStyle(element).backgroundImage !== "none";
-  return painted(document.documentElement) || painted(body) || [...body.querySelectorAll("*")].some((element) => painted(element) && shown(element));
+  return painted(document.documentElement) || painted(body) || [...body.querySelectorAll("*")].some((element) => shown(element) && painted(element));
 })()`;
 
 // A wait that runs out is the capture cap doing its job (puppeteer's TimeoutError); anything else is unexpected, so it's thrown

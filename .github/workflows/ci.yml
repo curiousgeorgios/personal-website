@@ -41,8 +41,20 @@ jobs:
           key: wrangler-chrome-${{ hashFiles('bun.lock') }}
           restore-keys: wrangler-chrome-
       - run: bun run test:e2e
+      # A run that died mid-download leaves a partial Chrome, and an exact-key hit would then serve it until bun.lock changes.
+      # Miniflare writes a marker into a version's directory once it is fully extracted, so save only when every one has it
+      - id: chrome-complete
+        if: always()
+        run: |
+          ready=false
+          for dir in ~/.cache/.wrangler/chrome/*/; do
+            [ -e "$dir" ] || continue
+            ready=true
+            [ -e "${dir}.miniflare-install-complete" ] || { ready=false; break; }
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/save@v6
-        if: always() && steps.chrome.outcome == 'success' && steps.chrome.outputs.cache-hit != 'true'
+        if: always() && steps.chrome.outcome == 'success' && steps.chrome.outputs.cache-hit != 'true' && steps.chrome-complete.outputs.ready == 'true'
         with:
           path: ~/.cache/.wrangler/chrome
           key: wrangler-chrome-${{ hashFiles('bun.lock') }}
