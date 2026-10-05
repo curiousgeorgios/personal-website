@@ -60,3 +60,30 @@ test("a variant that never fits keeps its smallest try, with a warning", async (
   expect(variants[0].bytes.length).toBe(40_000);
   expect(warn).toHaveBeenCalledTimes(2);
 });
+
+// The budgets are "under": a variant exactly at its budget is over it, one byte less fits
+test.each([
+  [480, 30_720],
+  [960, 71_680],
+] as const)("at %i wide, %i bytes is over the budget and one byte less fits", async (width, budget) => {
+  const atBudget = fakeImages((w, _format, quality) => (w === width ? (quality === 70 ? budget : budget - 1) : 1_000));
+  const stepped = await makeVariants(atBudget as unknown as ImagesBinding, png, base);
+  expect(atBudget.asked.filter((line) => line.startsWith(`output ${width} image/avif`))).toEqual([`output ${width} image/avif 70`, `output ${width} image/avif 60`]);
+  expect(stepped.find((variant) => variant.key === `${base}-${width}.avif`)!.bytes.length).toBe(budget - 1);
+
+  const under = fakeImages((w) => (w === width ? budget - 1 : 1_000));
+  await makeVariants(under as unknown as ImagesBinding, png, base);
+  expect(under.asked.filter((line) => line.startsWith(`output ${width} image/avif`))).toEqual([`output ${width} image/avif 70`]);
+});
+
+test("a variant that never fits keeps the smallest it tried, even when that isn't the last", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  // Quality 40 comes out bigger than quality 50 here, and none of them fit
+  const sizes: Record<number, number> = { 70: 50_000, 60: 40_000, 50: 35_000, 40: 36_000 };
+  const images = fakeImages((width, format, quality) => (width === 480 && format === "image/webp" ? sizes[quality] : 1_000));
+  const variants = await makeVariants(images as unknown as ImagesBinding, png, base);
+  expect(variants[1].key).toBe(`${base}-480.webp`);
+  expect(variants[1].bytes.length).toBe(35_000);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("35000 bytes"));
+});

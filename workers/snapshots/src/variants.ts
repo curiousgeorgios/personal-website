@@ -16,8 +16,8 @@ export interface Variant {
 
 /**
  * A capture's six files: AVIF and WebP at 480, 960 and 1920 wide (scaled down, aspect kept), each stepped down in
- * quality until it fits its budget. One that never fits keeps its smallest try; the snapshot matters more than a
- * budget, and the warning lands in Workers Logs.
+ * quality until it fits its budget. One that never fits keeps the smallest it tried, which needn't be the last (an
+ * encoder isn't always monotonic in quality); the snapshot matters more than a budget, and the warning lands in Workers Logs.
  */
 export async function makeVariants(images: ImagesBinding, png: Uint8Array, base: string): Promise<Variant[]> {
   const source = new Blob([png.slice()]);
@@ -25,12 +25,14 @@ export async function makeVariants(images: ImagesBinding, png: Uint8Array, base:
   for (const width of SNAPSHOT_WIDTHS) {
     const budget = VARIANT_BUDGETS[width];
     for (const { format, type } of FORMATS) {
-      let bytes = new Uint8Array();
+      let smallest: Uint8Array | undefined;
       for (const quality of QUALITIES) {
         const result = await images.input(source.stream()).transform({ width, fit: "scale-down" }).output({ format: type, quality });
-        bytes = new Uint8Array(await new Response(result.image()).arrayBuffer());
-        if (budget === undefined || bytes.byteLength < budget) break;
+        const attempt = new Uint8Array(await new Response(result.image()).arrayBuffer());
+        if (!smallest || attempt.byteLength < smallest.byteLength) smallest = attempt;
+        if (budget === undefined || attempt.byteLength < budget) break;
       }
+      const bytes = smallest!;
       const key = snapshotVariant(base, width, format);
       if (budget !== undefined && bytes.byteLength >= budget) console.warn(`snapshots: ${key} is ${bytes.byteLength} bytes, over its ${budget} budget`);
       variants.push({ key, type, bytes });

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { describeSnapshot, snapshotBase, snapshotVariant, variantBase } from "../../src/lib/snapshots";
+import { SNAPSHOT_WIDTHS, describeSnapshot, snapshotBase, snapshotVariant, variantBase, type SnapshotFormat } from "../../src/lib/snapshots";
 
 test.each([
   [null, null, "not captured yet"],
@@ -19,7 +19,9 @@ test("a capture's files share a base: snapshots/<slug>-<id>, then -<width>.<form
   const base = snapshotBase("canberra-events", "01k6d4x3n9e5r2q7w8y0z1a2b3");
   expect(base).toBe("snapshots/canberra-events-01k6d4x3n9e5r2q7w8y0z1a2b3");
   expect(snapshotVariant(base, 480, "avif")).toBe("snapshots/canberra-events-01k6d4x3n9e5r2q7w8y0z1a2b3-480.avif");
-  expect(variantBase(snapshotVariant(base, 1920, "webp"))).toBe(base);
+  for (const width of SNAPSHOT_WIDTHS) {
+    for (const format of ["avif", "webp"] satisfies SnapshotFormat[]) expect(variantBase(snapshotVariant(base, width, format))).toBe(base);
+  }
   expect(variantBase("snapshots/fixture-digital-nachos-960.webp")).toBe("snapshots/fixture-digital-nachos");
   expect(variantBase("snapshots/readme.txt")).toBeNull();
   expect(variantBase("covers/simple-things.webp")).toBeNull();

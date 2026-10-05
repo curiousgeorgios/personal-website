@@ -9,13 +9,24 @@ export interface FakeSite {
   png?: Uint8Array;
   /** Navigation fails with this error */
   fail?: Error;
+  /** Navigation answers with no response at all (puppeteer's null) */
+  noResponse?: boolean;
+  /** The page never finishes loading */
+  neverLoads?: boolean;
   /** The network never goes quiet */
   neverQuiet?: boolean;
+  /** The page shows nothing: no text and no media with a box, whatever the screenshot would weigh */
+  blank?: boolean;
+  /** The browser crashes (a plain error, not a timeout) while waiting for the page to load or go quiet */
+  crash?: "load" | "quiet";
   /** Runs while the page is navigating (to change the database mid-capture) */
   during?: () => Promise<void>;
   /** Reading the page throws (an unexpected failure, not a capture verdict) */
   broken?: boolean;
 }
+
+/** puppeteer's TimeoutError, which a capture's waits treat as the cap doing its job */
+const timeout = (message: string) => Object.assign(new Error(message), { name: "TimeoutError" });
 
 export type FakePage = CapturePage & { calls: string[]; intercept(url: string): Promise<"blocked" | "allowed"> };
 
@@ -41,14 +52,22 @@ export function fakePage(site: (url: string) => FakeSite): FakePage {
       current = site(url);
       await current.during?.();
       if (current.fail) throw current.fail;
+      if (current.noResponse) return null;
       return { status: () => current.status ?? 200, headers: () => current.headers ?? {} };
     },
     async waitForFunction(_expression, options) {
       calls.push(`wait load ${options.timeout}`);
+      if (current.crash === "load") throw new Error("Target closed");
+      if (current.neverLoads) throw timeout("Waiting failed: 15000ms exceeded");
     },
     async waitForNetworkIdle(options) {
       calls.push(`wait quiet ${options.idleTime} ${options.timeout}`);
-      if (current.neverQuiet) throw new Error("Timeout exceeded while waiting for network idle");
+      if (current.crash === "quiet") throw new Error("Target closed");
+      if (current.neverQuiet) throw timeout("Timeout exceeded while waiting for network idle");
+    },
+    async evaluate() {
+      calls.push("evaluate");
+      return !current.blank;
     },
     async content() {
       if (current.broken) throw new Error("Target closed");
