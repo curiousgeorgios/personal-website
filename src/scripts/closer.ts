@@ -44,11 +44,34 @@ function swapIn(link: HTMLAnchorElement, url: string) {
   );
 }
 
+// Resolves once the frame's own picture has loaded or failed, or after `ms`
+function arrival(shot: HTMLImageElement, ms: number) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(wait);
+      shot.removeEventListener("load", done);
+      shot.removeEventListener("error", done);
+      resolve();
+    };
+    const wait = setTimeout(done, ms);
+    shot.addEventListener("load", done);
+    shot.addEventListener("error", done);
+  });
+}
+
 async function open(link: HTMLAnchorElement) {
   if (!dialog || !big || dialog.open || opening) return;
   const shot = link.querySelector("img");
   if (!shot) return;
   opening = true;
+  // One deadline for both waits below, so a click lets go within PICTURE_WAIT in all
+  const until = performance.now() + PICTURE_WAIT;
+  // Chromium leaves currentSrc empty until the frame's own picture has arrived, so a click on a frame just shown, or on a
+  // slow file, waits for it within the same few seconds. Eager, so a lazy frame out of view fetches it too
+  if (!shot.currentSrc && !shot.complete) {
+    shot.loading = "eager";
+    await arrival(shot, PICTURE_WAIT);
+  }
   const own = shot.currentSrc;
   if (own) {
     big.src = own;
@@ -57,7 +80,7 @@ async function open(link: HTMLAnchorElement) {
     // Decoded already once the frame shows. A frame clicked before its picture arrived waits for it (fetched here too, as
     // a lazy frame out of view never fetches its own), but only a few seconds, so a picture that never comes doesn't hold
     // every other frame up. Nothing opens then: a look appearing long after the click would be a surprise
-    await Promise.race([big.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, PICTURE_WAIT))]);
+    await Promise.race([big.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, Math.max(0, until - performance.now())))]);
   }
   opening = false;
   // The label may have been closed meanwhile (its pill's aria-expanded is the state), and nothing opens over that

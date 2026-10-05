@@ -458,12 +458,14 @@ test("the closer look opens at once with the frame's own picture, and the big fi
   const item = page.locator('[data-slug="digital-nachos"]');
   await item.locator(".peek").click();
   await expect(item.locator(".frame img")).toBeVisible();
-  const own = await item.locator(".frame img").evaluate((img: HTMLImageElement) => img.currentSrc);
   await item.locator(".frame").click();
   const dialog = page.locator("dialog.closer");
   const big = dialog.locator("img");
   await expect(dialog).toHaveAttribute("open", "");
-  // Open before the 1920 could have arrived: the picture is the frame's own
+  // Open before the 1920 could have arrived: the picture is the frame's own. Read once open, as Chromium leaves the
+  // frame's currentSrc empty until its picture has arrived, which a click can come before
+  const own = await item.locator(".frame img").evaluate((img: HTMLImageElement) => img.currentSrc);
+  expect(own).not.toBe("");
   expect(await big.evaluate((img: HTMLImageElement) => img.currentSrc)).toBe(own);
   await expect.poll(() => big.evaluate((img) => getComputedStyle(img).transform)).toBe("none");
   const before = await big.boundingBox();
@@ -541,6 +543,29 @@ test("a frame whose own picture never arrives opens nothing, and holds no other 
   await expect(dialog).not.toHaveAttribute("open", "");
   await expect(second.locator(".frame")).toBeFocused();
   await expect(dialog.locator("img")).not.toHaveAttribute("src", /.*/);
+});
+
+test("a frame clicked before its own picture has arrived opens its closer look once the picture comes", async ({ page, browserName }) => {
+  const OWN = /fixture-digital-nachos-(480|960)\.(avif|webp)$/;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route(OWN, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  const asked = page.waitForRequest(OWN);
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await asked;
+  // Chromium has no currentSrc until the response is in: the click below used to find no picture and open nothing
+  if (browserName === "chromium") expect(await item.locator(".frame img").evaluate((img: HTMLImageElement) => img.currentSrc)).toBe("");
+  await item.locator(".frame").click();
+  release();
+  const dialog = page.locator("dialog.closer");
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of digital nachos");
+  await expect(item.locator(".frame img")).toHaveCSS("visibility", "hidden");
 });
 
 test("a closer look whose big file won't load keeps the frame's own picture, grown to fit the window", async ({ page }) => {

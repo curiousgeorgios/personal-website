@@ -42,8 +42,11 @@ test("the same record twice within 450ms plays once", async ({ page }) => {
   // click only once the renderer has handled the first, so how far apart the runner sees them is down to load. The edges
   // of the 450ms window are runner.test.ts's
   await page.evaluate(() => window.__deck!.hold(performance.now()));
-  await page.locator(".tracks li").first().locator("button").dblclick();
-  await page.evaluate(() => window.__deck!.hold(null));
+  try {
+    await page.locator(".tracks li").first().locator("button").dblclick();
+  } finally {
+    await page.evaluate(() => window.__deck!.hold(null));
+  }
   await playing(page, 0);
   expect((await deckState(page)).want).toBe(0);
   await settled(page);
