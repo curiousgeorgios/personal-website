@@ -40,17 +40,40 @@ function setOpen(item: HTMLElement, open: boolean) {
   );
 }
 
-// The hover card's picture is named in data attributes until the first hover or focus, on fine pointers only (spec 4.1)
+// A card centred on its pill near the page's edge would be cut there (.book clips sideways rather than scroll): it slides
+// back inside (8px from the edge) and still grows out of the pill, because its transform origin moves with it
+const EDGE = 8;
+function nudge(item: HTMLElement, card: HTMLElement) {
+  const wrap = item.querySelector(".peekwrap");
+  if (!wrap) return;
+  const box = wrap.getBoundingClientRect();
+  const bounds = item.closest(".book")?.getBoundingClientRect();
+  const left = Math.max(bounds?.left ?? 0, 0) + EDGE;
+  const right = Math.min(bounds?.right ?? Infinity, document.documentElement.clientWidth) - EDGE;
+  const half = card.offsetWidth / 2;
+  const centre = box.left + box.width / 2;
+  const shift = centre + half > right ? right - (centre + half) : centre - half < left ? left - (centre - half) : 0;
+  card.style.setProperty("--nudge", `${Math.round(shift)}px`);
+}
+
+// The hover card's picture is named in data attributes until the first hover or focus, on fine pointers only (spec 4.1).
+// The card shows only once that picture has decoded, so a slow first hover never fades in an empty card
 function loadCard(item: HTMLElement) {
   if (!finePointer()) return;
-  for (const element of item.querySelectorAll<HTMLElement>(".hovercard [data-srcset], .hovercard [data-src]")) {
+  const card = item.querySelector<HTMLElement>(".hovercard");
+  if (!card) return;
+  nudge(item, card); // on every hover: the window may have changed size since
+  const waiting = [...card.querySelectorAll<HTMLElement>("[data-srcset], [data-src]")];
+  if (waiting.length === 0) return; // named on an earlier hover
+  for (const element of waiting) {
     if (element.dataset.srcset) element.setAttribute("srcset", element.dataset.srcset);
     if (element.dataset.src) element.setAttribute("src", element.dataset.src);
     delete element.dataset.srcset;
     delete element.dataset.src;
   }
-  // Shown only from here on: without this script the card would be blank, and its "click for the label" untrue
-  item.querySelector(".hovercard")?.classList.add("ready");
+  // Shown only from here on: without this script the card would be blank, and its "click for the label" untrue. A picture
+  // that won't load removes the card instead (its error listener below)
+  card.querySelector("img")?.decode().then(() => card.classList.add("ready"), () => {});
 }
 
 const labelled = document.querySelectorAll<HTMLElement>(".line-item.labelled");

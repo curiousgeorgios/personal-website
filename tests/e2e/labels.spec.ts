@@ -618,6 +618,60 @@ test("the hover cards never scroll the page sideways", async ({ page, isMobile }
   }
 });
 
+test("a hover card near the page's right edge slides back inside it, still growing out of its pill", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  test.setTimeout(90_000); // three loads, and a loaded machine can stall a renderer for seconds after each hover
+  for (const width of [800, 830, 860]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    // The labelled line with a snapshot whose pill sits furthest right
+    const slug = await page.evaluate(() => {
+      const items = [...document.querySelectorAll<HTMLElement>(".line-item.labelled")].filter((item) => item.querySelector(".hovercard"));
+      const right = (item: HTMLElement) => item.querySelector(".peek")!.getBoundingClientRect().right;
+      return items.sort((a, b) => right(b) - right(a))[0].dataset.slug!;
+    });
+    const item = page.locator(`[data-slug="${slug}"]`);
+    const card = item.locator(".hovercard");
+    await item.locator(".peek").hover();
+    await expect(card, `${width}px wide`).toHaveCSS("opacity", "1", { timeout: 15_000 });
+    await card.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)).then(() => undefined));
+    const box = (await card.boundingBox())!;
+    const pill = (await item.locator(".peek").boundingBox())!;
+    expect(box.x, `${width}px wide`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${width}px wide`).toBeLessThanOrEqual(width - 7.5);
+    const centre = pill.x + pill.width / 2;
+    expect(centre, `${width}px wide: the pill is under the card`).toBeGreaterThan(box.x);
+    expect(centre, `${width}px wide: the pill is under the card`).toBeLessThan(box.x + box.width);
+    await page.locator("h1").hover();
+  }
+});
+
+test("a slow first hover shows the card only once its picture is ready, never an empty card", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  await page.route(/fixture-canberra-events-480\.(avif|webp)$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  await item.locator(".aside").hover();
+  await page.waitForTimeout(600); // well past the 90ms intent delay and the 140ms fade
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toHaveCSS("opacity", "1", { timeout: 10_000 });
+  expect(await card.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+});
+
+test("a real Tab reaches the pill and brings its card up", async ({ page, browserName, isMobile }) => {
+  test.skip(isMobile || browserName !== "chromium", "WebKit on macOS doesn't Tab to buttons, and phones have no hover cards");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator("a").first().focus(); // the line's own link, just before its pill
+  await page.keyboard.press("Tab");
+  await expect(item.locator(".peek")).toBeFocused();
+  await expect(item.locator(".hovercard")).toHaveCSS("opacity", "1");
+});
+
 test("selecting a line's text doesn't toggle its label", async ({ page, isMobile }) => {
   test.skip(isMobile, "a mouse selection");
   await page.goto("/");

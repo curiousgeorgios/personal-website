@@ -36,6 +36,29 @@ test("opening a label is counted with its slug and the visit's session", async (
   expect(body(opened).properties).toMatchObject({ slug: "canberra-events", $session_id: session });
 });
 
+test("closing a label, or find-in-page opening one, isn't counted", async ({ page }) => {
+  const opened: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/ingest/i/v0/e/") && body(request).event === "label_opened") opened.push(body(request).properties.slug);
+  });
+  await page.goto("/");
+  const pill = page.locator('[data-slug="canberra-events"] .peek');
+  const [first] = await Promise.all([beacon(page, "label_opened"), pill.click()]);
+  await accepted(first);
+  await pill.click(); // closes it
+  await expect(pill).toHaveAttribute("aria-expanded", "false");
+  // What find-in-page does to a match inside hidden="until-found": beforematch, then the attribute goes
+  await page.locator("#label-digital-nachos").evaluate((drawer) => {
+    drawer.dispatchEvent(new Event("beforematch"));
+    drawer.removeAttribute("hidden");
+  });
+  await expect(page.locator('[data-slug="digital-nachos"] .peek')).toHaveAttribute("aria-expanded", "true");
+  // A label opened by a click, which is counted: once its beacon is here, any the steps above sent would be too
+  const [last] = await Promise.all([beacon(page, "label_opened"), page.locator('[data-slug="linear-gratis"] .peek').click()]);
+  await accepted(last);
+  expect(opened).toEqual(["canberra-events", "linear-gratis"]);
+});
+
 test("playing a record is counted with its id", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "playback is covered by the deck specs; counted once here");
   test.setTimeout(90_000 * SLOW);
