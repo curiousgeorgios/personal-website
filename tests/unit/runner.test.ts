@@ -290,6 +290,62 @@ describe("deck runner with a scene", () => {
     expect(deck.getState()).toMatchObject({ playing: 0, scene: true });
   });
 
+  test("a different press during the download skips the first record's journey", async () => {
+    const { deck, audio } = setup();
+    const scene = fakeView(100);
+    let resolve!: (view: DeckView) => void;
+    deck.connect(new Promise((r) => (resolve = r)));
+    deck.toggle(0);
+    clock = 500;
+    deck.toggle(1);
+    resolve(scene.view);
+    await settle(5000);
+    expect(scene.calls).toEqual(["flip 1", "load 1"]);
+    expect(starts(audio.calls)).toEqual(["start /media/audio/b.mp3"]);
+    expect(deck.getState()).toMatchObject({ want: 1, current: 1, playing: 1, busy: false });
+  });
+
+  test("a stop during the download moves nothing", async () => {
+    const { deck, audio } = setup();
+    const scene = fakeView(100);
+    let resolve!: (view: DeckView) => void;
+    deck.connect(new Promise((r) => (resolve = r)));
+    deck.toggle(0);
+    clock = 500;
+    deck.toggle(0);
+    resolve(scene.view);
+    await settle(5000);
+    expect(scene.calls).toEqual([]);
+    expect(starts(audio.calls)).toEqual([]);
+    expect(deck.getState()).toMatchObject({ want: null, current: null, busy: false });
+  });
+
+  test("a record taken back on its way to the platter is never counted as played", async () => {
+    const audio = fakeAudio();
+    const played: number[] = [];
+    const deck = createDeck({ tracks, audio, announce: () => {}, now: () => clock, played: (index) => played.push(index) });
+    const scene = fakeView(1000);
+    deck.connect(Promise.resolve(scene.view));
+    await settle();
+    deck.toggle(0);
+    await settle(500); // record 0 is on its way
+    clock = 500;
+    deck.toggle(1);
+    await settle(10_000);
+    expect(played).toEqual([1]);
+    clock = 20_000;
+    deck.toggle(1); // stop, so the next press starts from an empty platter
+    await settle(10_000);
+    clock = 40_000;
+    deck.toggle(2);
+    await settle(500); // record 2 is on its way
+    clock = 40_600;
+    deck.toggle(2); // and is taken back before it lands
+    await settle(10_000);
+    expect(played).toEqual([1]);
+    expect(deck.getState()).toMatchObject({ want: null, current: null, playing: null });
+  });
+
   test("stops waiting for a scene that never arrives", async () => {
     const { deck } = setup();
     deck.connect(new Promise(() => {}));

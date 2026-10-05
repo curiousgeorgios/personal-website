@@ -50,6 +50,45 @@ test("a press during the scene download waits for it, then plays with one scene"
   await expectSeated(page);
 });
 
+test("a different press during the scene download plays only the second record; the first never leaves the crate", async ({ page }) => {
+  test.skip(!(await hasWebGL(page)), "no WebGL in this browser here");
+  // How far record 0's sleeve ever rose, and whether its disc ever showed, read on every frame once the scene exists
+  await page.addInitScript(() => {
+    const first = { lifted: 0, out: false };
+    (window as unknown as { first: typeof first }).first = first;
+    const watch = () => {
+      const record = window.__deckScene?.offsets()[0];
+      if (record) {
+        first.lifted = Math.max(first.lifted, record.lifted);
+        first.out ||= record.visible;
+      }
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route(SCENE, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  const asked = page.waitForRequest(SCENE);
+  await page.goto("/");
+  await page.locator("[data-deck]").scrollIntoViewIfNeeded();
+  await asked;
+  const rows = page.locator(".tracks li");
+  await rows.nth(0).locator("button").click();
+  // No wait between: a different record isn't held by the double-press guard, and the runner's 5s wait for the scene
+  // starts at the first press
+  await rows.nth(1).locator("button").click();
+  await expect(rows.nth(1).locator(".st")).toHaveText("cueing");
+  release();
+  await playing(page, 1, 60_000 * SLOW);
+  await settled(page);
+  await expectSeated(page);
+  expect(await page.evaluate(() => (window as unknown as { first: { lifted: number; out: boolean } }).first)).toEqual({ lifted: 0, out: false });
+});
+
 test("without WebGL the scene never loads and the list plays and stops every record", async ({ page }) => {
   await withoutWebGL(page);
   await page.goto("/");
