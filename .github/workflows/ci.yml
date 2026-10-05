@@ -32,13 +32,20 @@ jobs:
       - run: bun run seed:media --local
       - run: bun run seed:snapshots --local
       - run: bun run build:test
-      # Local Browser Rendering (the snapshot specs) downloads Chrome on first use; keep it between runs
-      - uses: actions/cache@v6
+      # Local Browser Rendering (the snapshot specs) downloads Chrome on first use; keep it between runs. Saved after the
+      # e2e step whatever its result, so a red run doesn't make the next one download Chrome again
+      - uses: actions/cache/restore@v6
+        id: chrome
         with:
           path: ~/.cache/.wrangler/chrome
           key: wrangler-chrome-${{ hashFiles('bun.lock') }}
           restore-keys: wrangler-chrome-
       - run: bun run test:e2e
+      - uses: actions/cache/save@v6
+        if: always() && steps.chrome.outcome == 'success' && steps.chrome.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/.wrangler/chrome
+          key: wrangler-chrome-${{ hashFiles('bun.lock') }}
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
