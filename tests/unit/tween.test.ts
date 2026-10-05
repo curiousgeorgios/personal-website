@@ -55,6 +55,21 @@ describe("tweens", () => {
     expect(frame).toHaveBeenCalledTimes(1);
   });
 
+  test("casting is true only while a running tween moves something that casts a shadow", () => {
+    const tweens = createTweens(() => {}, () => 0);
+    expect(tweens.casting).toBe(false);
+    void tweens.tween(100, () => {}, linear, "rate", false);
+    expect(tweens.count).toBe(1);
+    expect(tweens.casting).toBe(false);
+    void tweens.tween(50, () => {}, linear); // casts unless told otherwise
+    expect(tweens.casting).toBe(true);
+    tweens.step(50);
+    expect(tweens.count).toBe(1);
+    expect(tweens.casting).toBe(false);
+    tweens.step(100);
+    expect(tweens.count).toBe(0);
+  });
+
   test("ease-out ends exactly at 1", () => {
     expect(easeOut(1)).toBe(1);
     expect(easeOut(0.5)).toBeGreaterThan(0.5);

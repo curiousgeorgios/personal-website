@@ -107,7 +107,8 @@ export function bindPointer(canvas: HTMLCanvasElement, { deck, stage, journeys, 
       const now = deck.getState();
       if (now.current !== null && now.want === now.current && !now.busy) loop.spinTo(reduce ? 0 : OMEGA);
       const from = drag.rate;
-      void tweens.tween(420, (k) => deck.setRate(k === 1 ? 1 : from + (1 - from) * k), easeOut, "scratch");
+      // Only the playback rate moves, so its frames leave the shadow map alone
+      void tweens.tween(420, (k) => deck.setRate(k === 1 ? 1 : from + (1 - from) * k), easeOut, "scratch", false);
     }
     drag = null;
   }

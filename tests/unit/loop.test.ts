@@ -18,9 +18,13 @@ function setup() {
   };
   // As the real tweens do: step applies a tween's last pose and reports it done in the same call
   let running = 0;
+  let casts = true;
   const tweens = {
     get count() {
       return running;
+    },
+    get casting() {
+      return running > 0 && casts;
     },
     step: () => {
       if (running > 0) running -= 1;
@@ -28,7 +32,7 @@ function setup() {
     },
   };
   const loop = createLoop({ renderer: renderer as never, stage: stage as never, tweens: tweens as never, reduce: true, onFrame: () => {} });
-  return { loop, renderer, shadows, tween: (on: boolean) => void (running = on ? Infinity : 0), tweenFor: (frames: number) => void (running = frames) };
+  return { loop, renderer, shadows, tween: (on: boolean) => void (running = on ? Infinity : 0), tweenFor: (frames: number, casting = true) => void ((running = frames), (casts = casting)) };
 }
 
 beforeEach(() => {
@@ -88,5 +92,23 @@ test("a scratch draws every frame and redraws the shadow map only on its first, 
   expect(scratching[0]).toBe(true); // the frame setScratching asked for
   expect(scratching.slice(1).every((redrawn) => redrawn === false)).toBe(true);
   expect(loop.shadows).toBe(2);
+  loop.stop();
+});
+
+test("a tween that moves nothing casting a shadow leaves the shadow map alone, to its last frame, while a casting one redraws it", async () => {
+  const { loop, shadows, tweenFor } = setup();
+  loop.setVisible(true);
+  await vi.advanceTimersByTimeAsync(20);
+  let before = shadows.length;
+  tweenFor(3, false); // a playback rate, say: three frames, the third its last
+  loop.invalidate(); // as a starting tween does
+  await vi.advanceTimersByTimeAsync(200);
+  expect(shadows.slice(before)).toEqual([true, false, false]); // only the frame its start asked for
+
+  before = shadows.length;
+  tweenFor(3, true);
+  loop.invalidate();
+  await vi.advanceTimersByTimeAsync(200);
+  expect(shadows.slice(before)).toEqual([true, true, true]);
   loop.stop();
 });

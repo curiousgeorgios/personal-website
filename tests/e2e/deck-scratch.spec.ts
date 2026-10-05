@@ -27,16 +27,27 @@ test("dragging the spinning record scratches it; letting go plays on at normal s
     (window as unknown as { events: string[] }).events = events;
     document.addEventListener("logbook:track", (event) => events.push(event.detail.event));
   });
-  const shadowsBefore = await page.evaluate(() => window.__deckScene!.shadows());
+  // A real press and release, for the hit test, the pointer capture and the click that ends the drag; the moves between
+  // them are dispatched by the page, a frame apart, so the drag costs one round trip, not twelve
   await page.mouse.down();
-  for (let step = 1; step <= 12; step++) {
-    const angle = (step / 12) * Math.PI;
-    await page.mouse.move(record.x + record.rx * Math.cos(angle), record.y + record.ry * Math.sin(angle));
-  }
-  expect(await page.evaluate(() => window.__deckScene!.spin())).not.toBe(spin);
-  // Turning a disc changes no shadow: the drag's moves draw frames but leave the 2048 shadow map alone (the one redraw is
-  // the frame the scratch's start asks for)
-  expect((await page.evaluate(() => window.__deckScene!.shadows())) - shadowsBefore).toBeLessThanOrEqual(1);
+  const drag = await page.evaluate(async ({ x, y, rx, ry }) => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-deck] canvas")!;
+    const hooks = window.__deckScene!;
+    const before = { shadows: hooks.shadows(), frames: hooks.frames() };
+    for (let step = 1; step <= 12; step++) {
+      const angle = (step / 12) * Math.PI;
+      const clientX = x + rx * Math.cos(angle);
+      const clientY = y + ry * Math.sin(angle);
+      canvas.dispatchEvent(new PointerEvent("pointermove", { pointerType: "mouse", pointerId: 1, isPrimary: true, bubbles: true, cancelable: true, clientX, clientY, buttons: 1 }));
+      await new Promise(requestAnimationFrame);
+    }
+    return { spin: hooks.spin(), shadows: hooks.shadows() - before.shadows, frames: hooks.frames() - before.frames };
+  }, record);
+  expect(drag.spin).not.toBe(spin);
+  // Turning a disc changes no shadow: the drag's moves, each in a frame of its own, draw frames but leave the 2048 shadow
+  // map alone (the one redraw is the frame the scratch's start asks for)
+  expect(drag.frames).toBeGreaterThanOrEqual(3);
+  expect(drag.shadows).toBeLessThanOrEqual(1);
   await page.mouse.up();
   const rates = await page.evaluate(() => (window as unknown as { rates: number[] }).rates);
   expect(rates.length).toBeGreaterThan(0);
@@ -73,8 +84,9 @@ test("scratching again later in the same visit is not counted again", async ({ p
   for (const drag of [1, 2]) {
     await page.mouse.move(record.x + record.rx, record.y);
     await page.mouse.down();
-    for (let step = 1; step <= 12; step++) {
-      const angle = (step / 12) * Math.PI;
+    // Three moves are enough to start a scratch and bend the rate
+    for (let step = 1; step <= 3; step++) {
+      const angle = (step / 3) * Math.PI;
       await page.mouse.move(record.x + record.rx * Math.cos(angle), record.y + record.ry * Math.sin(angle));
     }
     await page.mouse.up();

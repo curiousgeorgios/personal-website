@@ -11,27 +11,31 @@ interface Running {
   ease: Ease;
   done: () => void;
   key?: string;
+  casts: boolean;
 }
 
 export interface Tweens {
   /**
    * Runs `apply` from 0 to 1 over `ms`. A keyed tween first ends any running tween with the same key where it stands,
-   * so fast repeated input (flips, hovers) retargets instead of two animations fighting.
+   * so fast repeated input (flips, hovers) retargets instead of two animations fighting. `casts` is true unless `apply`
+   * moves nothing that casts a shadow (a playback rate, say): the loop then leaves the 2048 shadow map alone for its frames.
    */
-  tween(ms: number, apply: (k: number) => void, ease?: Ease, key?: string): Promise<void>;
+  tween(ms: number, apply: (k: number) => void, ease?: Ease, key?: string, casts?: boolean): Promise<void>;
   wait(ms: number): Promise<void>;
   /** Advances every tween to `now`; true while any are still running */
   step(now: number): boolean;
   /** While instant (off screen, hidden tab, reduced motion, lost context) tweens jump to their end, so journeys never stall */
   setInstant(instant: boolean): void;
   readonly count: number;
+  /** True while any running tween moves something that casts a shadow */
+  readonly casting: boolean;
 }
 
 export function createTweens(onStart: () => void, clock: () => number = () => performance.now()): Tweens {
   const running: Running[] = [];
   let instant = false;
 
-  const tween: Tweens["tween"] = (ms, apply, ease = easeOut, key) =>
+  const tween: Tweens["tween"] = (ms, apply, ease = easeOut, key, casts = true) =>
     new Promise<void>((done) => {
       if (key) {
         const j = running.findIndex((r) => r.key === key);
@@ -41,7 +45,7 @@ export function createTweens(onStart: () => void, clock: () => number = () => pe
         apply(1);
         done();
       } else {
-        running.push({ start: clock(), ms, apply, ease, done, key });
+        running.push({ start: clock(), ms, apply, ease, done, key, casts });
       }
       onStart();
     });
@@ -71,6 +75,9 @@ export function createTweens(onStart: () => void, clock: () => number = () => pe
     },
     get count() {
       return running.length;
+    },
+    get casting() {
+      return running.some((r) => r.casts);
     },
   };
 }
