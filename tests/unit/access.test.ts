@@ -1,6 +1,6 @@
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair, type JWTVerifyGetKey } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { verifyAccessJwt } from "../../src/lib/admin/access";
+import { sessionEnds, verifyAccessJwt } from "../../src/lib/admin/access";
 
 const config = { teamDomain: "team.cloudflareaccess.com", audience: "aud-123" };
 let keys: JWTVerifyGetKey;
@@ -53,8 +53,9 @@ afterEach(() => {
 });
 
 describe("verifyAccessJwt", () => {
-  test("returns the email from a valid token", async () => {
-    expect(await verifyAccessJwt(await sign(), config, keys)).toBe("george@example.com");
+  test("returns the email and the session's end from a valid token", async () => {
+    const exp = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+    expect(await verifyAccessJwt(await sign({ exp }), config, keys)).toEqual({ email: "george@example.com", expires: exp });
   });
 
   test.each([
@@ -94,5 +95,16 @@ describe("verifyAccessJwt", () => {
   test("logs nothing for a valid token", async () => {
     await verifyAccessJwt(await sign(), config, keys);
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("sessionEnds", () => {
+  // The day the Access session ends, as /admin shows it: Sydney's date in the log's format
+  test.each([
+    ["2026-11-04T14:00:00Z", "05.11.26"], // 1am on the 5th in Sydney (AEDT, UTC+11)
+    ["2026-11-04T12:59:00Z", "04.11.26"], // 11:59pm on the 4th
+    ["2026-06-30T14:00:00Z", "01.07.26"], // midnight in winter (AEST, UTC+10)
+  ])("an expiry at %s reads %s", (iso, day) => {
+    expect(sessionEnds(Date.parse(iso) / 1000)).toBe(day);
   });
 });

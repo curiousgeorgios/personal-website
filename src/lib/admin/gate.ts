@@ -1,5 +1,5 @@
 import type { JWTVerifyGetKey } from "jose";
-import { accessKeys, logRefusal, verifyAccessJwt, type AccessConfig } from "./access";
+import { accessKeys, logRefusal, verifyAccessJwt, type AccessConfig, type AccessIdentity } from "./access";
 
 const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
@@ -11,14 +11,26 @@ export function originAllowed(request: Request, url: URL): boolean {
   return request.headers.get("origin") === url.origin;
 }
 
-/** The admin's email when the request carries a valid Access token for this application; null otherwise, and always null until Access is configured */
+export interface AdminConfig extends AccessConfig {
+  /** The one address let in (ADR-0016). Empty refuses everyone, as an unset team domain or audience does */
+  adminEmail: string;
+}
+
+const address = (email: string) => email.trim().toLowerCase();
+
+/**
+ * The admin's identity when the request carries a valid Access token for this application that names ADMIN_EMAIL;
+ * null otherwise, and always null until Access and the address are configured. The Access policy decides who may sign
+ * in, this decides who may edit, so a policy loosened by mistake doesn't open /admin (ADR-0016).
+ */
 export async function adminIdentity(
   request: Request,
-  config: AccessConfig,
+  config: AdminConfig,
   keys: (teamDomain: string) => JWTVerifyGetKey = accessKeys,
-): Promise<string | null> {
+): Promise<AccessIdentity | null> {
   const token = request.headers.get("cf-access-jwt-assertion");
-  if (!token || !config.teamDomain || !config.audience) return null;
+  // ?. because an ADMIN_EMAIL missing from wrangler.jsonc arrives as undefined, whatever its type says
+  if (!token || !config.teamDomain || !config.audience || !config.adminEmail?.trim()) return null;
   let keySet: JWTVerifyGetKey;
   try {
     keySet = keys(config.teamDomain);
@@ -27,5 +39,12 @@ export async function adminIdentity(
     logRefusal(error);
     return null;
   }
-  return verifyAccessJwt(token, config, keySet);
+  const identity = await verifyAccessJwt(token, config, keySet);
+  if (!identity) return null;
+  if (address(identity.email) !== address(config.adminEmail)) {
+    // A valid token for someone else: the Access policy let in more than George. Logged without the address
+    console.warn("admin: access token refused", "not the admin's email");
+    return null;
+  }
+  return identity;
 }

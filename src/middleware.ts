@@ -1,5 +1,6 @@
 import { defineMiddleware } from "astro:middleware";
 import { env } from "cloudflare:workers";
+import type { AccessIdentity } from "./lib/admin/access";
 import { adminIdentity, isAdminPath, originAllowed } from "./lib/admin/gate";
 
 // Astro sends Content-Security-Policy itself (security.csp in astro.config.mjs); these are the rest.
@@ -23,13 +24,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (!originAllowed(request, url)) {
     response = refuse("cross-site requests are not allowed");
   } else if (admin) {
-    let email: string | null;
+    let identity: AccessIdentity | null;
     // Test builds skip Access, and only on this machine; a production build can't contain this branch (astro.config.mjs
     // and the deploy job's guard), and a test build deployed by mistake still asks Access
-    if (__ADMIN_BYPASS__ && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) email = "admin-bypass@localhost";
-    else email = await adminIdentity(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD });
-    if (email) {
-      context.locals.adminEmail = email;
+    if (__ADMIN_BYPASS__ && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) identity = { email: "admin-bypass@localhost", expires: null };
+    else identity = await adminIdentity(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD, adminEmail: env.ADMIN_EMAIL });
+    if (identity) {
+      context.locals.adminEmail = identity.email;
+      if (identity.expires !== null) context.locals.adminUntil = identity.expires;
       try {
         response = await next();
       } catch (error) {

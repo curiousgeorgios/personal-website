@@ -42,3 +42,10 @@ test("a page that renders is passed through with the admin headers", async () =>
   expect(response.headers.get("Cache-Control")).toBe("no-store");
   expect(response.headers.has("Cache-Tag")).toBe(false);
 });
+
+test("under the local bypass the admin is signed in with no session end", async () => {
+  const url = new URL("http://localhost/admin/");
+  const locals: Record<string, unknown> = {};
+  await onRequest({ request: new Request(url), url, locals }, () => Promise.resolve(new Response("ok")));
+  expect(locals).toEqual({ adminEmail: "admin-bypass@localhost" });
+});

@@ -2,7 +2,7 @@ import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair, type JWTVerifyG
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { adminIdentity, isAdminPath, originAllowed } from "../../src/lib/admin/gate";
 
-const config = { teamDomain: "team.cloudflareaccess.com", audience: "aud-123" };
+const config = { teamDomain: "team.cloudflareaccess.com", audience: "aud-123", adminEmail: "george@example.com" };
 let keys: JWTVerifyGetKey;
 let token: string;
 
@@ -50,10 +50,30 @@ describe("originAllowed", () => {
 });
 
 describe("adminIdentity", () => {
-  test("returns the email for a valid Access token, fetching keys for the configured team", async () => {
+  test("returns the identity for the admin's valid Access token, fetching keys for the configured team", async () => {
     const keyFor = vi.fn(() => keys);
-    expect(await adminIdentity(request("GET", { "Cf-Access-Jwt-Assertion": token }), config, keyFor)).toBe("george@example.com");
+    expect(await adminIdentity(request("GET", { "Cf-Access-Jwt-Assertion": token }), config, keyFor)).toEqual({ email: "george@example.com", expires: expect.any(Number) });
     expect(keyFor).toHaveBeenCalledWith("team.cloudflareaccess.com");
+  });
+
+  test("lets the admin's address in whatever its case or surrounding spaces", async () => {
+    const identity = await adminIdentity(request("GET", { "Cf-Access-Jwt-Assertion": token }), { ...config, adminEmail: "  George@Example.COM " }, () => keys);
+    expect(identity?.email).toBe("george@example.com");
+  });
+
+  test("refuses a valid token for any other address, and logs why without the address", async () => {
+    const identity = await adminIdentity(request("GET", { "Cf-Access-Jwt-Assertion": token }), { ...config, adminEmail: "hello@curiousgeorge.dev" }, () => keys);
+    expect(identity).toBeNull();
+    expect(warn).toHaveBeenCalledWith("admin: access token refused", "not the admin's email");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("george@example.com");
+  });
+
+  test("refuses everyone while ADMIN_EMAIL is empty, before fetching any keys", async () => {
+    const keyFor = vi.fn(() => keys);
+    for (const adminEmail of ["", "   "]) {
+      expect(await adminIdentity(request("GET", { "Cf-Access-Jwt-Assertion": token }), { ...config, adminEmail }, keyFor)).toBeNull();
+    }
+    expect(keyFor).not.toHaveBeenCalled();
   });
 
   test("refuses a request without a token", async () => {
@@ -63,7 +83,7 @@ describe("adminIdentity", () => {
   test("refuses, rather than throws, when the team domain isn't a valid host", async () => {
     // Uses the real key set builder: new URL rejects the host, which must end as a refusal and not a 500
     const headers = { "Cf-Access-Jwt-Assertion": token };
-    expect(await adminIdentity(request("GET", headers), { teamDomain: "not a host", audience: "aud-123" })).toBeNull();
+    expect(await adminIdentity(request("GET", headers), { ...config, teamDomain: "not a host" })).toBeNull();
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0][0]).toBe("admin: access token refused");
     expect(JSON.stringify(warn.mock.calls)).not.toContain(token);
@@ -72,8 +92,8 @@ describe("adminIdentity", () => {
   test("fails closed until the team domain and audience are set", async () => {
     const keyFor = vi.fn(() => keys);
     const headers = { "Cf-Access-Jwt-Assertion": token };
-    expect(await adminIdentity(request("GET", headers), { teamDomain: "", audience: "aud-123" }, keyFor)).toBeNull();
-    expect(await adminIdentity(request("GET", headers), { teamDomain: "team.cloudflareaccess.com", audience: "" }, keyFor)).toBeNull();
+    expect(await adminIdentity(request("GET", headers), { ...config, teamDomain: "" }, keyFor)).toBeNull();
+    expect(await adminIdentity(request("GET", headers), { ...config, audience: "" }, keyFor)).toBeNull();
     expect(keyFor).not.toHaveBeenCalled();
   });
 });

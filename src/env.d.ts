@@ -10,6 +10,8 @@ declare namespace App {
   interface Locals {
     /** The signed-in admin's email, set by the middleware on /admin requests */
     adminEmail?: string;
+    /** When the admin's Access session ends (the token's exp, seconds since 1970); unset under the local bypass */
+    adminUntil?: number;
   }
 }
 

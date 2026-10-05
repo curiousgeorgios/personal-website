@@ -15,7 +15,8 @@ test("the admin page is private: no-store, noindex and the signed-in identity", 
   expect(headers["x-robots-tag"]).toBe("noindex");
   expect(headers["x-content-type-options"]).toBe("nosniff");
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
-  await expect(page.locator(".where")).toContainText("signed in as admin-bypass@localhost");
+  // The local bypass has no Access session, so no "until <date>"
+  await expect(page.locator(".where")).toHaveText("signed in as admin-bypass@localhost · the logbook");
 });
 
 test("a write without this site's origin is refused, with the security headers", async ({ baseURL }) => {
