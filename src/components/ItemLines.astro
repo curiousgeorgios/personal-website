@@ -9,7 +9,8 @@ interface Props {
 const { items } = Astro.props;
 // Snapshots (spec 4.1). The hover card's picture waits in data attributes until the first hover or focus on a fine
 // pointer (src/scripts/labels.ts). The frame's is lazy inside a hidden drawer, so it loads
-// only when the label opens (browsers ignore lazy loading without JavaScript, so then it comes with the page).
+// only when the label opens (browsers ignore lazy loading without JavaScript, so then it comes with the page). The frame
+// links to the big file, so without JavaScript it opens that; with it, src/scripts/closer.ts opens the closer look instead.
 const file = (base: string, width: SnapshotWidth, format: SnapshotFormat) => `/media/${snapshotVariant(base, width, format)}`;
 const FRAME_SIZES = "(max-width: 680px) 320px, 240px";
 ---
@@ -43,7 +44,7 @@ const FRAME_SIZES = "(max-width: 680px) 320px, 240px";
             <div class="drawer-inner">
               <div class:list={["wall", { framed: shot }]}>
                 {shot && (
-                  <button class="frame" type="button" aria-label={`look closer at ${name}`} data-closer-avif={file(shot, 1920, "avif")} data-closer-webp={file(shot, 1920, "webp")}>
+                  <a class="frame" href={file(shot, 1920, "webp")} aria-label={`look closer at ${name}`} data-closer-avif={file(shot, 1920, "avif")} data-closer-webp={file(shot, 1920, "webp")}>
                     <picture>
                       <source type="image/avif" srcset={`${file(shot, 480, "avif")} 480w, ${file(shot, 960, "avif")} 960w`} sizes={FRAME_SIZES} />
                       <img
@@ -57,7 +58,7 @@ const FRAME_SIZES = "(max-width: 680px) 320px, 240px";
                         decoding="async"
                       />
                     </picture>
-                  </button>
+                  </a>
                 )}
                 <div class="tag">
                   <p class="status">

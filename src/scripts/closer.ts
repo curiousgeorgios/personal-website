@@ -18,8 +18,8 @@ function restBox(img: HTMLElement) {
   img.getBoundingClientRect(); // settles the style, so the transition that follows starts from `now`
   return box;
 }
-let frame: HTMLButtonElement | null = null; // the frame whose snapshot is in the dialog
-let pending: HTMLButtonElement | null = null; // the frame whose big file is still loading: one open at a time
+let frame: HTMLAnchorElement | null = null; // the frame whose snapshot is in the dialog
+let pending: HTMLAnchorElement | null = null; // the frame whose big file is still loading: one open at a time
 let closing = false;
 let timer = 0;
 
@@ -28,14 +28,14 @@ function empty() {
   source?.removeAttribute("srcset");
 }
 
-async function open(button: HTMLButtonElement) {
+async function open(link: HTMLAnchorElement) {
   if (!dialog || !big || !source || dialog.open || pending) return;
-  const shot = button.querySelector("img");
+  const shot = link.querySelector("img");
   if (!shot) return;
-  pending = button;
-  button.setAttribute("aria-busy", "true"); // the pointer says so too (notebook.css)
-  source.srcset = button.dataset.closerAvif ?? "";
-  big.src = button.dataset.closerWebp ?? "";
+  pending = link;
+  link.setAttribute("aria-busy", "true"); // the pointer says so too (notebook.css)
+  source.srcset = link.dataset.closerAvif ?? "";
+  big.src = link.dataset.closerWebp ?? "";
   big.alt = shot.alt;
   dialog.setAttribute("aria-label", `closer look: ${shot.alt}`);
   await big.decode().catch(() => {}); // it rejects when the file fails to load or to decode; naturalWidth says which
@@ -46,11 +46,11 @@ async function open(button: HTMLButtonElement) {
     await big.decode().catch(() => {});
   }
   pending = null;
-  button.removeAttribute("aria-busy");
+  link.removeAttribute("aria-busy");
   // The label may have been closed while the file loaded (its pill's aria-expanded is the state), and nothing opens over that
-  const labelOpen = button.isConnected && button.closest(".line-item")?.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
+  const labelOpen = link.isConnected && link.closest(".line-item")?.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
   if (!labelOpen || big.naturalWidth === 0) return empty();
-  frame = button;
+  frame = link;
   // A classic scrollbar goes while the dialog is open (overflow: hidden), and the page would shift under the picture and
   // its frame. Its width stays as padding instead: scrollbar-gutter doesn't hold on the root in Chromium
   const bar = Math.max(0, innerWidth - document.documentElement.clientWidth);
@@ -75,8 +75,8 @@ async function open(button: HTMLButtonElement) {
 // here too, as it cuts the return short
 function restore() {
   if (!dialog || !big || !frame) return;
-  const button = frame;
-  const shot = button.querySelector("img");
+  const link = frame;
+  const shot = link.querySelector("img");
   window.clearTimeout(timer);
   big.removeEventListener("transitionend", restore);
   if (dialog.open) dialog.close();
@@ -87,7 +87,7 @@ function restore() {
   document.documentElement.style.paddingRight = "";
   closing = false;
   frame = null;
-  button.focus();
+  link.focus();
 }
 
 function close() {
@@ -104,7 +104,14 @@ function close() {
 }
 
 if (dialog) {
-  document.querySelectorAll<HTMLButtonElement>("button.frame").forEach((button) => button.addEventListener("click", () => void open(button)));
+  // A frame is a link to its big file, which is what it opens without this script (or with a modifier key, in a new tab)
+  document.querySelectorAll<HTMLAnchorElement>("a.frame").forEach((link) =>
+    link.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      void open(link);
+    }),
+  );
   dialog.addEventListener("click", close); // the veil, the image and the close button all put it back
   // Esc closes the closer look first; the label's own Esc handler only hears the next one, once focus is back in it
   dialog.addEventListener("cancel", (event) => {

@@ -58,7 +58,9 @@ test("a line with a snapshot gets a hover card that waits to load, and a framed,
   expect(card.querySelector("img")!.getAttribute("data-src")).toBe("/media/snapshots/fixture-canberra-events-480.webp");
   expect(card.querySelector("img")!.hasAttribute("src")).toBe(false);
   expect(text(card.querySelector(".cap"))).toBe("click for the label");
-  const frame = item.querySelector(".drawer .wall.framed > button.frame")!;
+  // A link to the big file, so without JavaScript it still opens the big picture
+  const frame = item.querySelector(".drawer .wall.framed > a.frame")!;
+  expect(frame.getAttribute("href")).toBe("/media/snapshots/fixture-canberra-events-1920.webp");
   expect(frame.getAttribute("aria-label")).toBe("look closer at canberra.events");
   expect(frame.getAttribute("data-closer-avif")).toBe("/media/snapshots/fixture-canberra-events-1920.avif");
   expect(frame.getAttribute("data-closer-webp")).toBe("/media/snapshots/fixture-canberra-events-1920.webp");

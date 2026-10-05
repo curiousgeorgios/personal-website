@@ -39,7 +39,7 @@ test("a same-frame open and close leaves the label closed and unstyled", async (
 
 test("links inside a labelled line navigate instead of toggling", async ({ page }) => {
   await page.goto("/");
-  const link = page.locator('[data-slug="canberra-events"] a');
+  const link = page.locator('[data-slug="canberra-events"] .line a');
   await expect(link).toHaveAttribute("href", "https://canberra.events");
   await page.route("https://canberra.events/**", (route) => route.fulfill({ body: "ok" }));
   await link.click();
@@ -257,6 +257,7 @@ test("a snapshot opens a closer look; Esc returns it to its frame, then closes t
   await expect(dialog.locator(".closer-close")).toBeFocused();
   await expect(dialog.locator("img")).toHaveAttribute("src", /fixture-digital-nachos-1920\.webp$/);
   await expect(dialog).toHaveAccessibleName("closer look: a snapshot of digital nachos");
+  expect(new URL(page.url()).pathname).toBe("/"); // the frame's link isn't followed
   await page.keyboard.press("Escape");
   await expect(dialog).not.toHaveAttribute("open", "");
   await expect(frame).toBeFocused();
@@ -333,16 +334,16 @@ test("a closer look closed while it is still growing goes back to its frame, not
   await item.locator(".peek").click();
   await expect(item.locator(".frame img")).toBeVisible();
   const { landed, frame } = await item.locator(".frame").evaluate(async (element) => {
-    const button = element as HTMLButtonElement;
+    const link = element as HTMLAnchorElement;
     const dialog = document.querySelector<HTMLDialogElement>("dialog.closer")!;
     const big = dialog.querySelector("img")!;
     const box = (rect: DOMRect) => ({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
-    button.click();
+    link.click();
     while (!dialog.open) await new Promise((resolve) => requestAnimationFrame(resolve));
     await new Promise((resolve) => setTimeout(resolve, 100)); // part-way through the 420ms grow
     const landed = new Promise<DOMRect>((resolve) => big.addEventListener("transitionend", () => resolve(big.getBoundingClientRect()), { once: true }));
     big.click();
-    return { landed: box(await landed), frame: box(button.querySelector("img")!.getBoundingClientRect()) };
+    return { landed: box(await landed), frame: box(link.querySelector("img")!.getBoundingClientRect()) };
   });
   for (const key of ["left", "top", "width", "height"] as const) expect(Math.abs(landed[key] - frame[key])).toBeLessThan(1);
 });
@@ -462,8 +463,8 @@ test("two quick Escapes put the snapshot back and focus on the frame as the brow
   // won't let the second Escape's cancel be stopped, so it closes the dialog 300ms early
   await dialog.evaluate((element) => {
     element.addEventListener("close", () => {
-      const button = document.querySelector<HTMLElement>('[data-slug="digital-nachos"] .frame')!;
-      (window as unknown as { atClose: object }).atClose = { snapshot: getComputedStyle(button.querySelector("img")!).visibility, focused: document.activeElement === button };
+      const link = document.querySelector<HTMLElement>('[data-slug="digital-nachos"] .frame')!;
+      (window as unknown as { atClose: object }).atClose = { snapshot: getComputedStyle(link.querySelector("img")!).visibility, focused: document.activeElement === link };
     });
   });
   await page.keyboard.press("Escape");
@@ -540,6 +541,15 @@ test.describe("snapshots without JavaScript", () => {
     // What find-in-page does to a match inside hidden="until-found"
     await page.locator("#label-digital-nachos").evaluate((drawer) => drawer.removeAttribute("hidden"));
     await expect.poll(() => page.locator("#label-digital-nachos").evaluate((drawer) => drawer.getBoundingClientRect().height)).toBeGreaterThan(100);
+  });
+
+  test("a frame is a link that opens the big picture", async ({ page }) => {
+    await page.goto("/");
+    await page.locator("#label-digital-nachos").evaluate((drawer) => drawer.removeAttribute("hidden"));
+    const frame = page.getByRole("link", { name: "look closer at digital nachos" });
+    await expect(frame).toHaveAttribute("href", /fixture-digital-nachos-1920\.webp$/);
+    await frame.click();
+    await expect(page).toHaveURL(/\/media\/snapshots\/fixture-digital-nachos-1920\.webp$/);
   });
 });
 
