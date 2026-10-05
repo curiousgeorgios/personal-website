@@ -63,15 +63,19 @@ export function isBlocked(url: string): boolean {
 const looksLikeChallenge = (html: string) => html.includes("_cf_chl_opt") || /<title>\s*Just a moment\.\.\.\s*<\/title>/i.test(html);
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-// Whether the page shows anything: some text, or media with a box, since a blank 2x screenshot is too big for MIN_BYTES to catch
-const SHOWS_SOMETHING = `(() => {
+// Whether the page shows anything: some text, media with a box or a CSS background (an image or a gradient) on the page
+// itself or on an element with a box. A blank 2x screenshot is too big for MIN_BYTES to catch, so the page is asked
+export const SHOWS_SOMETHING = `(() => {
   const body = document.body;
   if (!body) return false;
   if (body.innerText.trim() !== "") return true;
-  return [...document.querySelectorAll("img, svg, canvas, video, picture, iframe, object, embed")].some((element) => {
+  const shown = (element) => {
     const box = element.getBoundingClientRect();
     return box.width > 0 && box.height > 0;
-  });
+  };
+  if ([...document.querySelectorAll("img, svg, canvas, video, picture, iframe, object, embed")].some(shown)) return true;
+  const painted = (element) => getComputedStyle(element).backgroundImage !== "none";
+  return painted(document.documentElement) || painted(body) || [...body.querySelectorAll("*")].some((element) => painted(element) && shown(element));
 })()`;
 
 // A wait that runs out is the capture cap doing its job (puppeteer's TimeoutError); anything else is unexpected, so it's thrown
