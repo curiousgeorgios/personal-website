@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-05
 - Authors: George Vlachos
+- Sign-off: accepted under George's delegated sign-off during plan 5
 
 ## Context
 

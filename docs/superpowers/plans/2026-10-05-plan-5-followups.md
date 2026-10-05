@@ -9,6 +9,7 @@ What plan 5 (polish) found or left for later.
 - The audio graph is now built before the first press and resumed inside it. The real-device check on the checklist (one play on an iPhone, once with the ringer switch on silent, and Safari for macOS) covers this path too, and `audioSession`, which is set in the press after the context exists.
 - The first CI run's play INP annotation is the one to read before widening anything: it is about 80ms locally against a 200ms gate.
 - If a real phone shows the environment map taking far more than 70ms, measure compile time against GPU time before revisiting ADR-0017.
+- Re-run `scene-perf.spec.ts` on a GPU with headed Chromium (`bunx playwright install chromium` first: the documented `--headed` command needs it). Task 8 measured one 64ms long task on a cold first press (the next run had none) and nothing since, so spec 11, the README and the plan 4 follow-ups say it may still show one. If the cold press persists, find what remains in it; the first journey frame redrawing the 2048 shadow map is the likeliest.
 
 ## Accepted
 
@@ -26,6 +27,7 @@ What plan 5 (polish) found or left for later.
 - The rate tween after a scratch skips the shadow map now (one redraw, down from about 26), but every other tween's frames still redraw it.
 - When Browser Rendering refuses every session, the nightly run leaves every line's status as it was and logs `no browser` for each; the previous snapshots stay.
 - Task 13's log-line nits: the SessionGone test in `tests/unit/snapshot-run.test.ts` doesn't assert its log line, and `run.ts` uses one log prefix for a refused launch and for a session that can't open a page, so the log can't tell them apart.
+- A pen drag across the record ends in a click that stops it, because `pointer.ts` returns early for a pen and nothing sets `suppressClick`. Before plan 5 the same drag scratched it. If wanted: on a pen `pointerdown` on the record, remember where it went down, and on `pointerup` suppress the click when it moved more than `SCRATCH_PX`.
 - Task 4's pen scratch test pins that a pen drag doesn't scratch, but no test pins the comment's other claim, that a pen tap still stops the record; a `pointercancel` and a touch variant aren't covered either.
 - Task 6's e2e test is titled "before anything binds" but asserts only the end state after `load`, and the no-JavaScript check doesn't assert that `/media/` sends no `content-disposition`, the header that decides whether the browser plays the file or downloads it.
 - Task 5's height test in `deck-scene.spec.ts` assumes the scene is not yet live straight after `goto`; if it flakes, take the baseline height from the no-WebGL path or block the chunk request until after it.

@@ -25,7 +25,7 @@ bun run check
 
 ## The admin page
 
-`/admin` sits behind Cloudflare Access, and the Worker also requires the token's email to be `ADMIN_EMAIL` (`wrangler.jsonc`, ADR-0016); the page shows the day the Access session ends. Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "it's on the logbook now" there, because the dev server's cache accepts the purge and does nothing. Against a built Worker under `wrangler dev` (the end-to-end servers on ports 4331 to 4333) there's no cache to purge, so saves say "the logbook may show the old version for a little while".
+`/admin` sits behind Cloudflare Access, and the Worker also requires the token's email to be `ADMIN_EMAIL` (`wrangler.jsonc`, ADR-0016); the page shows the day the Access session ends, or on its last day the time (until 14:30). Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "it's on the logbook now" there, because the dev server's cache accepts the purge and does nothing. Against a built Worker under `wrangler dev` (the end-to-end servers on ports 4331 to 4333) there's no cache to purge, so saves say "the logbook may show the old version for a little while".
 
 ## Snapshots and analytics
 
@@ -46,6 +46,6 @@ The analytics proxy drops events locally, because the PostHog key is a Worker se
 - Media: the starting crate lives in `media/` (MP3s and 512px covers from `bun run covers`); `bun run seed:media --local` uploads it to the local R2 store, `--remote` to production (a launch step).
 - Tests run against `bun run build:test`, which compiles in the listening corner's test hooks; `bun run build` never contains them.
 - Posters: `bun run build:test`, then `bun run serve`, then `bun run poster`. It renders four (day and night, desktop and phone); rerun it whenever the scene changes, and look at them before committing.
-- Scene long tasks (opt-in, on a GPU): `SCENE_PERF=1 bun run test:e2e tests/e2e/scene-perf.spec.ts --project=chromium --headed`. It allows one task over 50ms, the environment map's (ADR-0017), and skips itself under software rendering.
+- Scene long tasks (opt-in, on a GPU): `SCENE_PERF=1 bun run test:e2e tests/e2e/scene-perf.spec.ts --project=chromium --headed`. It allows one task over 50ms, the environment map's (ADR-0017), and skips itself under software rendering. It was last measured after plan 5's Task 8, when one cold first press showed a long task of about 64ms (none on the next run), so it can still fail on that press; no run since. It needs Playwright's own Chromium (`bunx playwright install chromium`) for `--headed`.
 - The admin specs write, so they run against a third server on port 4333 whose store is deleted and migrated afresh on every run, in Chromium only. If a run stops part way, `pkill -f "port 4333"` before the next.
 - Run one end-to-end suite at a time: two at once oversubscribe the CPU, and headless renderers then stall for seconds (plan 5 measured up to 6.6s).
