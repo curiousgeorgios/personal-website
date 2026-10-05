@@ -10,7 +10,7 @@ ADR-0003 chose PostHog in cookieless server hash mode through a first-party beac
 
 ## Decision
 
-The PostHog project key is a Worker secret, `POSTHOG_KEY`, and the proxy adds it to each event; the page carries no key. The proxy forwards only the four events the logbook sends (`$pageview`, `label_opened`, `record_played`, `scratch_found`) and refuses anything else with a 400 before it reaches PostHog. It sets `distinct_id: "$posthog_cookieless"`, `$cookieless_mode: true` and `$process_person_profile: false` itself and drops any `$ip` property, whatever the page sent. The host is a var, `POSTHOG_HOST` (`https://us.i.posthog.com`). Without a key, as in local and test runs, the proxy accepts events and drops them.
+The PostHog project key is a Worker secret, `POSTHOG_KEY`, and the proxy adds it to each event; the page carries no key. The proxy forwards only the four events the logbook sends (`$pageview`, `label_opened`, `record_played`, `scratch_found`) and refuses anything else with a 400 before it reaches PostHog. It sets `distinct_id: "$posthog_cookieless"`, `$cookieless_mode: true` and `$process_person_profile: false` itself and drops any `$ip` property, whatever the page sent. The host is a var, `POSTHOG_HOST` (`https://us.i.posthog.com`). Without a key, as in local and test runs, the proxy accepts events and drops them. The beacon applies the same rule to the page's address: `$current_url` is the origin, the path and any `utm_*` parameters, never the rest of the query string or the fragment, because any of those can carry an identifier (an ad platform's click ID, a mail campaign's subscriber ID) and a list of known ones is never complete.
 
 ## Consequences
 
@@ -20,3 +20,4 @@ The HTML is smaller and key-free, a changed key needs only `wrangler secret put`
 
 - **A public key in the page, as spec 10 first said:** PostHog's standard way, but it puts the key in cached HTML and leaves the proxy forwarding whatever it is sent.
 - **Pass-through proxy with a filter on the page only:** simpler, but the filter would be in code the visitor controls.
+- **Strip known click IDs from the address and send the rest:** keeps query strings for pages whose meaning lives there (the logbook has none), but misses every identifier not on the list.
