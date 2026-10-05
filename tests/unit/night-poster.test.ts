@@ -35,3 +35,12 @@ test.each([
   const suffix = night ? "-night" : "";
   expect(posterAt(iso)).toEqual([`/posters/deck-phone${suffix}.webp`, `/posters/deck-desktop${suffix}.webp`, night]);
 });
+
+test.each([["7 pm"], ["NaN"]])("an hour that doesn't parse (%j) keeps the day poster, as no JavaScript does", (formatted) => {
+  vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function () {
+    return { format: () => formatted };
+  } as never);
+  // 21:00 in Sydney is night, so only an unreadable hour can leave the day poster
+  expect(posterAt("2026-10-05T10:00:00Z")).toEqual(["/posters/deck-phone.webp", "/posters/deck-desktop.webp", false]);
+  vi.restoreAllMocks();
+});
