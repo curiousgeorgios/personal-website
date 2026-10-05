@@ -32,7 +32,7 @@ const data = await loadAdmin(env.DB);
 const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url.searchParams.get("saved")) ?? null);
 const savedLine = Astro.url.searchParams.has("later") ? "saved - the logbook may show the old version for a little while." : "saved - it's on the logbook now.";
 const notice = (section: AdminSection) => (section === saved ? savedLine : null);
-// When the Access session runs out, so George can reload before typing rather than lose a save (none under the local bypass)
+// When the Access session runs out (its time on the last day), so George can reload before typing rather than lose a save; none under the local bypass
 const until = Astro.locals.adminUntil === undefined ? null : sessionEnds(Astro.locals.adminUntil);
 ---
 <Notebook title="admin · george vlachos" noindex>

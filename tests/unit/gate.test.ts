@@ -68,6 +68,15 @@ describe("adminIdentity", () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain("george@example.com");
   });
 
+  test("refuses, rather than throws, when ADMIN_EMAIL isn't a string", async () => {
+    const keyFor = vi.fn(() => keys);
+    for (const adminEmail of [undefined, null, 42, { not: "an address" }]) {
+      const bad = { ...config, adminEmail } as unknown as typeof config;
+      expect(await adminIdentity(request("GET", { "Cf-Access-Jwt-Assertion": token }), bad, keyFor)).toBeNull();
+    }
+    expect(keyFor).not.toHaveBeenCalled();
+  });
+
   test("refuses everyone while ADMIN_EMAIL is empty, before fetching any keys", async () => {
     const keyFor = vi.fn(() => keys);
     for (const adminEmail of ["", "   "]) {

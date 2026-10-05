@@ -16,7 +16,8 @@ export interface AdminConfig extends AccessConfig {
   adminEmail: string;
 }
 
-const address = (email: string) => email.trim().toLowerCase();
+// ASCII-only lowercase: toLowerCase also folds the Kelvin sign (U+212A) to "k"
+const address = (email: string) => email.trim().replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
 /**
  * The admin's identity when the request carries a valid Access token for this application that names ADMIN_EMAIL;
@@ -29,8 +30,9 @@ export async function adminIdentity(
   keys: (teamDomain: string) => JWTVerifyGetKey = accessKeys,
 ): Promise<AccessIdentity | null> {
   const token = request.headers.get("cf-access-jwt-assertion");
-  // ?. because an ADMIN_EMAIL missing from wrangler.jsonc arrives as undefined, whatever its type says
-  if (!token || !config.teamDomain || !config.audience || !config.adminEmail?.trim()) return null;
+  // typeof because an ADMIN_EMAIL missing from wrangler.jsonc arrives as undefined, and a number or object in vars would
+  // make .trim throw (a 500 without the admin headers), whatever the type says
+  if (!token || !config.teamDomain || !config.audience || typeof config.adminEmail !== "string" || !config.adminEmail.trim()) return null;
   let keySet: JWTVerifyGetKey;
   try {
     keySet = keys(config.teamDomain);

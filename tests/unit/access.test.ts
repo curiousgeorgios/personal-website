@@ -9,23 +9,18 @@ let strangerKey: CryptoKey;
 let ecKey: CryptoKey;
 
 interface Claims {
-  email?: string | null;
+  email?: string | string[] | null;
   iss?: string;
   aud?: string;
-  exp?: number | string;
+  exp?: number | string | null;
   key?: CryptoKey;
   header?: { alg: string; kid: string };
 }
 
 // A token shaped like Cloudflare Access's: RS256, kid, iss = https://<team domain>, aud = the application's AUD tag
 function sign({ email = "george@example.com", iss = "https://team.cloudflareaccess.com", aud = "aud-123", exp = "1h", key, header = { alg: "RS256", kid: "access-1" } }: Claims = {}) {
-  return new SignJWT(email === null ? {} : { email })
-    .setProtectedHeader(header)
-    .setIssuer(iss)
-    .setAudience(aud)
-    .setIssuedAt()
-    .setExpirationTime(exp)
-    .sign(key ?? accessKey);
+  const jwt = new SignJWT(email === null ? {} : { email }).setProtectedHeader(header).setIssuer(iss).setAudience(aud).setIssuedAt();
+  return (exp === null ? jwt : jwt.setExpirationTime(exp)).sign(key ?? accessKey);
 }
 
 beforeAll(async () => {
@@ -64,6 +59,9 @@ describe("verifyAccessJwt", () => {
     ["an expired token", { exp: Math.floor(Date.now() / 1000) - 60 }],
     ["no email claim", { email: null }],
     ["an empty email claim", { email: "" }],
+    ["an email claim that is a list", { email: ["george@example.com"] }],
+    ["an email claim with a non-ASCII character (the Kelvin sign)", { email: "geor\u212Ae@example.com" }],
+    ["no expiry", { exp: null }],
   ])("refuses %s", async (_name, claims) => {
     expect(await verifyAccessJwt(await sign(claims as Claims), config, keys)).toBeNull();
   });
@@ -99,12 +97,26 @@ describe("verifyAccessJwt", () => {
 });
 
 describe("sessionEnds", () => {
+  const at = (iso: string) => Date.parse(iso) / 1000;
   // The day the Access session ends, as /admin shows it: Sydney's date in the log's format
   test.each([
     ["2026-11-04T14:00:00Z", "05.11.26"], // 1am on the 5th in Sydney (AEDT, UTC+11)
     ["2026-11-04T12:59:00Z", "04.11.26"], // 11:59pm on the 4th
     ["2026-06-30T14:00:00Z", "01.07.26"], // midnight in winter (AEST, UTC+10)
-  ])("an expiry at %s reads %s", (iso, day) => {
-    expect(sessionEnds(Date.parse(iso) / 1000)).toBe(day);
+  ])("an expiry at %s reads %s when it's days away", (iso, day) => {
+    expect(sessionEnds(at(iso), new Date("2026-10-01T00:00:00Z"))).toBe(day);
+  });
+
+  // On the last day the date says little, so the time shows (24-hour, Sydney's clock)
+  test.each([
+    ["2026-11-05T03:30:00Z", "2026-11-04T23:30:00Z", "14:30"], // 2:30pm AEDT, from 10:30am that day
+    ["2026-06-30T14:05:00Z", "2026-06-30T20:00:00Z", "00:05"], // 12:05am AEST, from 6am that day
+    ["2026-11-04T12:59:00Z", "2026-11-04T01:00:00Z", "23:59"],
+  ])("an expiry at %s reads %s on the same Sydney day as now", (iso, now, time) => {
+    expect(sessionEnds(at(iso), new Date(now))).toBe(time);
+  });
+
+  test("the next Sydney day still shows its date", () => {
+    expect(sessionEnds(at("2026-11-04T14:00:00Z"), new Date("2026-11-04T12:59:00Z"))).toBe("05.11.26");
   });
 });

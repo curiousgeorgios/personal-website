@@ -12,7 +12,7 @@ export interface AccessConfig {
 /** Who a valid Access token says is signed in, and until when */
 export interface AccessIdentity {
   email: string;
-  /** When the Access session ends: the token's exp, in seconds since 1970; null for a token without one */
+  /** When the Access session ends: the token's exp, in seconds since 1970 (a token without one is refused); null only under the local bypass */
   expires: number | null;
 }
 
@@ -35,11 +35,12 @@ export function logRefusal(error: unknown): void {
   console.warn("admin: access token refused", reason);
 }
 
-/** The signed-in identity from a Cloudflare Access JWT, or null unless signature, audience, issuer and expiry all check out */
+/** The signed-in identity from a Cloudflare Access JWT, or null unless signature, audience, issuer and a present, unpassed expiry all check out */
 export async function verifyAccessJwt(token: string, config: AccessConfig, keys: JWTVerifyGetKey): Promise<AccessIdentity | null> {
   try {
-    const { payload } = await jwtVerify(token, keys, { issuer: `https://${config.teamDomain}`, audience: config.audience, algorithms: ["RS256"] });
-    if (typeof payload.email !== "string" || payload.email === "") return null;
+    const { payload } = await jwtVerify(token, keys, { issuer: `https://${config.teamDomain}`, audience: config.audience, algorithms: ["RS256"], requiredClaims: ["exp"] });
+    // ASCII only: a claim with any other character (the Kelvin sign folds to "k" under Unicode lowercasing) is never the admin
+    if (typeof payload.email !== "string" || !/^[\x21-\x7e]+$/.test(payload.email)) return null;
     return { email: payload.email, expires: typeof payload.exp === "number" ? payload.exp : null };
   } catch (error) {
     logRefusal(error);
@@ -47,5 +48,16 @@ export async function verifyAccessJwt(token: string, config: AccessConfig, keys:
   }
 }
 
-/** The day an Access session ends, as /admin shows it: Sydney's date in the log's day format (05.11.26) */
-export const sessionEnds = (expires: number): string => formatLogDate(sydneyDate(new Date(expires * 1000)), "day");
+let sydneyClockFormat: Intl.DateTimeFormat | undefined;
+
+/**
+ * When an Access session ends, as /admin shows it: Sydney's date in the log's day format (05.11.26), or on the session's
+ * last day the time (14:30), which is what George needs to know to reload before typing. `now` is for tests.
+ */
+export function sessionEnds(expires: number, now: Date = new Date()): string {
+  const end = new Date(expires * 1000);
+  const day = sydneyDate(end);
+  if (day !== sydneyDate(now)) return formatLogDate(day, "day");
+  sydneyClockFormat ??= new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Australia/Sydney" });
+  return sydneyClockFormat.format(end);
+}
