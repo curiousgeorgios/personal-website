@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "dev:admin": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro dev",
+    "dev:snapshots": "wrangler dev -c workers/snapshots/wrangler.jsonc --port 8790 --persist-to .wrangler/state --test-scheduled",
     "build": "astro build",
     "build:test": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro build",
     "typecheck": "astro check",
@@ -23,6 +24,7 @@
   },
   "dependencies": {
     "@astrojs/cloudflare": "14.3.3",
+    "@cloudflare/puppeteer": "1.4.0",
     "astro": "7.3.5",
     "jose": "6.2.12",
     "three": "0.169.0"

@@ -19,5 +19,7 @@
     }
   ],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "curiousgeorge-media" }],
-  "images": { "binding": "IMAGES" }
+  "images": { "binding": "IMAGES" },
+  // The admin's "re-shoot now" calls the snapshots Worker over RPC (spec 9)
+  "services": [{ "binding": "SNAPSHOTS", "service": "curiousgeorge-snapshots" }]
 }

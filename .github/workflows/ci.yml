@@ -31,6 +31,12 @@ jobs:
       - run: bun run db:migrate:local
       - run: bun run seed:media --local
       - run: bun run build:test
+      # Local Browser Rendering (the snapshot specs) downloads Chrome on first use; keep it between runs
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/.wrangler/chrome
+          key: wrangler-chrome-${{ hashFiles('bun.lock') }}
+          restore-keys: wrangler-chrome-
       - run: bun run test:e2e
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -63,6 +69,11 @@ jobs:
         env:
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
       - run: bun run db:migrate:remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # The snapshots Worker first: the main Worker's SNAPSHOTS binding needs it to exist
+      - run: bunx wrangler deploy -c workers/snapshots/wrangler.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

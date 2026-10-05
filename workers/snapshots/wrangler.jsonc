@@ -1,0 +1,26 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // The snapshots Worker (spec 9): a nightly capture of every line with a page to snapshot, and the admin's re-shoot
+  // over the main Worker's SNAPSHOTS service binding. No public route.
+  "name": "curiousgeorge-snapshots",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "logs": { "enabled": true } },
+  // 17:00 UTC is 03:00 in Sydney in standard time and 04:00 in daylight saving
+  "triggers": { "crons": ["0 17 * * *"] },
+  "browser": { "binding": "BROWSER" },
+  "images": { "binding": "IMAGES" },
+  // The same database and bucket as the main Worker (the id is filled in at launch, in both files)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "curiousgeorge-logbook",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "curiousgeorge-media" }]
+}

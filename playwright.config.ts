@@ -37,5 +37,23 @@ export default defineConfig({
           reuseExistingServer: false,
           timeout: 120_000,
         },
+        // The site the snapshot specs capture, so nothing real is visited
+        { command: "node tests/fixtures/snapshot-site.mjs", url: "http://127.0.0.1:4400/", reuseExistingServer: !process.env.CI, timeout: 30_000 },
+        // A fourth server running both Workers, with its own store recreated every run: canberra-events points at the
+        // fixture page, digital-nachos at a 404, linear-gratis at a page that never goes quiet, r4r-with-me at a blank
+        // page and every other line's page is cleared. Local Browser Rendering downloads Chrome on first use.
+        {
+          command: [
+            "rm -rf .wrangler/snapshots",
+            "wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/snapshots",
+            `wrangler d1 execute curiousgeorge-logbook --local --persist-to .wrangler/snapshots --command "UPDATE items SET snapshot_url = NULL; UPDATE items SET snapshot_url = 'http://127.0.0.1:4400/' WHERE slug = 'canberra-events'; UPDATE items SET snapshot_url = 'http://127.0.0.1:4400/missing' WHERE slug = 'digital-nachos'; UPDATE items SET snapshot_url = 'http://127.0.0.1:4400/busy' WHERE slug = 'linear-gratis'; UPDATE items SET snapshot_url = 'http://127.0.0.1:4400/blank' WHERE slug = 'r4r-with-me'"`,
+            // Its own dev registry: in the shared one, the other servers' SNAPSHOTS bindings would reach this snapshots
+            // Worker and re-shoot against this store
+            "WRANGLER_REGISTRY_PATH=.wrangler/snapshots/registry wrangler dev -c dist/server/wrangler.json -c workers/snapshots/wrangler.jsonc --port 4334 --persist-to .wrangler/snapshots",
+          ].join(" && "),
+          url: "http://localhost:4334",
+          reuseExistingServer: false,
+          timeout: 180_000,
+        },
       ],
 });
