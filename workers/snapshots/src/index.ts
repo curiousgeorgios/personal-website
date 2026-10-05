@@ -7,7 +7,8 @@ import { reshootOne, runAll, type RunDeps } from "./run";
 function depsOf(env: SnapshotsEnv): RunDeps {
   const { DB, MEDIA, IMAGES, BROWSER } = env;
   // @cloudflare/puppeteer's Browser and Page provide the slice capture() uses, so no cast is needed
-  return { db: DB, media: MEDIA, images: IMAGES, launch: () => puppeteer.launch(BROWSER) };
+  // Browser Rendering closes a browser idle for 60s, and encoding and storing a line can take that long
+  return { db: DB, media: MEDIA, images: IMAGES, launch: () => puppeteer.launch(BROWSER, { keep_alive: 600_000 }) };
 }
 
 // The snapshots Worker (spec 9): the nightly run on its cron, and "re-shoot now" over RPC for the admin page

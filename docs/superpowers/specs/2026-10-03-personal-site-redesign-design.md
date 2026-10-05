@@ -324,7 +324,7 @@ Launch checklist (only George can do these):
 - [ ] After the first deploy, open the site once and check PostHog shows the pageview with a country and that no cookie came back. Check that one event from iOS Safari arrives. Check that PostHog hashes the visitor's IP from `X-Forwarded-For`: two visits from different networks on the same day count as two visitors, and one visit reloaded counts as one.
 - [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).
 - [ ] On the iPhone, save something after the Access session has expired, and check what happens (the page's `form-action 'self'` may block Access's sign-in redirect; if it does, add the team domain to `form-action` or note it in the follow-ups).
-- [ ] After the first nightly run (17:00 UTC), check `/admin`'s snapshots section says "captured" for each line, then re-shoot one. Time that "re-shoot now" against the deployed pair: browser launch, encoding and storing come on top of the 15s capture cap.
+- [ ] After the first nightly run (17:00 UTC), check `/admin`'s snapshots section says "captured" for each line and the run's log has no session-closed errors after the first line, then re-shoot one. Time that "re-shoot now" against the deployed pair: browser launch, encoding and storing come on top of the 15s capture cap.
 - [ ] Sign off ADR-0009 (status Proposed until then).
 - [ ] Sign off ADR-0010 (status Proposed until then).
 - [ ] Sign off ADR-0011 (Origin checked in our middleware) and ADR-0012 (an identical repeat of an admin add counts as saved), both Proposed until then.
