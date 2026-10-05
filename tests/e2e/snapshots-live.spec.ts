@@ -19,6 +19,8 @@ const status = (slug: string) => `#snapshots li[data-slug="${slug}"] .status`;
 test("the nightly run captures a line's page even if it never goes quiet, and records a 404 as an error and a blank page as blank", async ({ page, request }) => {
   const response = await nightly(request);
   expect(response.ok(), await response.text()).toBe(true);
+  // The fixture page's analytics script is under /ingest/, which a capture blocks, so the fixture never saw a request for it
+  expect(await (await request.get("http://127.0.0.1:4400/ingest-hits")).text()).toBe("0");
   await page.goto(`${SNAPS}/admin/`);
   await expect(page.locator(status("canberra-events"))).toHaveText(/^captured \d{4}-\d{2}-\d{2}$/);
   await expect(page.locator(status("digital-nachos"))).toHaveText("the page returned an error · no good capture yet");

@@ -9,7 +9,7 @@
     "build": "astro build",
     "build:test": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro build",
     "typecheck": "astro check",
-    "cf-typegen": "wrangler types --strict-vars=false",
+    "cf-typegen": "wrangler types --strict-vars=false -c wrangler.jsonc -c workers/snapshots/wrangler.jsonc",
     "fonts": "node scripts/build-fonts.mjs",
     "og": "node scripts/og-image.mjs",
     "covers": "node scripts/covers.mjs",
