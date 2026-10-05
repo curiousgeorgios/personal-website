@@ -116,6 +116,7 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 }
 .frame img { display: block; width: 100%; height: auto; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); }
 .frame:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -6px; border-radius: 0; } /* inside the mat, and square like it */
+.frame[aria-busy="true"] { cursor: progress; } /* its closer look's file is on the way */
 @media (hover: hover) and (pointer: fine) {
   .frame { transition: box-shadow 200ms ease; }
   .frame:hover { box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 3px rgba(0, 0, 0, .05), 0 20px 36px -16px rgba(0, 0, 0, .34); }
@@ -172,8 +173,9 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 
 /* The closer look: a modal dialog over a paper veil; the image grows from its frame and goes back (spec 4.1) */
 .closer {
+  --room: max(6vh, 72px); /* above and below the picture; the close pill (16px from the top, 44px tall) always has its room */
   position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0;
-  padding: 6vh 6vw; border: 0; background: transparent; color: var(--ink); place-items: center; cursor: zoom-out; overflow: hidden;
+  padding: var(--room) 6vw; border: 0; background: transparent; color: var(--ink); place-items: center; cursor: zoom-out; overflow: hidden;
 }
 .closer[open] { display: grid; }
 .closer::backdrop { background: transparent; }
@@ -181,14 +183,14 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 .closer.on::before { opacity: 1; }
 .closer picture { position: relative; display: block; max-width: 100%; max-height: 100%; }
 .closer img {
-  display: block; max-width: 100%; max-height: 88vh; width: auto; height: auto; transform-origin: 0 0;
+  display: block; max-width: 100%; max-height: calc(100vh - 2 * var(--room)); width: auto; height: auto; transform-origin: 0 0;
   box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .4), 0 0 0 1px rgba(0, 0, 0, .08);
 }
 .closer-close {
   position: fixed; top: 16px; right: 16px; z-index: 1; min-height: 44px; padding: 0 14px; cursor: pointer;
   font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat); border: 1px solid var(--rule); border-radius: 999px;
 }
-html:has(.closer[open]) { overflow: hidden; }
+html:has(.closer[open]) { overflow: hidden; } /* closer.ts holds a classic scrollbar's width as padding, so the page stays put */
 
 @media (max-width: 680px) {
   :root { --label-w: 0px; --gap: 18px; }

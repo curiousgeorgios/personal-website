@@ -59,12 +59,21 @@ describe("Logbook", () => {
   });
 
   test("the closer look is in the page only when some line has a snapshot", async () => {
-    expect((await render(Logbook, { data: full })).querySelector("dialog.closer")).toBeNull();
-    const shot = { ...full, now: [{ ...full.now[0], label: { era: "", status: "live" as const, madeOf: null, text: null, kind: null, note: null, snapshotKey: "snapshots/fixture-x" } }] };
-    const dialog = (await render(Logbook, { data: shot })).querySelector("dialog.closer")!;
+    const label = { era: "", status: "live" as const, madeOf: null, text: null, kind: null, note: null };
+    const labelled = (item: Data["now"][number], snapshotKey: string | null) => ({ ...item, label: { ...label, snapshotKey } });
+    const closer = async (data: Data) => (await render(Logbook, { data })).querySelector("dialog.closer");
+    // No label at all, and a label with no snapshot: no dialog
+    expect(await closer(full)).toBeNull();
+    expect(await closer({ ...full, now: [labelled(full.now[0], null)], before: [labelled(full.before[0], null)] })).toBeNull();
+    // A snapshot on a line in now, or only in before
+    const dialog = (await closer({ ...full, now: [labelled(full.now[0], "snapshots/fixture-x")] }))!;
     expect(dialog.querySelector("button.closer-close")!.hasAttribute("autofocus")).toBe(true);
     expect(text(dialog.querySelector("button.closer-close"))).toBe("close");
     expect(dialog.querySelector("picture > source[type='image/avif'] + img")).not.toBeNull();
+    expect(await closer({ ...full, before: [labelled(full.before[0], "snapshots/fixture-y")] })).not.toBeNull();
+    // One dialog for the page, however many lines have a snapshot
+    const many = await render(Logbook, { data: { ...full, now: [labelled(full.now[0], "snapshots/fixture-x")], before: [labelled(full.before[0], "snapshots/fixture-y")] } });
+    expect(many.querySelectorAll("dialog.closer")).toHaveLength(1);
   });
 
   test("visitor info says exactly what is collected", async () => {

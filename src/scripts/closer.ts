@@ -18,19 +18,43 @@ function restBox(img: HTMLElement) {
   img.getBoundingClientRect(); // settles the style, so the transition that follows starts from `now`
   return box;
 }
-let frame: HTMLButtonElement | null = null;
+let frame: HTMLButtonElement | null = null; // the frame whose snapshot is in the dialog
+let pending: HTMLButtonElement | null = null; // the frame whose big file is still loading: one open at a time
 let closing = false;
+let timer = 0;
+
+function empty() {
+  big?.removeAttribute("src");
+  source?.removeAttribute("srcset");
+}
 
 async function open(button: HTMLButtonElement) {
-  if (!dialog || !big || !source || dialog.open) return;
+  if (!dialog || !big || !source || dialog.open || pending) return;
   const shot = button.querySelector("img");
   if (!shot) return;
-  frame = button;
+  pending = button;
+  button.setAttribute("aria-busy", "true"); // the pointer says so too (notebook.css)
   source.srcset = button.dataset.closerAvif ?? "";
   big.src = button.dataset.closerWebp ?? "";
   big.alt = shot.alt;
   dialog.setAttribute("aria-label", `closer look: ${shot.alt}`);
-  await big.decode().catch(() => {}); // a big file that won't decode still opens, as the browser draws it
+  await big.decode().catch(() => {}); // it rejects when the file fails to load or to decode; naturalWidth says which
+  if (big.naturalWidth === 0 && shot.currentSrc) {
+    // No big file: grow from the frame's own picture, which is already here, rather than from a broken-image box
+    source.removeAttribute("srcset");
+    big.src = shot.currentSrc;
+    await big.decode().catch(() => {});
+  }
+  pending = null;
+  button.removeAttribute("aria-busy");
+  // The label may have been closed while the file loaded (its pill's aria-expanded is the state), and nothing opens over that
+  const labelOpen = button.isConnected && button.closest(".line-item")?.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
+  if (!labelOpen || big.naturalWidth === 0) return empty();
+  frame = button;
+  // A classic scrollbar goes while the dialog is open (overflow: hidden), and the page would shift under the picture and
+  // its frame. Its width stays as padding instead: scrollbar-gutter doesn't hold on the root in Chromium
+  const bar = Math.max(0, innerWidth - document.documentElement.clientWidth);
+  if (bar) document.documentElement.style.paddingRight = `${bar}px`;
   dialog.showModal();
   const from = shot.getBoundingClientRect(); // reading a rect also settles the dialog's first style, so the veil fades in from clear
   dialog.classList.add("on");
@@ -47,35 +71,36 @@ async function open(button: HTMLButtonElement) {
   );
 }
 
-function close() {
-  if (!dialog?.open || !big || !frame || closing) return;
+// Back in the frame: its snapshot shown, the dialog emptied and focus on the frame. A close the browser forces comes
+// here too, as it cuts the return short
+function restore() {
+  if (!dialog || !big || !frame) return;
   const button = frame;
   const shot = button.querySelector("img");
+  window.clearTimeout(timer);
+  big.removeEventListener("transitionend", restore);
+  if (dialog.open) dialog.close();
+  if (shot) shot.style.visibility = "";
+  big.style.transition = "none";
+  big.style.transform = "";
+  empty();
+  document.documentElement.style.paddingRight = "";
+  closing = false;
+  frame = null;
+  button.focus();
+}
+
+function close() {
+  if (!dialog?.open || !big || !frame || closing) return;
+  const shot = frame.querySelector("img");
   closing = true;
   dialog.classList.remove("on");
-  const done = () => {
-    dialog.close();
-    if (shot) shot.style.visibility = "";
-    big.style.transition = "none";
-    big.style.transform = "";
-    big.removeAttribute("src");
-    source?.removeAttribute("srcset");
-    closing = false;
-    frame = null;
-    button.focus();
-  };
-  if (reduced() || !shot) return done();
+  if (reduced() || !shot) return restore();
   const rest = restBox(big);
   big.style.transition = "transform 300ms var(--ease-out)";
   big.style.transform = flip(shot.getBoundingClientRect(), rest);
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    done();
-  };
-  big.addEventListener("transitionend", finish, { once: true });
-  window.setTimeout(finish, 400); // in case the transition never ends (a tab in the background)
+  big.addEventListener("transitionend", restore, { once: true });
+  timer = window.setTimeout(restore, 400); // in case the transition never ends (a tab in the background)
 }
 
 if (dialog) {
@@ -86,4 +111,6 @@ if (dialog) {
     event.preventDefault();
     close();
   });
+  // A second Esc inside the return can't be stopped: the browser closes the dialog itself, so settle it at once
+  dialog.addEventListener("close", restore);
 }
