@@ -60,7 +60,7 @@ test("showing older log entries responds within 200ms at 4× CPU", async ({ page
   expect(latency).toBeLessThan(200);
 });
 
-// Reported, not gated: the first press builds the deck's AudioContext (plan 2 code), about 150 to 185ms at 4× CPU
+// Reported, not gated: the first press builds the deck's AudioContext (plan 2 code), about 200ms at 4× CPU
 // here and more on CI's runners. The plan 4 follow-ups move that work out of the press, then this becomes a gate.
 test("pressing play: its interaction latency is reported", async ({ page }) => {
   await throttled(page);

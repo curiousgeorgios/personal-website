@@ -40,7 +40,7 @@ The analytics proxy drops events locally, because the PostHog key is a Worker se
 - Migrations: always `wrangler d1 migrations apply`, never `wrangler d1 execute --file`.
 - Fonts: `bun run fonts` after adding copy with new characters.
 - Open Graph image: `bun run build`, then `bun run serve`, then `bun run og`.
-- Deploys happen only from GitHub Actions on `main`, after every check passes; the privacy spec and a media check (every record's audio and cover answer) then run against the live site.
+- Deploys happen only from GitHub Actions on `main`, after every check passes; the privacy spec and a media check (every record's audio and cover answer) then run against the live site, followed by a Lighthouse run (a warning, not a failed deploy).
 - `/` is cached at the edge for five minutes with background refresh, and every deploy purges it (ADR-0010).
 - CI runs the end-to-end suite on one worker (ADR-0009), so the end-to-end step takes about 18 minutes.
 - Media: the starting crate lives in `media/` (MP3s and 512px covers from `bun run covers`); `bun run seed:media --local` uploads it to the local R2 store, `--remote` to production (a launch step).

@@ -36,4 +36,5 @@ Each passes alone.
 - `deck-crate.spec.ts` "the arrows are disabled while a record travels".
 - `admin-gate.spec.ts` "a write from this site's origin gets through the gate" (wrangler dev's ProxyWorker answers 500 on a cold server).
 - `deck-scratch.spec.ts`'s two scratch tests.
+- `privacy.spec.ts` "cookies none, storage empty, every request first party".
 - `labels.spec.ts` "two quick Escapes".

@@ -207,7 +207,7 @@ Every HTML response carries the security headers in section 12.1.
   - **Log:** add, edit, delete entries (date, day or month precision, text).
   - **Lately:** shelf (title, author) and kettle (title, note). Saving both fields empty hides that half of the row.
   - **Records:** add (title, artist, mp3 up to 15MB, cover as JPEG, PNG or WebP up to 10MB), edit title and artist, reorder, deactivate, activate and delete (with their files). At most 6 active. Uploads go to R2 under random unique keys (`audio/<ulid>.mp3`, `covers/<ulid>.webp`); covers are converted to a 512px square WebP under 40KB with the Images binding. SVG and anything that fails type sniffing is rejected. A save that fails part way keeps nothing.
-  - **Snapshots:** last capture time and status per line with a page to snapshot (the statuses are defined in `src/lib/snapshots.ts`), plus a "re-shoot now" button, which arrives with the snapshots Worker in plan 4. Changing a line's page to snapshot clears its old snapshot.
+  - **Snapshots:** last capture time and status per line with a page to snapshot (the statuses are defined in `src/lib/snapshots.ts`), plus a "re-shoot now" button, which calls the snapshots Worker and waits for the capture (section 9). Changing a line's page to snapshot clears its old snapshot.
 - Every write is a form POST to `/admin/` with an `intent`. Every request other than GET, HEAD or OPTIONS, anywhere on the site, needs an `Origin` header equal to the site origin; the middleware checks it (Astro's `checkOrigin` is off, so the 403 carries the security headers). Writes are validated server side (lengths, `https:` URLs, links the logbook can show, the record cap, sniffed file types). A failure re-renders the page with status 422 and the failed form open with its values and messages. A failure that belongs to no form on the page (a line, entry or record removed in another tab; an unrecognised action; an unknown fact; an unreadable form) shows its message in a banner at the top of the page instead; something unexpected (a throw) does the same with status 500. A success purges the `/` cache and redirects with 303, so a reload never repeats it. An identical repeat of an add (a double tap) counts as already saved (ADR-0012); so does removing something already removed and activating a record that's already active. A double-tapped move moves twice.
 
 ## 8. Data
@@ -227,7 +227,7 @@ Seed:
 ## 9. Snapshots (ADR-0002)
 
 - A separate Worker, `curiousgeorge-snapshots`, in `workers/snapshots/`, with bindings for D1 (`DB`), R2 (`MEDIA`), Browser Rendering (`BROWSER`) and Images (`IMAGES`). Cron `0 17 * * *` (UTC), which is 03:00 in Sydney during standard time and 04:00 during daylight saving.
-- For each item with a `snapshot_url`, it captures 1440 × 900 CSS px at device scale factor 2: navigate, wait for `load` plus a 1.5s quiet period and take the shot at a 15s cap even if the page never goes idle. Requests to known analytics hosts (PostHog, Google Analytics, Meta) are blocked so the visit isn't counted on George's other sites.
+- For each item with a `snapshot_url`, it captures 1440 × 900 CSS px at device scale factor 2: navigate, wait for `load` plus a 1.5s quiet period and take the shot at a 15s cap even if the page never goes idle. Requests to known analytics hosts (PostHog, Google Analytics including `analytics.google.com` and `stats.g.doubleclick.net`, Google Tag Manager and Meta's `facebook.com` and `facebook.net`) and to `/ingest/` paths on any host (a first-party PostHog proxy like this site's) are blocked so the visit isn't counted on George's other sites.
 - A capture fails only on a navigation error, a non-2xx status, a Cloudflare challenge (`cf-mitigated` header or the challenge page markup, not the JavaScript detections script an ordinary page may carry), a blank page (nothing visible: no text, images, video, canvas or frames) or an image under 10KB. A blank 2x shot weighs about 19KB, so the size floor alone never catches one. A failed capture keeps the previous snapshot and records `snapshot_status`; it never replaces a good image with a bad one. Failures are logged to Workers Logs.
 - Variants are precomputed with the Images binding and stored in R2 as AVIF and WebP: 480px wide (hover card and label), 960px (label on phones and high-density screens) and 1920px (closer look). Superseded objects are deleted after 7 days.
 - The admin "re-shoot now" button calls the Worker through a service binding.
@@ -255,7 +255,7 @@ Seed:
 - The proxy forwards only the four events above; anything else is refused with a 400 before it reaches PostHog. It sets `distinct_id`, `$cookieless_mode` and `$process_person_profile` itself and drops any `$ip` property.
 - The beacon sends a plain-text JSON body with `sendBeacon` (no preflight), falling back to `fetch` with `keepalive`. Scripts announce events as a DOM event (`logbook:track`), so the label script, the deck runner and the scene share no code with the beacon.
 - The beacon sends the page's address as its origin, path and `utm_*` parameters only, and the referrer as its origin only, because any other part of a URL can carry an identifier (ADR-0013).
-- Checks against the live site send no events: the post-deploy privacy and media checks run under Global Privacy Control, the privacy check tests the proxy with an event it refuses, and Lighthouse's post-deploy runs block `/ingest`.
+- Checks against the live site send no events: the post-deploy privacy and media checks run under Global Privacy Control, the privacy check tests the proxy with an event it refuses; Lighthouse's post-deploy runs block `/ingest`.
 
 ## 11. Performance budgets
 
@@ -313,23 +313,23 @@ Launch checklist (only George can do these):
 - [ ] Confirm the intro line and `based: sydney and canberra`.
 - [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, cookie SameSite Lax or Strict and a session long enough for a phone: when it runs out, a save in progress is lost), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
 - [ ] Check the account can use the Images binding (the admin converts record covers with it).
-- [ ] Before setting the key, switch on "Cookieless server hash mode" in the PostHog project.
-- [ ] Set the PostHog project key as a Worker secret: `bunx wrangler secret put POSTHOG_KEY`. Remove the old `NEXT_PUBLIC_POSTHOG_*` lines from your local `.env`. Then open the site once and check PostHog shows the pageview with a country and that no cookie came back. Check that one event from iOS Safari arrives, and that PostHog hashes the visitor's IP from `X-Forwarded-For`.
-- [ ] Put the D1 database id in `workers/snapshots/wrangler.jsonc` as well as `wrangler.jsonc`.
 - [ ] Check the account can use Browser Rendering (the nightly snapshots and "re-shoot now").
-- [ ] After the first nightly run (17:00 UTC), check `/admin`'s snapshots section says "captured" for each line, then re-shoot one. Time that "re-shoot now" against the deployed pair: browser launch, encoding and storing come on top of the 15s capture cap.
-- [ ] The Cloudflare dashboard's Git build of the old `personal-website` Worker ("Workers Builds") fails on every commit. Disconnect it, or point it at the new config, since GitHub Actions deploys.
-- [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).
-- [ ] On the iPhone, save something after the Access session has expired, and check what happens (the page's `form-action 'self'` may block Access's sign-in redirect; if it does, add the team domain to `form-action` or note it in the follow-ups).
 - [ ] Check the Workers plan suits a 15MB upload (`formData()` buffers the whole body; Workers Paid removes the doubt).
+- [ ] Switch on "Cookieless server hash mode" in the PostHog project, then set the project key as a Worker secret: `bunx wrangler secret put POSTHOG_KEY`. Remove the old `NEXT_PUBLIC_POSTHOG_*` lines from your local `.env`.
 - [ ] Apply the zone settings in section 10.
-- [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets and disconnect Workers Builds.
+- [ ] Before the first deploy, create the D1 database (`bunx wrangler d1 create curiousgeorge-logbook --location oc`) and put its id in `wrangler.jsonc` and in `workers/snapshots/wrangler.jsonc`.
+- [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets. Disconnect the Cloudflare dashboard's Git build of the old `personal-website` Worker ("Workers Builds"): it fails on every commit, and GitHub Actions deploys.
 - [ ] Before the first deploy, create the R2 bucket (`bunx wrangler r2 bucket create curiousgeorge-media --location oc`) and upload the starting crate (`bun run seed:media --remote`); the deploy applies the records migration, whose rows point at those files.
 - [ ] Add `CLOUDFLARE_ZONE_ID` to GitHub Actions secrets and give the API token the zone's Cache Purge permission (each deploy purges the cached home page, ADR-0010); after the first deploy, confirm a request to `/` straight after the purge is a cache miss (`cf-cache-status: MISS`).
+- [ ] After the first deploy, open the site once and check PostHog shows the pageview with a country and that no cookie came back. Check that one event from iOS Safari arrives. Check that PostHog hashes the visitor's IP from `X-Forwarded-For`: two visits from different networks on the same day count as two visitors, and one visit reloaded counts as one.
+- [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).
+- [ ] On the iPhone, save something after the Access session has expired, and check what happens (the page's `form-action 'self'` may block Access's sign-in redirect; if it does, add the team domain to `form-action` or note it in the follow-ups).
+- [ ] After the first nightly run (17:00 UTC), check `/admin`'s snapshots section says "captured" for each line, then re-shoot one. Time that "re-shoot now" against the deployed pair: browser launch, encoding and storing come on top of the 15s capture cap.
 - [ ] Sign off ADR-0009 (status Proposed until then).
 - [ ] Sign off ADR-0010 (status Proposed until then).
 - [ ] Sign off ADR-0011 (Origin checked in our middleware) and ADR-0012 (an identical repeat of an admin add counts as saved), both Proposed until then.
 - [ ] Sign off ADR-0013 (the analytics proxy holds the PostHog key and forwards only the logbook's events) and ADR-0014 (snapshots under fresh keys, a line moved to one only if its address is unchanged), both Proposed until then.
+- [ ] Sign off ADR-0015 (a modal holds the page still with the scrollbar's measured width, not `scrollbar-gutter`), Proposed until then.
 - [ ] Try the turntable on a real iPhone (once with the ringer switch on silent) and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
 
 ## 14. Testing
@@ -339,4 +339,4 @@ Launch checklist (only George can do these):
 - Snapshots Worker: unit tests with a fake browser page for success, a page that never goes quiet (shot at the cap), navigation errors, non-2xx statuses, challenge headers and pages and a blank image (each keeps the old snapshot), the variants' budgets, a line changed or removed mid-capture and the week-old clean-up; end to end, both Workers on a local server (port 4334) with local Browser Rendering and Images capture a fixture site (port 4400), nightly and through "re-shoot now".
 - Analytics: unit tests for the proxy (the key, the country, the forwarded IP, no cookies either way, refusals, the size cap) and the beacon's event body; end to end, the pageview and the events the page sends, nothing under Global Privacy Control and the proxy's answers.
 - Privacy smoke test against the built site and again after deploy: no `Set-Cookie` header on any response, `document.cookie === ""` and empty storage after interacting with everything, every request goes to the site's own origin and the `/ingest` proxy never forwards a `Cookie` header.
-- Budgets: a script that builds, serves and measures each budget in section 11 and fails the run when one is exceeded.
+- Budgets: a script that builds, serves and measures the size budgets in section 11 and fails the run when one is exceeded; interaction to next paint and layout shift are checked in Playwright on every run, and largest contentful paint is a Lighthouse warning after each deploy.
