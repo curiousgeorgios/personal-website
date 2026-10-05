@@ -69,7 +69,9 @@ describe("Logbook", () => {
     const dialog = (await closer({ ...full, now: [labelled(full.now[0], "snapshots/fixture-x")] }))!;
     expect(dialog.querySelector("button.closer-close")!.hasAttribute("autofocus")).toBe(true);
     expect(text(dialog.querySelector("button.closer-close"))).toBe("close");
-    expect(dialog.querySelector("picture > source[type='image/avif'] + img")).not.toBeNull();
+    // No <source>: closer.ts shows the frame's own picture, then the big file in the format that picture chose
+    expect(dialog.querySelector("picture > img")).not.toBeNull();
+    expect(dialog.querySelector("picture > source")).toBeNull();
     expect(await closer({ ...full, before: [labelled(full.before[0], "snapshots/fixture-y")] })).not.toBeNull();
     // One dialog for the page, however many lines have a snapshot
     const many = await render(Logbook, { data: { ...full, now: [labelled(full.now[0], "snapshots/fixture-x")], before: [labelled(full.before[0], "snapshots/fixture-y")] } });

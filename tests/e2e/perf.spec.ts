@@ -71,8 +71,8 @@ test("pressing play responds within 200ms at 4× CPU", async ({ page }) => {
   expect(latency).toBeLessThan(200);
 });
 
-// The click's latency runs to the next paint (the frame's busy state), not to the dialog opening: that waits for the
-// 1920 to decode, which is the network's time and not an interaction's.
+// The click's latency runs to the next paint after it. The look opens once the frame's own picture is decoded, which it
+// already is, and the 1920 is swapped in later, off the interaction.
 test("opening the closer look responds within 200ms at 4× CPU", async ({ page }) => {
   await throttled(page);
   const item = page.locator('[data-slug="digital-nachos"]');

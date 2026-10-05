@@ -1,9 +1,10 @@
-// The closer look (spec 4.1): a framed snapshot grows from its frame to fit the viewport over a paper veil (FLIP,
-// 420ms ease-out-quint), and goes back into its frame (300ms ease-out) on a click, the close button or Esc. The dialog
-// is modal, so focus moves into it, and returns to the frame. Nothing moves under reduced motion.
+// The closer look (spec 4.1): a framed snapshot grows from its frame to fit the window over a paper veil (FLIP, 420ms
+// ease-out-quint), and goes back into its frame (300ms ease-out) on a click, the close button or Esc. It opens at once
+// with the frame's own picture, which is already here, and the 1920px file takes its place once it has arrived, so a slow
+// or missing file never holds anything up. The dialog is modal, so focus moves into it, and returns to the frame.
+// Nothing moves under reduced motion.
 const dialog = document.querySelector<HTMLDialogElement>("dialog.closer");
 const big = dialog?.querySelector("img");
-const source = dialog?.querySelector("source");
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 // The transform that puts `to` where `from` is
 const flip = (from: DOMRect, to: DOMRect) => `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
@@ -19,46 +20,57 @@ function restBox(img: HTMLElement) {
   return box;
 }
 let frame: HTMLAnchorElement | null = null; // the frame whose snapshot is in the dialog
-let pending: HTMLAnchorElement | null = null; // the frame whose big file is still loading: one open at a time
+let opening = false; // a frame's picture is still decoding: one open at a time
 let closing = false;
 let timer = 0;
 
-function empty() {
-  big?.removeAttribute("src");
-  source?.removeAttribute("srcset");
+const empty = () => big?.removeAttribute("src");
+
+// The big file in the format the frame's own picture chose (AVIF where the browser takes it)
+const bigFile = (link: HTMLAnchorElement, shot: HTMLImageElement) => (shot.currentSrc.endsWith(".avif") ? link.dataset.closerAvif : link.dataset.closerWebp) ?? "";
+
+// Loads the big file on the side and swaps it in once decoded, unless this look has closed meanwhile. The window sets the
+// image's box, not the file, so the swap moves nothing; a file that won't load leaves the frame's picture, which fits too
+function swapIn(link: HTMLAnchorElement, url: string) {
+  if (!url) return;
+  const loader = new Image();
+  loader.src = url;
+  loader.decode().then(
+    () => {
+      if (frame === link && !closing && big) big.src = url;
+    },
+    () => {},
+  );
 }
 
 async function open(link: HTMLAnchorElement) {
-  if (!dialog || !big || !source || dialog.open || pending) return;
+  if (!dialog || !big || dialog.open || opening) return;
   const shot = link.querySelector("img");
   if (!shot) return;
-  pending = link;
-  link.setAttribute("aria-busy", "true"); // the pointer says so too (notebook.css)
-  source.srcset = link.dataset.closerAvif ?? "";
-  big.src = link.dataset.closerWebp ?? "";
-  big.alt = shot.alt;
-  dialog.setAttribute("aria-label", `closer look: ${shot.alt}`);
-  await big.decode().catch(() => {}); // it rejects when the file fails to load or to decode; naturalWidth says which
-  if (big.naturalWidth === 0 && shot.currentSrc) {
-    // No big file: grow from the frame's own picture, which is already here, rather than from a broken-image box
-    source.removeAttribute("srcset");
-    big.src = shot.currentSrc;
+  opening = true;
+  // Decoded already once the frame shows; this waits only for a frame clicked the moment its picture arrives
+  await shot.decode().catch(() => {});
+  const own = shot.currentSrc;
+  if (own) {
+    big.src = own;
+    big.alt = shot.alt;
+    dialog.setAttribute("aria-label", `closer look: ${shot.alt}`);
     await big.decode().catch(() => {});
   }
-  pending = null;
-  link.removeAttribute("aria-busy");
-  // The label may have been closed while the file loaded (its pill's aria-expanded is the state), and nothing opens over that
+  opening = false;
+  // The label may have been closed meanwhile (its pill's aria-expanded is the state), and nothing opens over that
   const labelOpen = link.isConnected && link.closest(".line-item")?.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
-  if (!labelOpen || big.naturalWidth === 0) return empty();
+  if (!own || !labelOpen || big.naturalWidth === 0) return empty();
   frame = link;
   // A classic scrollbar goes while the dialog is open (overflow: hidden), and the page would shift under the picture and
-  // its frame. Its width stays as padding instead: scrollbar-gutter doesn't hold on the root in Chromium
+  // its frame. Its width stays as padding instead: scrollbar-gutter doesn't hold on the root in Chromium (ADR-0015)
   const bar = Math.max(0, innerWidth - document.documentElement.clientWidth);
   if (bar) document.documentElement.style.paddingRight = `${bar}px`;
   dialog.showModal();
   const from = shot.getBoundingClientRect(); // reading a rect also settles the dialog's first style, so the veil fades in from clear
   dialog.classList.add("on");
   shot.style.visibility = "hidden";
+  swapIn(link, bigFile(link, shot));
   if (reduced()) return;
   big.style.transition = "none";
   big.style.transform = flip(from, big.getBoundingClientRect());
@@ -112,7 +124,12 @@ if (dialog) {
       void open(link);
     }),
   );
-  dialog.addEventListener("click", close); // the veil, the image and the close button all put it back
+  // The veil, the image and the close button all put it back. The second click of a double click on a frame lands here
+  // once the look has opened, and isn't a request to close it (a keyboard press on the close button has detail 0)
+  dialog.addEventListener("click", (event) => {
+    if (event.detail > 1) return;
+    close();
+  });
   // Esc closes the closer look first; the label's own Esc handler only hears the next one, once focus is back in it
   dialog.addEventListener("cancel", (event) => {
     event.preventDefault();

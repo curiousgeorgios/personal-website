@@ -317,7 +317,7 @@ test("a snapshot opens a closer look; Esc returns it to its frame, then closes t
   const dialog = page.locator("dialog.closer");
   await expect(dialog).toHaveAttribute("open", "");
   await expect(dialog.locator(".closer-close")).toBeFocused();
-  await expect(dialog.locator("img")).toHaveAttribute("src", /fixture-digital-nachos-1920\.webp$/);
+  await expect(dialog.locator("img")).toHaveAttribute("src", /fixture-digital-nachos-1920\.(avif|webp)$/);
   await expect(dialog).toHaveAccessibleName("closer look: a snapshot of digital nachos");
   expect(new URL(page.url()).pathname).toBe("/"); // the frame's link isn't followed
   await page.keyboard.press("Escape");
@@ -419,7 +419,6 @@ const delayBig = (page: Page, ms: number) =>
   });
 
 test("a double click on a frame still grows the snapshot out of it, instead of popping it open", async ({ page }) => {
-  await delayBig(page, 300);
   await page.goto("/");
   const item = page.locator('[data-slug="canberra-events"]');
   await item.locator(".peek").click();
@@ -447,10 +446,32 @@ test("a double click on a frame still grows the snapshot out of it, instead of p
   // the image with the first's transform on made the grow's start the identity, so the picture popped to full size
   const frames = await page.evaluate(() => (window as unknown as { frames: string[] }).frames);
   expect(frames.filter((transform) => transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)")).toEqual([]);
+  // The double click's second click lands on the open look, and doesn't close it
+  await expect(page.locator("dialog.closer")).toHaveAttribute("open", "");
+  await expect(page.locator("dialog.closer")).toHaveClass(/\bon\b/);
 });
 
-test("a second frame clicked while the first one's big file loads is ignored, and the first frame's snapshot comes back", async ({ page }) => {
-  await delayBig(page, 2000);
+test("the closer look opens at once with the frame's own picture, and the big file takes its place in the same box", async ({ page }) => {
+  await delayBig(page, 3000);
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const own = await item.locator(".frame img").evaluate((img: HTMLImageElement) => img.currentSrc);
+  await item.locator(".frame").click();
+  const dialog = page.locator("dialog.closer");
+  const big = dialog.locator("img");
+  await expect(dialog).toHaveAttribute("open", "");
+  // Open before the 1920 could have arrived: the picture is the frame's own
+  expect(await big.evaluate((img: HTMLImageElement) => img.currentSrc)).toBe(own);
+  await expect.poll(() => big.evaluate((img) => getComputedStyle(img).transform)).toBe("none");
+  const before = await big.boundingBox();
+  await expect(big).toHaveAttribute("src", /fixture-digital-nachos-1920\.(avif|webp)$/, { timeout: 10_000 });
+  expect(await big.boundingBox()).toEqual(before);
+});
+
+test("a big file that never arrives holds nothing up: the look closes, and the next frame opens its own", async ({ page }) => {
+  await page.route(BIG, () => {}); // never answered
   await page.goto("/");
   const first = page.locator('[data-slug="digital-nachos"]');
   const second = page.locator('[data-slug="canberra-events"]');
@@ -458,42 +479,39 @@ test("a second frame clicked while the first one's big file loads is ignored, an
   await second.locator(".peek").click();
   await expect(first.locator(".frame img")).toBeVisible();
   await expect(second.locator(".frame img")).toBeVisible();
-  await first.locator(".frame").click();
-  // The wait shows: the frame says it is busy and the pointer says so too
-  await expect(first.locator(".frame")).toHaveAttribute("aria-busy", "true");
-  await expect(first.locator(".frame")).toHaveCSS("cursor", "progress");
-  await second.locator(".frame").click();
   const dialog = page.locator("dialog.closer");
-  await expect(dialog).toHaveAttribute("open", "", { timeout: 10_000 });
-  await expect(dialog.locator("img")).toHaveAttribute("src", /fixture-digital-nachos-1920\.webp$/);
-  await expect(first.locator(".frame")).not.toHaveAttribute("aria-busy", /.*/);
-  await expect(second.locator(".frame")).not.toHaveAttribute("aria-busy", /.*/);
+  await first.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
   await dialog.locator(".closer-close").click();
   await expect(dialog).not.toHaveAttribute("open", "");
-  await expect(first.locator(".frame img")).toHaveCSS("visibility", "visible");
-  await expect(second.locator(".frame img")).toHaveCSS("visibility", "visible");
   await expect(first.locator(".frame")).toBeFocused();
+  await second.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of canberra.events");
+  await dialog.locator(".closer-close").click();
+  await expect(second.locator(".frame")).toBeFocused();
+  await expect(first.locator(".frame img")).toHaveCSS("visibility", "visible");
 });
 
-test("a label closed while its closer look loads never gets one, and focus stays where it was put", async ({ page }) => {
+test("a big file that arrives after the look has closed changes nothing", async ({ page }) => {
   await delayBig(page, 1500);
   await page.goto("/");
   const item = page.locator('[data-slug="digital-nachos"]');
-  const pill = item.locator(".peek");
-  await pill.click();
+  await item.locator(".peek").click();
   await expect(item.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
   await item.locator(".frame").click();
-  await expect(item.locator(".frame")).toHaveAttribute("aria-busy", "true");
-  await pill.press("Enter");
-  await expect(pill).toHaveAttribute("aria-expanded", "false");
-  // The file arrives, and nothing opens over the closed label; the busy marks go on this path too
-  await expect(item.locator(".frame")).not.toHaveAttribute("aria-busy", /.*/, { timeout: 10_000 });
-  await expect(page.locator("dialog.closer")).not.toHaveAttribute("open", "");
-  await expect(pill).toBeFocused();
+  await expect(dialog).toHaveAttribute("open", "");
+  await dialog.locator(".closer-close").click();
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await page.waitForTimeout(2500); // the big file has arrived by now
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(dialog.locator("img")).not.toHaveAttribute("src", /.*/);
   await expect(item.locator(".frame img")).toHaveCSS("visibility", "visible");
+  await expect(item.locator(".frame")).toBeFocused();
 });
 
-test("a closer look whose big file won't load grows from the frame's own picture instead of a broken one", async ({ page }) => {
+test("a closer look whose big file won't load keeps the frame's own picture, grown to fit the window", async ({ page }) => {
   await page.route(BIG, (route) => route.abort());
   await page.goto("/");
   const item = page.locator('[data-slug="canberra-events"]');
@@ -502,14 +520,15 @@ test("a closer look whose big file won't load grows from the frame's own picture
   await item.locator(".frame").click();
   const dialog = page.locator("dialog.closer");
   await expect(dialog).toHaveAttribute("open", "");
-  await expect(item.locator(".frame")).not.toHaveAttribute("aria-busy", /.*/);
-  const same = await item.locator(".frame").evaluate((button) => {
+  await expect.poll(() => dialog.locator("img").evaluate((big) => getComputedStyle(big).transform)).toBe("none");
+  const same = await item.locator(".frame").evaluate((frame) => {
     const big = document.querySelector<HTMLImageElement>("dialog.closer img")!;
-    return { loaded: big.naturalWidth > 0, current: big.currentSrc === button.querySelector("img")!.currentSrc };
+    return { loaded: big.naturalWidth > 0, current: big.currentSrc === frame.querySelector("img")!.currentSrc };
   });
   expect(same).toEqual({ loaded: true, current: true });
-  await expect.poll(() => dialog.locator("img").evaluate((big) => getComputedStyle(big).transform)).toBe("none");
-  expect((await dialog.locator("img").boundingBox())!.width).toBeGreaterThan((await item.locator(".frame img").boundingBox())!.width);
+  // The window decides its size, not the file: 88vw, or the height left by the room above and below, at 16:10
+  const fit = await page.evaluate(() => Math.min(innerWidth * 0.88, (innerHeight - 2 * Math.max(innerHeight * 0.06, 72)) * 1.6));
+  expect(Math.abs((await dialog.locator("img").boundingBox())!.width - fit)).toBeLessThan(1);
 });
 
 test("two quick Escapes put the snapshot back and focus on the frame as the browser closes the dialog, then a third closes the label", async ({ page }) => {
