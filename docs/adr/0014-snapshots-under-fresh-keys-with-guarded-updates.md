@@ -12,7 +12,7 @@ ADR-0002 chose always-fresh snapshots: a separate Worker captures each line's pa
 
 - Every good capture is stored under a fresh base key, `snapshots/<slug>-<ulid>`, as six files (`-480`, `-960` and `-1920`, each AVIF and WebP). Keys are never overwritten.
 - The line is pointed at the new base with an update that also requires its `snapshot_url` to still be the address that was captured; a failed capture only records `snapshot_status` under the same condition. If the line was edited or removed meanwhile, nothing changes and the new files are deleted.
-- A capture's files are deleted by the nightly run a week after the next capture of the same line replaced them, however old they are; files of a line whose address changed or that was removed go a week after their own upload.
+- A capture's files are deleted by the nightly run a week after the next capture of the same line replaced them, however old they are; files of a line whose address changed or that was removed go a week after their own upload. Each capture's files carry their line's id in R2 metadata, so a line renamed in `/admin` keeps its old files for the full week. A database update that fails after it may have committed never deletes the new files unless the line is known not to name them; the sweep collects any left over.
 - Captures use `@cloudflare/puppeteer` (134KiB gzipped) rather than `@cloudflare/playwright` (624KiB).
 
 ## Consequences
@@ -24,3 +24,4 @@ A cached page never names a missing or half-replaced file, and George's edits al
 - **One fixed key per line, overwritten nightly:** simpler, but a cached page could show a file mid-replacement, and the old image would be gone before the cache let go of it.
 - **Delete superseded files at once:** saves a little storage, but breaks pages still cached at the edge.
 - **Check the line before capturing, then write unconditionally:** leaves a window where an edit made during the capture is overwritten.
+- **Group a line's captures by the slug in their keys:** needs no metadata, but a line renamed in `/admin` would look removed, and its old files, if over a week old, would go in the same run that replaced them while cached pages still name them.
