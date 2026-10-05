@@ -29,7 +29,8 @@ describe("Turntable", () => {
   test("has the deck, the hint, a polite live region and one audio element that preloads nothing", async () => {
     const doc = await render(Turntable, { records });
     expect(doc.querySelector("[data-deck]")).not.toBeNull();
-    expect(text(doc.querySelector(".hint"))).toBe("flip through the crate with ‹ ›, or pick a track. nothing plays until you do.");
+    expect(text(doc.querySelector(".hint .hint-scene"))).toBe("flip through the crate with ‹ ›, or pick a track. nothing plays until you do.");
+    expect(text(doc.querySelector(".hint .hint-list"))).toBe("pick a track. nothing plays until you do.");
     const status = doc.querySelector("[data-deck-status]")!;
     expect([status.getAttribute("role"), status.getAttribute("aria-live")]).toEqual(["status", "polite"]);
     expect([...doc.querySelectorAll("audio")].map((audio) => audio.getAttribute("preload"))).toEqual(["none"]);

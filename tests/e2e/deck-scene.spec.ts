@@ -98,6 +98,9 @@ test("without WebGL the scene never loads and the list plays and stops every rec
   const poster = page.locator("[data-deck] .poster img");
   await expect(poster).toBeVisible();
   await expect.poll(() => poster.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+  // No scene, no ‹ ›: only the short hint shows
+  await expect(page.locator(".corner > .hint .hint-list")).toBeVisible();
+  await expect(page.locator(".corner > .hint .hint-scene")).toBeHidden();
   const rows = page.locator(".tracks li");
   for (let i = 0; i < (await rows.count()); i++) {
     await rows.nth(i).locator("button").click();
@@ -123,3 +126,27 @@ test("losing the WebGL context mid-journey drops the scene and the list keeps wo
   await rows.nth(1).locator("button").click();
   await playing(page, 1);
 });
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 375, height: 812 }]) {
+  test(`at ${viewport.width}px the hint names ‹ › only while the scene is live, and its line never changes height`, async ({ page }) => {
+    test.skip(!(await hasWebGL(page)), "no WebGL in this browser here");
+    // At 375px the long sentence wraps to two lines, and the short one must keep that height
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const hint = page.locator(".corner > .hint");
+    const full = hint.locator(".hint-scene");
+    const short = hint.locator(".hint-list");
+    await expect(short).toBeVisible();
+    await expect(full).toBeHidden();
+    const height = (await hint.boundingBox())!.height;
+    await page.locator("[data-deck]").scrollIntoViewIfNeeded();
+    await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 * SLOW });
+    await expect(full).toBeVisible();
+    await expect(short).toBeHidden();
+    expect((await hint.boundingBox())!.height).toBe(height);
+    await page.evaluate(() => window.__deckScene!.loseContext());
+    await expect(page.locator("[data-deck].live")).toHaveCount(0);
+    await expect(short).toBeVisible();
+    await expect(full).toBeHidden();
+  });
+}
