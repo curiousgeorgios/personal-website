@@ -7,6 +7,7 @@ import Log from "./Log.astro";
 import Turntable from "./Turntable.astro";
 import SayHi from "./SayHi.astro";
 import VisitorInfo from "./VisitorInfo.astro";
+import CloserLook from "./CloserLook.astro";
 import type { Logbook } from "../lib/logbook";
 interface Props {
   data: Logbook | null;
@@ -23,6 +24,7 @@ const { data } = Astro.props;
   <Row label="say hi" id="say-hi"><SayHi /></Row>
   <Row label="visitor info" id="visitor-info"><VisitorInfo /></Row>
 </main>
+{data && [...data.now, ...data.before].some((item) => item.label?.snapshotKey) && <CloserLook />}
 <script>
   import "../scripts/beacon";
 </script>

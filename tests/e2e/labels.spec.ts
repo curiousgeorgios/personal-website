@@ -245,6 +245,95 @@ test("find-in-page with JavaScript on loads the frame's snapshot", async ({ page
   await expect.poll(() => item.locator(".frame img").evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)).toBe(true);
 });
 
+test("a snapshot opens a closer look; Esc returns it to its frame, then closes the label", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  const frame = item.locator(".frame");
+  await expect(frame.locator("img")).toBeVisible();
+  await frame.click();
+  const dialog = page.locator("dialog.closer");
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect(dialog.locator(".closer-close")).toBeFocused();
+  await expect(dialog.locator("img")).toHaveAttribute("src", /fixture-digital-nachos-1920\.webp$/);
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of digital nachos");
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(frame).toBeFocused();
+  await expect(frame.locator("img")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "false");
+  await expect(item.locator(".peek")).toBeFocused();
+});
+
+test("a click anywhere in the closer look, or its close button, puts the snapshot back", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  const dialog = page.locator("dialog.closer");
+  for (const close of [() => dialog.locator("img").click(), () => dialog.locator(".closer-close").click()]) {
+    await item.locator(".frame").click();
+    await expect(dialog).toHaveAttribute("open", "");
+    await close();
+    await expect(dialog).not.toHaveAttribute("open", "");
+    await expect(item.locator(".frame")).toBeFocused();
+  }
+});
+
+test("with reduced motion the closer look opens and closes without moving", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await item.locator(".frame").click();
+  const img = page.locator("dialog.closer img");
+  await expect(page.locator("dialog.closer")).toHaveAttribute("open", "");
+  expect(await img.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("dialog.closer")).not.toHaveAttribute("open", "");
+});
+
+test("the paper veil fades in over the page instead of appearing at once", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  // WebKit used to start the veil already opaque, as nothing had settled the dialog's style before the class went on
+  const fading = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const dialog = document.querySelector<HTMLDialogElement>("dialog.closer")!;
+        new MutationObserver((_records, observer) => {
+          if (!dialog.classList.contains("on")) return;
+          observer.disconnect();
+          requestAnimationFrame(() => resolve(dialog.getAnimations({ subtree: true }).some((animation) => animation instanceof CSSTransition && animation.transitionProperty === "opacity")));
+        }).observe(dialog, { attributes: true, attributeFilter: ["class"] });
+        document.querySelector<HTMLElement>('[data-slug="canberra-events"] .frame')!.click();
+      }),
+  );
+  expect(fading).toBe(true);
+});
+
+test("a closer look closed while it is still growing goes back to its frame, not to where it had got to", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const { landed, frame } = await item.locator(".frame").evaluate(async (element) => {
+    const button = element as HTMLButtonElement;
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.closer")!;
+    const big = dialog.querySelector("img")!;
+    const box = (rect: DOMRect) => ({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    button.click();
+    while (!dialog.open) await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 100)); // part-way through the 420ms grow
+    const landed = new Promise<DOMRect>((resolve) => big.addEventListener("transitionend", () => resolve(big.getBoundingClientRect()), { once: true }));
+    big.click();
+    return { landed: box(await landed), frame: box(button.querySelector("img")!.getBoundingClientRect()) };
+  });
+  for (const key of ["left", "top", "width", "height"] as const) expect(Math.abs(landed[key] - frame[key])).toBeLessThan(1);
+});
+
 test.describe("snapshots without JavaScript", () => {
   test.use({ javaScriptEnabled: false });
   // Browsers ignore loading="lazy" while scripting is off (an anti-tracking rule in the HTML spec), so without

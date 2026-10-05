@@ -58,6 +58,15 @@ describe("Logbook", () => {
     expect(labels(doc)).toEqual(["logbook of", "say hi", "visitor info"]);
   });
 
+  test("the closer look is in the page only when some line has a snapshot", async () => {
+    expect((await render(Logbook, { data: full })).querySelector("dialog.closer")).toBeNull();
+    const shot = { ...full, now: [{ ...full.now[0], label: { era: "", status: "live" as const, madeOf: null, text: null, kind: null, note: null, snapshotKey: "snapshots/fixture-x" } }] };
+    const dialog = (await render(Logbook, { data: shot })).querySelector("dialog.closer")!;
+    expect(dialog.querySelector("button.closer-close")!.hasAttribute("autofocus")).toBe(true);
+    expect(text(dialog.querySelector("button.closer-close"))).toBe("close");
+    expect(dialog.querySelector("picture > source[type='image/avif'] + img")).not.toBeNull();
+  });
+
   test("visitor info says exactly what is collected", async () => {
     const doc = await render(Logbook, { data: null });
     const pairs = [...doc.querySelectorAll("#visitor-info dt")].map((dt) => [text(dt), text(dt.nextElementSibling)]);
