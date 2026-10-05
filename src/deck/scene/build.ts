@@ -89,9 +89,14 @@ const SLEEVE_BACKS = [0xe8e2d5, 0xdfd6c4, 0xe6dccb, 0xd9d1c1];
 // candle (spec 5.2). Built in idle slices between sections.
 export async function buildStage(renderer: WebGLRenderer, textures: Textures, covers: Texture[], light: Light): Promise<Stage> {
   const scene = new Scene();
+  // The one scene task allowed over 50ms (about 70ms at 4× CPU, once, before the canvas shows, while the poster is still
+  // on screen; spec 11 and ADR-0017). It gets an idle moment of its own, so nothing else lands in the same task
+  await idle();
+  if (__TEST_HOOKS__) performance.mark("deck:environment:start");
   const pmrem = new PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   pmrem.dispose();
+  if (__TEST_HOOKS__) performance.measure("deck:environment", "deck:environment:start");
   scene.environmentIntensity = light.environment;
   const camera = new PerspectiveCamera(24, 1, 0.1, 200);
 
