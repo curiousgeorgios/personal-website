@@ -1,25 +1,38 @@
 ---
 import { describeSnapshot } from "../../lib/snapshots";
+import { formState } from "../../lib/admin/form-state";
+import type { ActionFailure } from "../../lib/admin/actions";
 import type { AdminItem } from "../../lib/admin/store";
 
 interface Props {
   items: AdminItem[];
+  failure: ActionFailure | null;
 }
 
-// Read-only until plan 4 builds the snapshots Worker and its "re-shoot now" button
-const shots = Astro.props.items.filter((item) => item.snapshotUrl);
+const { items, failure } = Astro.props;
+const shots = items.filter((item) => item.snapshotUrl);
 ---
 {shots.length === 0 ? (
   <p class="empty">no lines have a page to snapshot yet. add one in a line's wall label.</p>
 ) : (
   <ul class="snapshots">
-    {shots.map((item) => (
-      <li data-slug={item.slug}>
-        <span class="mono">{item.slug}</span>
-        <span class="url">{item.snapshotUrl}</span>
-        <span class="status">{describeSnapshot(item.snapshotStatus, item.snapshotAt)}</span>
-      </li>
-    ))}
+    {shots.map((item) => {
+      const id = `shot-${item.id}`;
+      const { errors } = formState(failure, id, {});
+      return (
+        <li data-slug={item.slug}>
+          <span class="mono">{item.slug}</span>
+          <span class="url">{item.snapshotUrl}</span>
+          <span class="status">{describeSnapshot(item.snapshotStatus, item.snapshotAt)}</span>
+          <form method="post" action={`/admin/#${id}`} id={id} class="reshoot">
+            <input type="hidden" name="intent" value="snapshot.reshoot" />
+            <input type="hidden" name="id" value={item.id} />
+            {errors.form && <p class="error" role="alert">{errors.form}</p>}
+            <button type="submit" class="button quiet" aria-label={`re-shoot ${item.slug} now`}>re-shoot now</button>
+          </form>
+        </li>
+      );
+    })}
   </ul>
 )}
-<p class="hint">pages are captured nightly once the snapshots worker is running.</p>
+<p class="hint">pages are captured every night, around 3am in sydney. re-shoot one when it has changed; it takes a few seconds.</p>

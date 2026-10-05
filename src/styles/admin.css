@@ -97,3 +97,5 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
   .records-admin .entry { grid-template-columns: 40px minmax(0, 1fr); }
   .records-admin .controls { grid-column: 2; }
 }
+
+.snapshots .reshoot { display: grid; gap: 6px; justify-items: start; margin-top: 6px; }

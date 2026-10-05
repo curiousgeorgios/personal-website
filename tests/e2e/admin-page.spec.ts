@@ -84,3 +84,14 @@ test("a write the page can't place shows its message stuck at the top, in view, 
   const formBox = (await page.locator("#fact-kettle").boundingBox())!;
   expect(formBox.y).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
 });
+
+test("re-shooting without the snapshots Worker says so on the line", async ({ page }) => {
+  await openAdmin(page);
+  const line = page.locator('#snapshots li[data-slug="digital-nachos"]');
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => candidate.request().method() === "POST"),
+    line.getByRole("button", { name: "re-shoot digital-nachos now", exact: true }).click(),
+  ]);
+  expect(response.status()).toBe(422);
+  await expect(page.locator('#snapshots li[data-slug="digital-nachos"] .error')).toHaveText("the snapshots worker didn't answer. try again in a minute.");
+});

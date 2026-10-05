@@ -3,6 +3,7 @@ import { runAction, type ActionDeps } from "../../src/lib/admin/actions";
 import { newMediaKeys } from "../../src/lib/admin/media";
 import * as store from "../../src/lib/admin/store";
 import { sqliteD1 } from "./sqlite-d1";
+import type { ShotOutcome } from "../../workers/snapshots/src/run";
 
 const MP3 = Uint8Array.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3]);
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2]);
@@ -404,6 +405,65 @@ describe("records", () => {
     expect(await submit({ intent: "record.remove", id: "1", confirm: "yes" })).toEqual({ ok: true, section: "records" });
     expect(await submit({ intent: "record.remove", id: "1", confirm: "yes" })).toEqual({ ok: true, section: "records" });
     expect(await submit({ intent: "record.remove", id: "-3", confirm: "yes" })).toMatchObject({ ok: false, errors: { form: "that record no longer exists" } });
+  });
+});
+
+describe("snapshots", () => {
+  const reshoot = async (answer: ShotOutcome | "gone" | Error | null, id = "1") => {
+    const snapshots =
+      answer === null
+        ? undefined
+        : {
+            reshoot: vi.fn(async () => {
+              if (answer instanceof Error) throw answer;
+              return answer;
+            }),
+          };
+    const form = new FormData();
+    form.append("intent", "snapshot.reshoot");
+    form.append("id", id);
+    return { result: await runAction(form, { ...deps(), snapshots }), snapshots };
+  };
+
+  test("a re-shoot that captures the page is saved", async () => {
+    const { result, snapshots } = await reshoot("ok");
+    expect(result).toEqual({ ok: true, section: "snapshots" });
+    expect(snapshots!.reshoot).toHaveBeenCalledWith(1);
+  });
+
+  test("a capture that fails says why, on its line", async () => {
+    expect((await reshoot("challenge")).result).toEqual({
+      ok: false,
+      section: "snapshots",
+      form: "shot-1",
+      errors: { form: "couldn't capture it: a bot check blocked it" },
+      values: {},
+    });
+    expect((await reshoot("too-small")).result).toMatchObject({ errors: { form: "couldn't capture it: the capture came out blank" } });
+  });
+
+  test("a line that changed while it was captured asks for another go", async () => {
+    expect((await reshoot("discarded")).result).toMatchObject({ form: "shot-1", errors: { form: "the line changed while it was being captured. try again." } });
+  });
+
+  test("a line with no page to snapshot any more is a message for the page", async () => {
+    expect((await reshoot("gone")).result).toMatchObject({ section: null, form: "", errors: { form: "that line has no page to snapshot any more" } });
+  });
+
+  test("a snapshots Worker that doesn't answer, or isn't bound, says so on the line", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const answer of [new Error('Worker "curiousgeorge-snapshots" not found'), null]) {
+      expect((await reshoot(answer)).result).toMatchObject({
+        section: "snapshots",
+        form: "shot-1",
+        errors: { form: "the snapshots worker didn't answer. try again in a minute." },
+      });
+    }
+    expect(error).toHaveBeenCalledTimes(2);
+  });
+
+  test("an id that isn't one is gone", async () => {
+    expect((await reshoot("ok", "abc")).result).toMatchObject({ section: null, errors: { form: "that line no longer exists" } });
   });
 });
 

@@ -1,3 +1,5 @@
+import type { ShotOutcome } from "../../../workers/snapshots/src/run";
+import { SNAPSHOT_STATUSES } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
 import {
@@ -14,7 +16,12 @@ import {
   type Fields,
 } from "./validate";
 
-export type AdminSection = "now" | "before" | "log" | "lately" | "records";
+export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots";
+
+/** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
+export interface SnapshotsService {
+  reshoot(id: number): Promise<ShotOutcome | "gone">;
+}
 
 export interface ActionDeps {
   db: D1Database;
@@ -22,6 +29,8 @@ export interface ActionDeps {
   images: ImagesBinding;
   /** New R2 keys for a record (tests pass fixed ones) */
   keys?: () => MediaKeys;
+  /** The snapshots Worker, through the SNAPSHOTS service binding (spec 9) */
+  snapshots?: SnapshotsService;
 }
 
 export interface ActionFailure {
@@ -79,6 +88,8 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return setRecordActive(form, deps, false);
     case "record.remove":
       return removeRecord(form, deps);
+    case "snapshot.reshoot":
+      return reshoot(form, deps);
     default:
       return fail(null, "", { form: "that action isn't recognised" });
   }
@@ -273,4 +284,25 @@ async function removeRecord(form: FormData, { db, media }: ActionDeps): Promise<
 /** Deletes files from R2; a failure only leaves an orphan there, so it's logged, not thrown */
 async function deleteFiles(media: R2Bucket, keys: string[], what: string) {
   await media.delete(keys).catch((error: unknown) => console.error(`admin: couldn't delete ${what}`, error));
+}
+
+// Snapshots
+
+/** "Re-shoot now" (spec 9): waits for the capture, which takes a few seconds; a failed capture isn't a save */
+async function reshoot(form: FormData, { snapshots }: ActionDeps): Promise<ActionResult> {
+  const id = idOf(form);
+  if (id === null) return gone("line");
+  const formId = `shot-${id}`;
+  let outcome: ShotOutcome | "gone";
+  try {
+    if (!snapshots) throw new Error("no SNAPSHOTS binding");
+    outcome = await snapshots.reshoot(id);
+  } catch (error) {
+    console.error("admin: the snapshots worker didn't answer", error instanceof Error ? error.message : String(error));
+    return fail("snapshots", formId, { form: "the snapshots worker didn't answer. try again in a minute." });
+  }
+  if (outcome === "ok") return { ok: true, section: "snapshots" };
+  if (outcome === "gone") return fail(null, "", { form: "that line has no page to snapshot any more" });
+  if (outcome === "discarded") return fail("snapshots", formId, { form: "the line changed while it was being captured. try again." });
+  return fail("snapshots", formId, { form: `couldn't capture it: ${SNAPSHOT_STATUSES[outcome]}` });
 }

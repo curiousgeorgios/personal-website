@@ -13,14 +13,14 @@ import { loadAdmin } from "../../lib/admin/store";
 import { submitForm } from "../../lib/admin/submit";
 import "../../styles/admin.css";
 
-const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records"];
+const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records", "snapshots"];
 
 // Every write (spec 7). Success redirects with 303 (post, redirect, get), so a reload never repeats a write; a failure
 // renders the page again below with its status (422, or 500 when something unexpected broke) and the failed form open.
 let failure: ActionFailure | null = null;
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData().catch(() => null);
-  const deps = { db: env.DB, media: env.MEDIA, images: env.IMAGES };
+  const deps = { db: env.DB, media: env.MEDIA, images: env.IMAGES, snapshots: env.SNAPSHOTS };
   const outcome = await submitForm(form, deps, Astro.cache, (promise) => Astro.locals.cfContext.waitUntil(promise));
   if ("redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
   failure = outcome.failure;
@@ -45,6 +45,6 @@ const notice = (section: AdminSection) => (section === saved ? savedLine : null)
     <AdminRow label="log" id="log" notice={notice("log")}><LogAdmin entries={data.log} failure={failure} /></AdminRow>
     <AdminRow label="records" id="records" notice={notice("records")}><RecordsAdmin records={data.records} failure={failure} /></AdminRow>
     <AdminRow label="before" id="before" notice={notice("before")}><ItemsAdmin section="before" items={data.before} failure={failure} /></AdminRow>
-    <Row label="snapshots" id="snapshots"><SnapshotsAdmin items={[...data.now, ...data.before]} /></Row>
+    <AdminRow label="snapshots" id="snapshots" notice={notice("snapshots")}><SnapshotsAdmin items={[...data.now, ...data.before]} failure={failure} /></AdminRow>
   </main>
 </Notebook>

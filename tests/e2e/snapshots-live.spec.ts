@@ -30,3 +30,22 @@ test("the nightly run captures a line's page even if it never goes quiet, and re
   // Judged blank from the page itself, before any shot
   await expect(page.locator(status("r4r-with-me"))).toHaveText("the capture came out blank · no good capture yet");
 });
+
+test("re-shoot now captures one line again and says it saved", async ({ page }) => {
+  await page.goto(`${SNAPS}/admin/`);
+  await page.getByRole("button", { name: "re-shoot canberra-events now", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/\?saved=snapshots(&later=1)?#snapshots$/);
+  await expect(page.locator("#snapshots .notice")).toHaveText(/^saved - /);
+  await expect(page.locator(status("canberra-events"))).toHaveText(/^captured \d{4}-\d{2}-\d{2}$/);
+});
+
+test("a re-shoot that fails says why on its line, and keeps the line as it was", async ({ page }) => {
+  await page.goto(`${SNAPS}/admin/`);
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => candidate.request().method() === "POST"),
+    page.getByRole("button", { name: "re-shoot digital-nachos now", exact: true }).click(),
+  ]);
+  expect(response.status()).toBe(422);
+  await expect(page.locator('#snapshots li[data-slug="digital-nachos"] .error')).toHaveText("couldn't capture it: the page returned an error");
+  await expect(page.locator(status("digital-nachos"))).toHaveText("the page returned an error · no good capture yet");
+});
