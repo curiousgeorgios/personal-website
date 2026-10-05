@@ -10,7 +10,7 @@ The 3D scene lights its materials with an environment map made by `PMREMGenerato
 
 ## Decision
 
-Generate the map in the browser and accept the one-off hitch. The step runs in an idle task of its own at the start of `buildStage`, once per visit, before the canvas replaces the poster, so nothing on screen is moving for it to jank and touch scrolling runs off the main thread. Spec 11 names it as the single allowed exception: "No scene task over 50ms at 4× CPU throttle, except one: generating the environment map, about 70ms at 4×, once, before the canvas shows, while the poster is still on screen." Test builds wrap it in a `deck:environment` measure, and the opt-in `scene-perf.spec.ts` allows one long task overlapping that measure, under 100ms, and fails on any other.
+Generate the map in the browser and accept the one-off hitch. The step runs in an idle task of its own at the start of `buildStage`, once per visit, before the canvas replaces the poster, so nothing on screen is moving for it to jank and touch scrolling runs off the main thread. Spec 11 names it as the single allowed exception: "No scene task over 50ms at 4× CPU throttle, except one: generating the environment map, about 70ms at 4×, once, before the canvas shows, while the poster is still on screen." It also keeps the other boot work out of the way so it stays the only exception: an idle moment follows the measure, so nothing else shares its task, and every texture goes to the GPU with `renderer.initTexture` in an idle moment of its own before the first frame, which took the first frame from 106 to 118ms down to 6 to 8ms at 4×. Test builds wrap it in a `deck:environment` measure, and the opt-in `scene-perf.spec.ts` allows one long task overlapping that measure, under 100ms, and fails on any other.
 
 ## Consequences
 
@@ -19,4 +19,5 @@ Nobody downloads extra bytes or makes an extra request for a 70ms step nobody se
 ## Alternatives considered
 
 - **Precompute the map and ship it:** swaps 70ms nobody sees for bytes and a request every visitor pays for, and a small precompute would likely not remove the hitch, since the blur still compiles in the browser.
+- **Let the first frame upload the textures:** simpler, but it made the first frame a second long task (106 to 118ms at 4×), which would have needed a second exception.
 - **Leave the step where it was:** it shared a task with the last texture slice, the glow canvas and the cover promise's continuation, about 8ms more on top.
