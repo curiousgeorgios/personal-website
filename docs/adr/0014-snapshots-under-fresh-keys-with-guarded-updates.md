@@ -15,12 +15,15 @@ ADR-0002 chose always-fresh snapshots: a separate Worker captures each line's pa
 - Files no line names are deleted by the nightly run a week after the next capture of the same line was uploaded, however old they are; files with no later capture of their line (a line removed, or given a new address and not captured since) go a week after their own upload. Each capture's files carry their line's id in R2 metadata, so a line renamed in `/admin` keeps its old files for the full week. A database update that fails after it may have committed never deletes the new files unless the line is known not to name them; the sweep collects any left over.
 - Captures use `@cloudflare/puppeteer` (134KiB gzipped) rather than `@cloudflare/playwright` (624KiB).
 
+- A browser session counts as dead only when it can't open a page. A page's own failure (a navigation error, a blank or blocked page, an Images, R2 or D1 error) is that line's outcome and never costs a session. When a session can't open a page, the nightly run closes it and captures the same line again in a fresh one, at most three sessions a night; a re-shoot does the same within its one session. A line that is left with no session gets `no-browser` and its row is not touched, so it keeps its last status and snapshot.
+
 ## Consequences
 
 A cached page never names a half-replaced file, and George's changes always win over a capture that was already running. It never names a missing one either, with one narrow exception: a line removed or given a new address in `/admin` whose newest capture is over a week old (its captures have been failing) loses those files at the next nightly run, and if that save's purge failed, a stale copy of the page can still name them for up to a day. R2 holds each line's previous capture for a week after it was replaced, a few hundred KB per line per day, which costs next to nothing. Changing a line's page to snapshot clears its old snapshot at once (plan 3), and the old files go with the next week-old clean-up. The design depends on keys never being reused, which the ULID guarantees. Two faults together (a capture's clean-up failing, then a later capture of the same line) can start a file's week early, and the re-read after a failed update assumes D1 reads come from the primary; turning on read replication would mean pinning that read to it. Moving to Playwright later would mean a larger Worker for the same capture.
 
 ## Alternatives considered
 
+- **Count any error as a dead session:** simpler, but one broken page used up a session, a session that died during navigation was missed, and once sessions ran out healthy lines were recorded as errors and lost their "captured" status.
 - **One fixed key per line, overwritten nightly:** simpler, but a cached page could show a file mid-replacement, and the old image would be gone before the cache let go of it.
 - **Delete superseded files at once:** saves a little storage, but breaks pages still cached at the edge.
 - **Check the line before capturing, then write unconditionally:** leaves a window where an edit made during the capture is overwritten.
