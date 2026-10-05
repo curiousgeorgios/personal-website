@@ -1,4 +1,4 @@
-import type { ShotOutcome } from "../../../workers/snapshots/src/run";
+import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
@@ -20,7 +20,7 @@ export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "sn
 
 /** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
 export interface SnapshotsService {
-  reshoot(id: number): Promise<ShotOutcome | "gone">;
+  reshoot(id: number): Promise<ReshootOutcome>;
 }
 
 export interface ActionDeps {
@@ -316,7 +316,7 @@ async function reshoot(form: FormData, { db, snapshots }: ActionDeps): Promise<A
   const id = idOf(form);
   if (id === null) return gone("line");
   const formId = `shot-${id}`;
-  let outcome: ShotOutcome | "gone";
+  let outcome: ReshootOutcome;
   try {
     if (!snapshots) throw new Error("no SNAPSHOTS binding");
     outcome = await within(snapshots.reshoot(id), RESHOOT_DEADLINE_MS);
@@ -329,6 +329,7 @@ async function reshoot(form: FormData, { db, snapshots }: ActionDeps): Promise<A
     return fail("snapshots", formId, { form: failed ? "the snapshots worker hit an error. try again in a minute." : "the snapshots worker didn't answer. try again in a minute." });
   }
   if (outcome === "ok") return { ok: true, section: "snapshots" };
+  if (outcome === "no-browser") return fail("snapshots", formId, { form: "the browser couldn't start. try again in a minute." });
   if (outcome === "gone") return fail(null, "", { form: NOTHING_TO_SNAPSHOT });
   if (outcome === "discarded") {
     // Removing a line or clearing its page mid-capture also discards the capture, and then the line has no form left to

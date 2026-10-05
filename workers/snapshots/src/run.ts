@@ -23,6 +23,10 @@ export interface ShotTarget {
 /** "discarded": the line was given another address, or removed, while it was being captured */
 export type ShotOutcome = SnapshotStatus | "discarded";
 
+/** What "re-shoot now" answers: a capture's outcome; "gone" when the line has no page to snapshot; "no-browser" when
+ *  Browser Rendering wouldn't give a working session (a rate or concurrency limit, or an outage) */
+export type ReshootOutcome = ShotOutcome | "gone" | "no-browser";
+
 /** Files no line points at stay this long, so a cached page that still names them keeps working (spec 9) */
 export const KEEP_SUPERSEDED_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -184,16 +188,28 @@ export async function runAll(deps: RunDeps): Promise<Record<string, ShotOutcome 
 }
 
 /**
- * The admin's "re-shoot now": one line, its own session; "gone" when it has no page to snapshot. A capture that throws
- * is recorded on the line and thrown on, so the admin says the worker hit an error (the Worker's RPC method logs it)
+ * The admin's "re-shoot now": one line, its own session; "gone" when it has no page to snapshot, "no-browser" when the
+ * session won't start or can't open a page (nothing was captured, so the line keeps its status, as at night). A capture
+ * that throws is recorded on the line and thrown on, so the admin says the worker hit an error (the Worker's RPC method
+ * logs it)
  */
-export async function reshootOne(deps: RunDeps, id: number): Promise<ShotOutcome | "gone"> {
+export async function reshootOne(deps: RunDeps, id: number): Promise<ReshootOutcome> {
   const [target] = await shotTargets(deps.db, id);
   if (!target) return "gone";
-  const browser = await deps.launch();
+  let browser: CaptureBrowser;
+  try {
+    browser = watched(await deps.launch());
+  } catch (error) {
+    console.error(`snapshots: no browser for the re-shoot of ${target.slug}:`, error);
+    return "no-browser";
+  }
   try {
     return await shootOne(deps, browser, target);
   } catch (error) {
+    if (error instanceof SessionGone) {
+      console.error(`snapshots: no browser for the re-shoot of ${target.slug}:`, error.cause);
+      return "no-browser";
+    }
     await recordError(deps.db, target);
     throw error;
   } finally {

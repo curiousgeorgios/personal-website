@@ -423,3 +423,37 @@ test("the clean-up deletes in batches of 1000 keys, as R2 allows", async () => {
   expect(bucket.delete.mock.calls.map(([keys]) => [keys].flat().length)).toEqual([1000, 2]);
   expect(bucket.objects.size).toBe(0);
 });
+
+test("a re-shoot whose browser won't start says so, and the line keeps its status", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await db.prepare("UPDATE items SET snapshot_status = 'ok' WHERE slug = 'canberra-events'").run();
+  const canberra = (await row("canberra-events"))!.id;
+  const refused: RunDeps = {
+    ...deps(),
+    launch: async () => {
+      throw new Error("Unable to create new browser: code: 429: message: Too many browsers");
+    },
+  };
+  expect(await reshootOne(refused, canberra)).toBe("no-browser");
+  expect(await row("canberra-events")).toMatchObject({ snapshot_status: "ok" });
+  expect(console.error).toHaveBeenCalledWith("snapshots: no browser for the re-shoot of canberra-events:", expect.any(Error));
+});
+
+test("a re-shoot whose session can't open a page is also no-browser, closed again, with the status kept", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await db.prepare("UPDATE items SET snapshot_status = 'ok' WHERE slug = 'canberra-events'").run();
+  const canberra = (await row("canberra-events"))!.id;
+  const dead: RunDeps = {
+    ...deps(),
+    launch: async () => {
+      const session = await deps().launch();
+      session.newPage = async () => {
+        throw new Error("Protocol error: Connection closed.");
+      };
+      return session;
+    },
+  };
+  expect(await reshootOne(dead, canberra)).toBe("no-browser");
+  expect(browser.closed).toBe(true);
+  expect(await row("canberra-events")).toMatchObject({ snapshot_status: "ok" });
+});

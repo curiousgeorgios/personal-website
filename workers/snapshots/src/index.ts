@@ -24,7 +24,7 @@ export default class Snapshots extends WorkerEntrypoint<SnapshotsEnv> {
     }
   }
 
-  /** Captures one line now (the admin's "re-shoot now"); "gone" when it has no page to snapshot */
+  /** Captures one line now (the admin's "re-shoot now"); "gone" when it has no page to snapshot, "no-browser" when no browser session would start */
   async reshoot(id: number) {
     try {
       return await reshootOne(depsOf(this.env), id);

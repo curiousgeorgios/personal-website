@@ -3,7 +3,7 @@ import { runAction, type ActionDeps } from "../../src/lib/admin/actions";
 import { newMediaKeys } from "../../src/lib/admin/media";
 import * as store from "../../src/lib/admin/store";
 import { sqliteD1 } from "./sqlite-d1";
-import type { ShotOutcome } from "../../workers/snapshots/src/run";
+import type { ReshootOutcome, ShotOutcome } from "../../workers/snapshots/src/run";
 
 const MP3 = Uint8Array.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3]);
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2]);
@@ -411,7 +411,7 @@ describe("records", () => {
 describe("snapshots", () => {
   afterEach(() => vi.useRealTimers());
 
-  const reshoot = async (answer: ShotOutcome | "gone" | Error | null, id = "1") => {
+  const reshoot = async (answer: ReshootOutcome | Error | null, id = "1") => {
     const snapshots =
       answer === null
         ? undefined
@@ -459,6 +459,16 @@ describe("snapshots", () => {
     });
     await db.prepare("DELETE FROM items WHERE id = 1").run();
     expect((await reshoot("discarded")).result).toMatchObject({ section: null, form: "", errors: { form: "that line has no page to snapshot any more" } });
+  });
+
+  test("a browser that couldn't start says so, on its line", async () => {
+    expect((await reshoot("no-browser")).result).toEqual({
+      ok: false,
+      section: "snapshots",
+      form: "shot-1",
+      errors: { form: "the browser couldn't start. try again in a minute." },
+      values: {},
+    });
   });
 
   test("a capture that fails with a status this page doesn't know prints it", async () => {
