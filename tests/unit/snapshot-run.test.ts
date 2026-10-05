@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { KEEP_SUPERSEDED_MS, reshootOne, runAll, sweep, type RunDeps } from "../../workers/snapshots/src/run";
+import { KEEP_SUPERSEDED_MS, reshootOne, runAll, SESSIONS_PER_RUN, sweep, type RunDeps } from "../../workers/snapshots/src/run";
 import { fakeBrowser, type FakeSite } from "./fake-browser";
 import { sqliteD1 } from "./sqlite-d1";
 
@@ -358,4 +358,47 @@ test("a line given another slug keeps its old capture for a week after the new o
   expect(await sweep({ ...deps(), now: () => later })).toBe(6);
   expect(left()).toEqual([]);
   expect([...bucket.objects.keys()].filter((key) => key.startsWith(`snapshots/canberra-nights-${ID}`))).toHaveLength(6); // the line's own is never deleted
+});
+
+test("a session that dies mid-run is replaced, so the lines after it are still captured", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) => (url.includes("digitalnachos") ? { kills: true } : {});
+  expect(await runAll(deps())).toEqual({ "digital-nachos": "error", "canberra-events": "ok", "linear-gratis": "ok", onestack: "ok" });
+  expect(launches).toBe(2);
+  expect(browser.closed).toBe(true);
+});
+
+test("sessions that keep dying are replaced only twice a night; the lines after that error", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = () => ({ kills: true });
+  expect(Object.values(await runAll(deps()))).toEqual(["error", "error", "error", "error"]);
+  expect(launches).toBe(SESSIONS_PER_RUN);
+});
+
+test("Browser Rendering refusing every session leaves every line as it was, after three tries at most; the clean-up still runs", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await db.prepare("UPDATE items SET snapshot_status = 'ok' WHERE slug = 'canberra-events'").run();
+  const refused: RunDeps = {
+    ...deps(),
+    launch: async () => {
+      launches += 1;
+      throw new Error("Unable to create new browser: code: 429: message: Too many browsers");
+    },
+  };
+  expect(Object.values(await runAll(refused))).toEqual(["no-browser", "no-browser", "no-browser", "no-browser"]);
+  expect(launches).toBe(SESSIONS_PER_RUN);
+  expect(bucket.list).toHaveBeenCalled();
+  expect(await row("canberra-events")).toMatchObject({ snapshot_status: "ok" });
+});
+
+test("the clean-up deletes in batches of 1000 keys, as R2 allows", async () => {
+  const old = new Date(NOW.getTime() - KEEP_SUPERSEDED_MS - 1);
+  for (let i = 0; i < 167; i++) {
+    for (const width of [480, 960, 1920]) {
+      for (const format of ["avif", "webp"]) bucket.seed(`snapshots/gone-${String(i).padStart(3, "0")}-${width}.${format}`, old);
+    }
+  }
+  expect(await sweep(deps())).toBe(1002);
+  expect(bucket.delete.mock.calls.map(([keys]) => [keys].flat().length)).toEqual([1000, 2]);
+  expect(bucket.objects.size).toBe(0);
 });

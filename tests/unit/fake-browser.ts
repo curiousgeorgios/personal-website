@@ -23,6 +23,8 @@ export interface FakeSite {
   during?: () => Promise<void>;
   /** Reading the page throws (an unexpected failure, not a capture verdict) */
   broken?: boolean;
+  /** The whole session dies while reading this page: it throws, and every later page in the session fails to open */
+  kills?: boolean;
 }
 
 /** puppeteer's TimeoutError, which a capture's waits treat as the cap doing its job */
@@ -31,7 +33,7 @@ const timeout = (message: string) => Object.assign(new Error(message), { name: "
 export type FakePage = CapturePage & { calls: string[]; intercept(url: string): Promise<"blocked" | "allowed"> };
 
 /** A Browser Rendering page that answers from `site` instead of the network, and records what it was asked to do */
-export function fakePage(site: (url: string) => FakeSite): FakePage {
+export function fakePage(site: (url: string) => FakeSite, kill?: () => void): FakePage {
   const calls: string[] = [];
   let listener: ((request: CaptureRequest) => void) | undefined;
   let current: FakeSite = {};
@@ -70,6 +72,10 @@ export function fakePage(site: (url: string) => FakeSite): FakePage {
       return !current.blank;
     },
     async content() {
+      if (current.kills) {
+        kill?.();
+        throw new Error("Target closed");
+      }
       if (current.broken) throw new Error("Target closed");
       return current.html ?? "<html><head><title>a page</title></head><body>hello</body></html>";
     },
@@ -98,14 +104,18 @@ export function fakePage(site: (url: string) => FakeSite): FakePage {
   return page;
 }
 
-/** A browser session whose pages answer from `site`; counts launches of pages and whether it was closed */
+/** A browser session whose pages answer from `site`; counts launches of pages, whether it was closed and whether it died */
 export function fakeBrowser(site: (url: string) => FakeSite) {
   const pages: FakePage[] = [];
-  const browser: CaptureBrowser & { pages: FakePage[]; closed: boolean } = {
+  const browser: CaptureBrowser & { pages: FakePage[]; closed: boolean; dead: boolean } = {
     pages,
     closed: false,
+    dead: false,
     async newPage() {
-      const page = fakePage(site);
+      if (browser.dead) throw new Error("Protocol error: Connection closed.");
+      const page = fakePage(site, () => {
+        browser.dead = true;
+      });
       pages.push(page);
       return page;
     },
