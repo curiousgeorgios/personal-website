@@ -129,6 +129,62 @@ test("Escape dismisses a hovered card until the pointer leaves the line", async 
   await expect(card).toHaveCSS("opacity", "1");
 });
 
+// Hovers the pill until its card is up, then gives the pointer's way to the card: a point in the gap between them,
+// and the card's centre
+async function hoverCard(page: Page, slug: string) {
+  const item = page.locator(`[data-slug="${slug}"]`);
+  const card = item.locator(".hovercard");
+  await item.locator(".peek").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  const pill = (await item.locator(".peek").boundingBox())!;
+  const box = (await card.boundingBox())!;
+  const x = box.x + box.width / 2;
+  return { card, gap: { x, y: (box.y + box.height + pill.y) / 2 }, centre: { x, y: box.y + box.height / 2 } };
+}
+
+test("the hover card can be hovered: the pointer crosses the gap onto it and the card stays", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const { card, gap, centre } = await hoverCard(page, "canberra-events");
+  // The card's opacity on every frame from here, so a fade that starts anywhere on the way is caught
+  await card.evaluate((element) => {
+    const seen = new Set<string>();
+    const tick = () => {
+      seen.add(getComputedStyle(element).opacity);
+      requestAnimationFrame(tick);
+    };
+    tick();
+    (window as unknown as { seen: Set<string> }).seen = seen;
+  });
+  // Resting in the gap and then on the card, each for longer than the card's 140ms fade
+  await page.mouse.move(gap.x, gap.y, { steps: 4 });
+  await page.waitForTimeout(250);
+  await page.mouse.move(centre.x, centre.y, { steps: 8 });
+  await page.waitForTimeout(250);
+  expect(await page.evaluate(() => [...(window as unknown as { seen: Set<string> }).seen])).toEqual(["1"]);
+  expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest(".hovercard"), centre)).toBe(true);
+  // Escape still dismisses it with the pointer on it, until the pointer leaves the line and comes back
+  await page.keyboard.press("Escape");
+  await expect(card).toBeHidden();
+  await page.locator("h1").hover();
+  await item.locator(".peek").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+});
+
+test("a click on the hover card opens its line's label, not whatever is under the card", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const { card, gap, centre } = await hoverCard(page, "canberra-events");
+  await page.mouse.move(gap.x, gap.y, { steps: 4 });
+  await page.mouse.move(centre.x, centre.y, { steps: 8 });
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.locator('[data-slug="canberra-events"] .peek')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".line-item.open")).toHaveCount(1);
+  await expect(card).toBeHidden();
+});
+
 test("focusing the pill shows the card; Escape dismisses it until focus leaves the line", async ({ page, isMobile }) => {
   test.skip(isMobile, "no hover cards on a phone");
   await page.goto("/");
