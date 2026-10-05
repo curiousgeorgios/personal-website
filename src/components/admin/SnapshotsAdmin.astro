@@ -28,11 +28,11 @@ const shots = items.filter((item) => item.snapshotUrl);
             <input type="hidden" name="intent" value="snapshot.reshoot" />
             <input type="hidden" name="id" value={item.id} />
             {errors.form && <p class="error" role="alert">{errors.form}</p>}
-            <button type="submit" class="button quiet" aria-label={`re-shoot ${item.slug} now`}>re-shoot now</button>
+            <button type="submit" class="button quiet" aria-label={`re-shoot now, ${item.slug}`}>re-shoot now</button>
           </form>
         </li>
       );
     })}
   </ul>
 )}
-<p class="hint">pages are captured every night, around 3am in sydney. re-shoot one when it has changed; it takes a few seconds.</p>
+<p class="hint">pages are captured every night, at 3am in sydney or 4am in daylight saving. re-shoot one when it has changed; it can take up to half a minute.</p>

@@ -24,7 +24,7 @@
 .admin-form { display: grid; gap: 12px; padding: 12px 0 20px; max-width: 34rem; }
 /* Breathing room above a form the fragment scroll lands on. With a stuck page message showing, scroll-padding clears it
    (for the fragment scroll and for focus scrolls alike), so the two don't add up. */
-.admin-form, .admin details { scroll-margin-top: 1rem; }
+.admin-form, .admin details, .snapshots .reshoot { scroll-margin-top: 1rem; }
 html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .field { display: grid; gap: 4px; min-width: 0; }
 .field label { font: 12px/1.5 var(--mono); color: var(--muted); }

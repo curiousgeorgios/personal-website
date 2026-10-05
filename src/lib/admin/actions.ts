@@ -1,5 +1,5 @@
 import type { ShotOutcome } from "../../../workers/snapshots/src/run";
-import { SNAPSHOT_STATUSES } from "../snapshots";
+import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
 import {
@@ -288,21 +288,53 @@ async function deleteFiles(media: R2Bucket, keys: string[], what: string) {
 
 // Snapshots
 
+/** How long a re-shoot waits for the snapshots Worker: a capture takes up to about half a minute, with launch and encoding */
+const RESHOOT_DEADLINE_MS = 60_000;
+const NOTHING_TO_SNAPSHOT = "that line has no page to snapshot any more";
+
+/** The snapshots Worker didn't answer within its deadline */
+class Late extends Error {}
+
+/** Wrangler's local dev reports a Worker that isn't running from its own proxy, so that error arrives marked remote too */
+const NOT_RUNNING = /^Worker ".+" not found/;
+
+/** The binding's answer, or a `Late` if it takes longer than `ms`; the timer is cleared either way */
+async function within<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Late(`no answer within ${ms / 1000}s`)), ms);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** "Re-shoot now" (spec 9): waits for the capture, which takes a few seconds; a failed capture isn't a save */
-async function reshoot(form: FormData, { snapshots }: ActionDeps): Promise<ActionResult> {
+async function reshoot(form: FormData, { db, snapshots }: ActionDeps): Promise<ActionResult> {
   const id = idOf(form);
   if (id === null) return gone("line");
   const formId = `shot-${id}`;
   let outcome: ShotOutcome | "gone";
   try {
     if (!snapshots) throw new Error("no SNAPSHOTS binding");
-    outcome = await snapshots.reshoot(id);
+    outcome = await within(snapshots.reshoot(id), RESHOOT_DEADLINE_MS);
   } catch (error) {
-    console.error("admin: the snapshots worker didn't answer", error instanceof Error ? error.message : String(error));
-    return fail("snapshots", formId, { form: "the snapshots worker didn't answer. try again in a minute." });
+    // An exception the Worker's own code threw crosses RPC marked `remote`: it was reached, and it failed. Anything else
+    // (no binding, no Worker, no answer in time) is a Worker that couldn't be got hold of.
+    const message = error instanceof Error ? error.message : String(error);
+    const failed = !(error instanceof Late) && (error as { remote?: unknown } | null)?.remote === true && !NOT_RUNNING.test(message);
+    console.error(`admin: the snapshots worker ${failed ? "failed" : "didn't answer"}`, message);
+    return fail("snapshots", formId, { form: failed ? "the snapshots worker hit an error. try again in a minute." : "the snapshots worker didn't answer. try again in a minute." });
   }
   if (outcome === "ok") return { ok: true, section: "snapshots" };
-  if (outcome === "gone") return fail(null, "", { form: "that line has no page to snapshot any more" });
-  if (outcome === "discarded") return fail("snapshots", formId, { form: "the line changed while it was being captured. try again." });
-  return fail("snapshots", formId, { form: `couldn't capture it: ${SNAPSHOT_STATUSES[outcome]}` });
+  if (outcome === "gone") return fail(null, "", { form: NOTHING_TO_SNAPSHOT });
+  if (outcome === "discarded") {
+    // Removing a line or clearing its page mid-capture also discards the capture, and then the line has no form left to
+    // carry the message, so it goes to the page like "gone"
+    if (!(await store.hasSnapshotUrl(db, id))) return fail(null, "", { form: NOTHING_TO_SNAPSHOT });
+    return fail("snapshots", formId, { form: "the line changed while it was being captured. try again." });
+  }
+  return fail("snapshots", formId, { form: `couldn't capture it: ${snapshotReason(outcome)}` });
 }

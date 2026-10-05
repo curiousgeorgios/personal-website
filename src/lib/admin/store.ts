@@ -179,6 +179,11 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<numb
   return result.meta.changes > 0 ? result.meta.last_row_id : 0;
 }
 
+/** Whether a line is saved with a page to snapshot, which is what gives it a line (and a re-shoot form) on the admin page */
+export async function hasSnapshotUrl(db: D1Database, id: number): Promise<boolean> {
+  return (await db.prepare("SELECT id FROM items WHERE id = ? AND snapshot_url IS NOT NULL AND snapshot_url != ''").bind(id).first()) !== null;
+}
+
 /** Whether this exact line (slug, section and text) is already saved: a double-tapped add arrives twice */
 export async function sameItem(db: D1Database, input: ItemInput): Promise<boolean> {
   const found = await db.prepare("SELECT id FROM items WHERE slug = ? AND section = ? AND text = ?").bind(input.slug, input.section, input.text).first();

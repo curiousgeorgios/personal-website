@@ -409,6 +409,8 @@ describe("records", () => {
 });
 
 describe("snapshots", () => {
+  afterEach(() => vi.useRealTimers());
+
   const reshoot = async (answer: ShotOutcome | "gone" | Error | null, id = "1") => {
     const snapshots =
       answer === null
@@ -446,24 +448,81 @@ describe("snapshots", () => {
     expect((await reshoot("discarded")).result).toMatchObject({ form: "shot-1", errors: { form: "the line changed while it was being captured. try again." } });
   });
 
+  test("a line removed or cleared while it was captured has no form left, so the message goes to the page", async () => {
+    await db.prepare("UPDATE items SET snapshot_url = NULL WHERE id = 1").run();
+    expect((await reshoot("discarded")).result).toEqual({
+      ok: false,
+      section: null,
+      form: "",
+      errors: { form: "that line has no page to snapshot any more" },
+      values: {},
+    });
+    await db.prepare("DELETE FROM items WHERE id = 1").run();
+    expect((await reshoot("discarded")).result).toMatchObject({ section: null, form: "", errors: { form: "that line has no page to snapshot any more" } });
+  });
+
+  test("a capture that fails with a status this page doesn't know prints it", async () => {
+    expect((await reshoot("surprise" as ShotOutcome)).result).toMatchObject({ form: "shot-1", errors: { form: "couldn't capture it: surprise" } });
+  });
+
   test("a line with no page to snapshot any more is a message for the page", async () => {
     expect((await reshoot("gone")).result).toMatchObject({ section: null, form: "", errors: { form: "that line has no page to snapshot any more" } });
   });
 
   test("a snapshots Worker that doesn't answer, or isn't bound, says so on the line", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    for (const answer of [new Error('Worker "curiousgeorge-snapshots" not found'), null]) {
+    // Wrangler's local dev raises a missing Worker from its own proxy, so that error is marked remote as well
+    const notRunning = Object.assign(new Error('Worker "curiousgeorge-snapshots" not found. Make sure it is running locally.'), { remote: true });
+    for (const answer of [new Error('Worker "curiousgeorge-snapshots" not found'), notRunning, null]) {
       expect((await reshoot(answer)).result).toMatchObject({
         section: "snapshots",
         form: "shot-1",
         errors: { form: "the snapshots worker didn't answer. try again in a minute." },
       });
     }
-    expect(error).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenCalledTimes(3);
   });
 
-  test("an id that isn't one is gone", async () => {
-    expect((await reshoot("ok", "abc")).result).toMatchObject({ section: null, errors: { form: "that line no longer exists" } });
+  test("a snapshots Worker that was reached and threw says it hit an error, not that it didn't answer", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const threw = Object.assign(new Error("Browser time limit exceeded"), { remote: true });
+    expect((await reshoot(threw)).result).toMatchObject({
+      section: "snapshots",
+      form: "shot-1",
+      errors: { form: "the snapshots worker hit an error. try again in a minute." },
+    });
+    expect(error).toHaveBeenCalledWith("admin: the snapshots worker failed", "Browser time limit exceeded");
+  });
+
+  test("a snapshots Worker that takes over a minute is given up on, and its timer never outlives the call", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const snapshots = { reshoot: vi.fn(() => new Promise<ShotOutcome>(() => {})) };
+    const form = new FormData();
+    form.append("intent", "snapshot.reshoot");
+    form.append("id", "1");
+    const pending = runAction(form, { ...deps(), snapshots });
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(error).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toMatchObject({
+      section: "snapshots",
+      form: "shot-1",
+      errors: { form: "the snapshots worker didn't answer. try again in a minute." },
+    });
+    expect(error).toHaveBeenCalledWith("admin: the snapshots worker didn't answer", "no answer within 60s");
+    expect(vi.getTimerCount()).toBe(0);
+
+    await reshoot("ok");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("an id that isn't one is gone, and the Worker is never asked", async () => {
+    for (const id of ["abc", "0", "-3", ""]) {
+      const { result, snapshots } = await reshoot("ok", id);
+      expect(result).toMatchObject({ section: null, errors: { form: "that line no longer exists" } });
+      expect(snapshots!.reshoot).not.toHaveBeenCalled();
+    }
   });
 });
 

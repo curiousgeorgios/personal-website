@@ -9,6 +9,9 @@ export const SNAPSHOT_STATUSES = {
 
 export type SnapshotStatus = keyof typeof SNAPSHOT_STATUSES;
 
+/** The words for a status, or the status itself when this page doesn't know it (the two Workers deploy separately) */
+export const snapshotReason = (status: string): string => (Object.hasOwn(SNAPSHOT_STATUSES, status) ? SNAPSHOT_STATUSES[status as SnapshotStatus] : status);
+
 // The Worker captures at 17:00 UTC, already the next morning in Sydney, so the admin shows Sydney dates
 const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Australia/Sydney" });
 
@@ -18,7 +21,7 @@ export function describeSnapshot(status: string | null, at: string | null): stri
   const day = date && !Number.isNaN(date.getTime()) ? SYDNEY_DAY.format(date) : null;
   if (!status) return "not captured yet";
   if (status === "ok") return day ? `captured ${day}` : "captured";
-  const reason = Object.hasOwn(SNAPSHOT_STATUSES, status) ? SNAPSHOT_STATUSES[status as SnapshotStatus] : status;
+  const reason = snapshotReason(status);
   return day ? `${reason} · last good capture ${day}` : `${reason} · no good capture yet`;
 }
 

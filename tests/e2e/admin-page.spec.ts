@@ -90,7 +90,7 @@ test("re-shooting without the snapshots Worker says so on the line", async ({ pa
   const line = page.locator('#snapshots li[data-slug="digital-nachos"]');
   const [response] = await Promise.all([
     page.waitForResponse((candidate) => candidate.request().method() === "POST"),
-    line.getByRole("button", { name: "re-shoot digital-nachos now", exact: true }).click(),
+    line.getByRole("button", { name: "re-shoot now, digital-nachos", exact: true }).click(),
   ]);
   expect(response.status()).toBe(422);
   await expect(page.locator('#snapshots li[data-slug="digital-nachos"] .error')).toHaveText("the snapshots worker didn't answer. try again in a minute.");
