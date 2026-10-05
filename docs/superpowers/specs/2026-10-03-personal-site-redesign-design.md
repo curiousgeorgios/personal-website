@@ -316,6 +316,7 @@ Launch checklist (only George can do these):
 - [ ] Sign off ADR-0009 (status Proposed until then).
 - [ ] Sign off ADR-0010 (status Proposed until then).
 - [ ] Sign off ADR-0011 (Origin checked in our middleware) and ADR-0012 (an identical repeat of an admin add counts as saved), both Proposed until then.
+- [ ] Sign off ADR-0013 (the analytics proxy holds the PostHog key and forwards only the logbook's events) and ADR-0014 (snapshots under fresh keys, a line moved to one only if its address is unchanged), both Proposed until then.
 - [ ] Try the turntable on a real iPhone (once with the ringer switch on silent) and on Safari for macOS (Playwright's WebKit does not enforce the user-gesture rule for audio).
 
 ## 14. Testing
