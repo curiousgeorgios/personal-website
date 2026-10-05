@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { SLOW } from "./deck";
 import { withGpc } from "./gpc";
 
 test("cookies none, storage empty, every request first party", async ({ page, baseURL }) => {
+  // Playing a record brings the 3D scene in (the list scrolls into view), so this gets the scene specs' budget
+  test.setTimeout(90_000 * SLOW);
   // Against the live site the beacon would count this check as a visit; Global Privacy Control switches it off (the
   // proxy is checked separately below)
   if (process.env.PLAYWRIGHT_BASE_URL) await withGpc(page);

@@ -29,11 +29,28 @@ test("five quick next presses stop at the last record with exact tilts", async (
 });
 
 test("the arrows are disabled while a record travels", async ({ page }) => {
+  // From record 1, so both arrows are live at rest (on record 0 the previous arrow is disabled anyway)
+  await control(page, "next").click();
+  await settled(page);
+  // The page records the control's every state from before the press: with the scene drawing in software, each round
+  // trip to the page can take longer than the 2.5s journey, so asking afterwards can miss the travelling state entirely
+  await page.evaluate(() => {
+    const states: string[] = [];
+    (window as unknown as { states: string[] }).states = states;
+    const hud = document.querySelector(".crate-hud")!;
+    const read = (act: string, name: string) => hud.querySelector(`[data-act="${act}"]`)!.getAttribute(name);
+    new MutationObserver(() => states.push(`${read("prev", "aria-disabled")} ${read("play", "data-state")} ${read("next", "aria-disabled")}`)).observe(hud, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["aria-disabled", "data-state"],
+    });
+  });
   await control(page, "play").click();
-  await expect(control(page, "prev")).toHaveAttribute("aria-disabled", "true");
-  await expect(control(page, "next")).toHaveAttribute("aria-disabled", "true");
-  await expect(control(page, "play")).toHaveAttribute("data-state", "cueing");
-  await playing(page, 0);
+  await playing(page, 1);
+  const states = await page.evaluate(() => (window as unknown as { states: string[] }).states);
+  // It travelled, and whenever it did, both arrows were disabled
+  expect(states).toContain("true cueing true");
+  expect(states.filter((state) => state.includes("cueing")).every((state) => state === "true cueing true")).toBe(true);
   await expect(control(page, "next")).toHaveAttribute("aria-disabled", "false");
   await expect(control(page, "play")).toHaveAttribute("data-state", "stop");
   await page.mouse.move(0, 0);

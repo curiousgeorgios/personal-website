@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { STALL_MS } from "./load";
 
 test("older entries expand and collapse", async ({ page }) => {
   await page.goto("/");
@@ -11,7 +12,8 @@ test("older entries expand and collapse", async ({ page }) => {
   await expect(page.locator("#older-entries li").first()).toBeVisible();
   await more.click();
   await expect(more.locator(".lbl")).toHaveText("older entries");
-  await expect(page.locator("#older-entries")).toHaveAttribute("hidden", "until-found");
+  // Hidden again by a 300ms timer once the drawer has closed, which a loaded machine can run seconds late
+  await expect(page.locator("#older-entries")).toHaveAttribute("hidden", "until-found", { timeout: STALL_MS });
 });
 
 test("a same-frame open and close leaves the log closed and unstyled", async ({ page }) => {

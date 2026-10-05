@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { postToSite } from "./site";
 
 // The test build skips Access (__ADMIN_BYPASS__), so this checks the headers and the origin rule end to end; the
 // Access token rules are unit-tested in tests/unit/access.test.ts and gate.test.ts
@@ -25,7 +26,7 @@ test("a write without this site's origin is refused, with the security headers",
   for (const path of ["/admin/", "/"]) {
     for (const origin of [null, "https://example.com"]) {
       // Node's fetch sends no Origin unless asked, unlike a browser
-      const response = await fetch(new URL(path, baseURL), { method: "POST", body, headers: origin ? { Origin: origin } : {} });
+      const response = await postToSite(new URL(path, baseURL), { body, headers: origin ? { Origin: origin } : {} });
       expect(response.status, `${path} with origin ${origin}`).toBe(403);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -35,8 +36,7 @@ test("a write without this site's origin is refused, with the security headers",
 });
 
 test("a write from this site's origin gets through the gate", async ({ baseURL }) => {
-  const response = await fetch(new URL("/admin/", baseURL), {
-    method: "POST",
+  const response = await postToSite(new URL("/admin/", baseURL), {
     body: new URLSearchParams({ intent: "nothing-at-all" }),
     headers: { Origin: new URL(baseURL!).origin },
   });

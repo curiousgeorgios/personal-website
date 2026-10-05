@@ -1,4 +1,5 @@
 import { chromium, expect, test, type Page } from "@playwright/test";
+import { STALL_MS } from "./load";
 
 // The 3D scene's first frame can block the main thread for seconds under software WebGL (headless CI), landing just after
 // load, where these tests hover. None of them is about the scene, so it stays out
@@ -20,7 +21,7 @@ test("clicking a labelled line opens its label in place; Esc closes and returns 
   await page.keyboard.press("Escape");
   await expect(pill).toHaveAttribute("aria-expanded", "false");
   await expect(pill).toBeFocused();
-  await expect(drawer).toHaveAttribute("hidden", "until-found");
+  await expect(drawer).toHaveAttribute("hidden", "until-found", { timeout: STALL_MS }); // a 320ms timer, which load can delay
 });
 
 test("the pill toggles with the keyboard and several labels can be open", async ({ page }) => {
@@ -583,7 +584,8 @@ test("two quick Escapes put the snapshot back and focus on the frame as the brow
   await page.keyboard.press("Escape");
   await expect(dialog).not.toHaveAttribute("open", "");
   await expect(item.locator(".frame")).toBeFocused();
-  expect(await page.evaluate(() => (window as unknown as { atClose: object }).atClose)).toEqual({ snapshot: "visible", focused: true });
+  // The browser returns focus to the frame as it closes the dialog, but dispatches "close" a task later: wait for it
+  await expect.poll(() => page.evaluate(() => (window as unknown as { atClose?: object }).atClose)).toEqual({ snapshot: "visible", focused: true });
   await expect(item.locator(".frame img")).toHaveCSS("visibility", "visible");
   await page.keyboard.press("Escape");
   await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "false");
