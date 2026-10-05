@@ -20,12 +20,15 @@ test("no scene task blocks the main thread for more than 50ms at 4× CPU, the en
   test.skip(/swiftshader|llvmpipe/i.test(renderer), "software rendering is no guide");
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-  await page.evaluate(() => {
+  // When the observer started: the environment map must be measured after it, or its task could have been missed and the
+  // check below would pass without having seen the map
+  const observedFrom = await page.evaluate(() => {
     const tasks: { start: number; duration: number }[] = [];
     (window as unknown as { longTasks: typeof tasks }).longTasks = tasks;
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) tasks.push({ start: entry.startTime, duration: entry.duration });
     }).observe({ type: "longtask" });
+    return performance.now();
   });
   await page.locator("[data-deck]").scrollIntoViewIfNeeded();
   await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 150_000 });
@@ -40,6 +43,7 @@ test("no scene task blocks the main thread for more than 50ms at 4× CPU, the en
   });
   console.log("long tasks (ms)", tasks.map((task) => Math.round(task.duration)), "environment map (ms)", environment && Math.round(environment.duration));
   expect(environment, "a test build marks the environment map").not.toBeNull();
+  expect(environment!.start, "the observer was attached before the environment map was generated").toBeGreaterThan(observedFrom);
   const overlaps = (task: Task) => task.start < environment!.start + environment!.duration && task.start + task.duration > environment!.start;
   const atEnvironment = tasks.filter(overlaps);
   expect(tasks.filter((task) => !overlaps(task)).map((task) => Math.round(task.duration))).toEqual([]);
