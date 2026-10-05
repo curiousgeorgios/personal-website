@@ -83,7 +83,7 @@ Layout: book width 940px max, 24px side gutter, margin column 150px, 40px gap ei
 - Hover (fine pointers only, 90ms intent delay): the pill darkens and a 232px preview card grows out of the pill (origin bottom centre, 200ms ease-out, opacity 140ms). The card shows the snapshot and `click for the label`. No hover card is rendered on touch devices or when the item has no snapshot yet.
 - Click: the label opens in place below the line (grid rows 0fr to 1fr, 300ms ease-out-quint); the pill's plus rotates 45 degrees to a cross. Contents: framed snapshot (left, 240px; omitted when there is no snapshot or the image fails to load) and the tag: a status line (`live and in use · <era>` with a red dot, or `retired · <era>`), `made of …`, the label text, then a hairline and `the decision` or `the lesson` with George's sentence. Several labels may be open at once.
 - Snapshot click: "closer look", a modal dialog. The image grows from its frame to fit the viewport (FLIP, 420ms ease-out-quint) over a paper veil; focus moves into the dialog; click, the close button or Esc returns it into its frame (300ms ease-out) and focus returns to the frame. Esc closes the closer look first, then the label that has focus.
-- Images load on first hover or first open, never up front.
+- Images load on first hover or first open, never up front. Without JavaScript browsers ignore lazy loading, so the framed snapshots come with the page.
 - Without JavaScript, label contents and older log entries use `hidden="until-found"` so they remain reachable by find-in-page, and the page is otherwise complete.
 
 ### 4.2 Log
@@ -231,6 +231,10 @@ Seed:
 - A capture fails only on a navigation error, a non-2xx status, a Cloudflare challenge (`cf-mitigated` header or the challenge page markup, not the JavaScript detections script an ordinary page may carry), a blank page (nothing visible: no text, images, video, canvas or frames) or an image under 10KB. A blank 2x shot weighs about 19KB, so the size floor alone never catches one. A failed capture keeps the previous snapshot and records `snapshot_status`; it never replaces a good image with a bad one. Failures are logged to Workers Logs.
 - Variants are precomputed with the Images binding and stored in R2 as AVIF and WebP: 480px wide (hover card and label), 960px (label on phones and high-density screens) and 1920px (closer look). Superseded objects are deleted after 7 days.
 - The admin "re-shoot now" button calls the Worker through a service binding.
+- Captures use `@cloudflare/puppeteer`. A capture's six files go under a fresh key, `snapshots/<slug>-<ulid>-<width>.<avif|webp>`, and the line points at the new base only if it still has the address that was captured; a line edited or removed meanwhile keeps what George saved and the new files are deleted (unless the database may have saved the update after all, in which case they wait for the clean-up). Each capture's files carry their line's id, so a renamed line keeps its old files for the week. Variants step their quality down until they fit their budget; one that never fits keeps its smallest try, with a warning in the logs.
+- The nightly run captures every line in one browser session. A capture's files are deleted a week after the next capture of that line replaced them, however old they are, so a cached page that names them keeps working.
+- "Re-shoot now" waits for the capture (up to about half a minute): a good one is a save; a failed one says why on its line and the line keeps its previous snapshot. A Worker that doesn't answer within 60s, and one that fails, each say so on the line.
+- The whole pipeline is tested on a developer's machine: wrangler runs Browser Rendering and the Images binding locally, so both Workers capture a small fixture site in the end-to-end suite.
 
 ## 10. Analytics and privacy (ADR-0003)
 
@@ -247,11 +251,15 @@ Seed:
 - When the browser signals Global Privacy Control (`navigator.globalPrivacyControl`), the beacon sends nothing.
 - Accepted consequences: no cross-day unique visitors, no PostHog bot detection (bot filtering uses `$raw_user_agent`), no city-level location. The visitor info line `analytics: anonymous counts of visits and clicks, no cookies` describes exactly this.
 - Cloudflare zone settings required for `cookies: none` (and the CSP) to stay true: Bot Fight Mode off, no JavaScript detections or challenges, no rate-limiting rules that set `_cfuvid`, Web Analytics auto-inject off, Zaraz off, Email Address Obfuscation off (it rewrites the `mailto:` link) and Rocket Loader off (it rewrites scripts, breaking their CSP hashes).
-- Environment variables are renamed from `NEXT_PUBLIC_POSTHOG_*` to `PUBLIC_POSTHOG_KEY` (and the PostHog host for the proxy) in `.env`, GitHub Actions secrets and the Worker config.
+- The PostHog project key is added by the proxy, from a Worker secret (`POSTHOG_KEY`, set with `wrangler secret put POSTHOG_KEY`); the host is a var (`POSTHOG_HOST`, `https://us.i.posthog.com`). The page carries neither, and the old `NEXT_PUBLIC_POSTHOG_*` variables are no longer used. Without a key (local and test runs) the proxy drops what it accepts.
+- The proxy forwards only the four events above; anything else is refused with a 400 before it reaches PostHog. It sets `distinct_id`, `$cookieless_mode` and `$process_person_profile` itself and drops any `$ip` property.
+- The beacon sends a plain-text JSON body with `sendBeacon` (no preflight), falling back to `fetch` with `keepalive`. Scripts announce events as a DOM event (`logbook:track`), so the label script, the deck runner and the scene share no code with the beacon.
+- The beacon sends the page's address as its origin, path and `utm_*` parameters only, and the referrer as its origin only, because any other part of a URL can carry an identifier (ADR-0013).
+- Checks against the live site send no events: the post-deploy privacy and media checks run under Global Privacy Control, the privacy check tests the proxy with an event it refuses, and Lighthouse's post-deploy runs block `/ingest`.
 
 ## 11. Performance budgets
 
-Measured with Lighthouse CLI, mobile preset (simulated 4G, 4× CPU), median of 5 runs, cold browser cache and warm edge cache, against the deployed site:
+Largest contentful paint is measured with Lighthouse (mobile preset: simulated 4G, 4× CPU; median of five runs) against the deployed site after every deploy, with a warning when it's over budget. Interaction to next paint is checked on every run in Playwright at 4× CPU, with the Event Timing API (Lighthouse's navigation mode doesn't report it), for opening a label, showing older log entries and opening the closer look (pressing play is reported, at about 200ms at 4× CPU, not gated, until the deck builds its audio context before the first press). Layout shift is checked on every run at desktop and phone widths.
 
 - JavaScript before any interaction: under 10KB gzipped total (page scripts and the deck runner), no framework runtime.
 - HTML for `/`: under 30KB gzipped. CSS: under 15KB gzipped.
@@ -305,10 +313,15 @@ Launch checklist (only George can do these):
 - [ ] Confirm the intro line and `based: sydney and canberra`.
 - [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, cookie SameSite Lax or Strict and a session long enough for a phone: when it runs out, a save in progress is lost), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
 - [ ] Check the account can use the Images binding (the admin converts record covers with it).
+- [ ] Before setting the key, switch on "Cookieless server hash mode" in the PostHog project.
+- [ ] Set the PostHog project key as a Worker secret: `bunx wrangler secret put POSTHOG_KEY`. Remove the old `NEXT_PUBLIC_POSTHOG_*` lines from your local `.env`. Then open the site once and check PostHog shows the pageview with a country and that no cookie came back. Check that one event from iOS Safari arrives, and that PostHog hashes the visitor's IP from `X-Forwarded-For`.
+- [ ] Put the D1 database id in `workers/snapshots/wrangler.jsonc` as well as `wrangler.jsonc`.
+- [ ] Check the account can use Browser Rendering (the nightly snapshots and "re-shoot now").
+- [ ] After the first nightly run (17:00 UTC), check `/admin`'s snapshots section says "captured" for each line, then re-shoot one. Time that "re-shoot now" against the deployed pair: browser launch, encoding and storing come on top of the 15s capture cap.
+- [ ] The Cloudflare dashboard's Git build of the old `personal-website` Worker ("Workers Builds") fails on every commit. Disconnect it, or point it at the new config, since GitHub Actions deploys.
 - [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).
 - [ ] On the iPhone, save something after the Access session has expired, and check what happens (the page's `form-action 'self'` may block Access's sign-in redirect; if it does, add the team domain to `form-action` or note it in the follow-ups).
 - [ ] Check the Workers plan suits a 15MB upload (`formData()` buffers the whole body; Workers Paid removes the doubt).
-- [ ] Turn on "Cookieless server hash mode" in PostHog.
 - [ ] Apply the zone settings in section 10.
 - [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets and disconnect Workers Builds.
 - [ ] Before the first deploy, create the R2 bucket (`bunx wrangler r2 bucket create curiousgeorge-media --location oc`) and upload the starting crate (`bun run seed:media --remote`); the deploy applies the records migration, whose rows point at those files.
@@ -323,6 +336,7 @@ Launch checklist (only George can do these):
 
 - Playwright (Chromium and WebKit, clock frozen with `page.clock` so the Sydney time and lighting are stable, fixed seed data, stubbed snapshot images): the listening corner suite (section 5.5); labels (open, close, Esc order, focus return, lazy image loading, no snapshot, broken snapshot); log toggle and empty states (no entries, three or fewer, no records); 404 status; redirects (`/ig`, `/jobs/video-editor`); visual checks at 375px and 1280px.
 - Admin: Playwright against a local Worker on port 4333 with the build-time Access bypass and its own store (deleted and migrated afresh on every run), covering each form, the record cap, upload type rejection and the `Origin` check (in Chromium only, because the specs write; a read-only layout check also runs on the phone); unit tests for the Access token checks, validation and link parsing, the store (the real migrations on `node:sqlite`) and the actions (fake R2 and Images bindings).
-- Snapshots Worker: unit tests with a mocked browser for success, timeout-but-shot, navigation error, challenge page, blank page and tiny image (keeps the old image).
+- Snapshots Worker: unit tests with a fake browser page for success, a page that never goes quiet (shot at the cap), navigation errors, non-2xx statuses, challenge headers and pages and a blank image (each keeps the old snapshot), the variants' budgets, a line changed or removed mid-capture and the week-old clean-up; end to end, both Workers on a local server (port 4334) with local Browser Rendering and Images capture a fixture site (port 4400), nightly and through "re-shoot now".
+- Analytics: unit tests for the proxy (the key, the country, the forwarded IP, no cookies either way, refusals, the size cap) and the beacon's event body; end to end, the pageview and the events the page sends, nothing under Global Privacy Control and the proxy's answers.
 - Privacy smoke test against the built site and again after deploy: no `Set-Cookie` header on any response, `document.cookie === ""` and empty storage after interacting with everything, every request goes to the site's own origin and the `/ingest` proxy never forwards a `Cookie` header.
 - Budgets: a script that builds, serves and measures each budget in section 11 and fails the run when one is exceeded.

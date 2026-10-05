@@ -12,6 +12,7 @@ George Vlachos's logbook. Astro 7 on Cloudflare Workers, D1 for the living conte
 bun install
 bun run db:migrate:local
 bun run seed:media --local
+bun run seed:snapshots --local
 bun run dev
 ```
 
@@ -25,6 +26,14 @@ bun run check
 ## The admin page
 
 `/admin` sits behind Cloudflare Access. Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "it's on the logbook now" there, because the dev server's cache accepts the purge and does nothing. Against a built Worker under `wrangler dev` (the end-to-end servers on ports 4331 to 4333) there's no cache to purge, so saves say "the logbook may show the old version for a little while".
+
+## Snapshots and analytics
+
+The snapshots Worker lives in `workers/snapshots/`. `bun run dev:snapshots` runs it on its own; the end-to-end suite runs it beside the site on port 4334, with local Browser Rendering (wrangler downloads Chrome on first use) capturing a fixture site on port 4400. Run scripts under Node 24 (`mise exec node@24 --` outside your home directory): wrangler's Chrome download has hung under Node 26.
+
+`bun run seed:snapshots --local` gives two labelled lines a snapshot in the local store, so the e2e server shows hover cards and the closer look.
+
+The analytics proxy drops events locally, because the PostHog key is a Worker secret only production has. `bun run lighthouse [url]` measures spec 11's page budgets (median of five mobile runs).
 
 ## Notes
 

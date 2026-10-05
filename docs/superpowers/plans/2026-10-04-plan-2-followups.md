@@ -10,6 +10,8 @@ Done in [plan 3](2026-10-04-plan-3-admin.md).
 
 ## Plan 4 (snapshots, analytics, Lighthouse) and launch
 
+[Plan 4](2026-10-05-plan-4-snapshots-analytics.md) did the shadow map, the analytics events and the Lighthouse, INP and layout checks. The environment map is still question 1 below, and the real-device items are launch work.
+
 ### Scene performance
 
 - **The environment map hitch.** Spec 11 asks for no scene task over 50ms at 4× CPU throttle. Task 11 measured `PMREMGenerator.fromScene` at 66 to 75ms at 4× (about 18ms unthrottled), on the main thread before the canvas shows. `tests/e2e/scene-perf.spec.ts` (opt-in) therefore fails today, on that step and on headless software-rendering readback. Decide between precomputing the map and accepting the hitch (see the questions below), then make that spec pass or retire it. The 50ms budget is measured locally rather than gated in CI; gating it would need a GPU runner, which is George's cost call.

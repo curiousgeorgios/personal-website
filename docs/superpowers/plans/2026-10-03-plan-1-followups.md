@@ -17,6 +17,8 @@ Done in [plan 3](2026-10-04-plan-3-admin.md).
 
 ## Plan 4 (snapshots and analytics)
 
+Done in [plan 4](2026-10-05-plan-4-snapshots-analytics.md).
+
 - `src/scripts/labels.ts` and `src/scripts/log-toggle.ts`: keep the close timer id and `clearTimeout` it in `setOpen` (a close, reopen, close within 320ms lets the stale timer cut the second animation short, confirmed by measurement); add `.open` synchronously in the `beforematch` path so find-in-page reveals instantly; ignore line clicks that end a text selection.
 - Assert that drawers actually expand (height above 0 after the transition), since `toBeVisible()` passes on a collapsed drawer.
 - Rename the `NEXT_PUBLIC_POSTHOG_*` variables; until then `wrangler types` picks them up from a local `.env`. Add `!.env.example` to `.gitignore` if an example file is added.

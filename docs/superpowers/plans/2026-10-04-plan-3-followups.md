@@ -4,6 +4,8 @@ What plan 3 (the admin page) found or left for later, by where it belongs.
 
 ## Plan 4 (snapshots and analytics)
 
+Done in [plan 4](2026-10-05-plan-4-snapshots-analytics.md).
+
 - The snapshots Worker writes `snapshot_status` with the values in `src/lib/snapshots.ts` (`ok`, `navigation-error`, `http-error`, `challenge`, `too-small`) and `snapshot_at` as an ISO time. The admin's snapshots section already reads both.
 - Add the "re-shoot now" button to the snapshots section (a POST with an `intent`, like every other admin write) and the service binding it calls.
 - Changing a line's page to snapshot clears its `snapshot_key`, time and status but leaves the old images in R2; the Worker's clean-up of superseded objects should cover them.
