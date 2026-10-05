@@ -83,6 +83,37 @@ test("scratching again later in the same visit is not counted again", async ({ p
   expect((await heard()).events).toEqual(["scratch_found"]);
 });
 
+test("a pen on the spinning record doesn't scratch it: pens, like touch, keep scrolling the page", async ({ page }) => {
+  const record = await platterOnScreen(page);
+  // The page dispatches the pen's drag itself (Playwright has no pen), and records what it hears
+  const heard = await page.evaluate(
+    async ({ x, y, rx, ry }) => {
+      const canvas = document.querySelector<HTMLCanvasElement>("[data-deck] canvas")!;
+      const element = document.querySelector<HTMLAudioElement>("audio[data-deck-audio]")!;
+      const rates: number[] = [];
+      const events: string[] = [];
+      element.addEventListener("ratechange", () => rates.push(element.playbackRate));
+      document.addEventListener("logbook:track", (event) => events.push(event.detail.event));
+      const pen = (type: string, clientX: number, clientY: number) =>
+        canvas.dispatchEvent(
+          new PointerEvent(type, { pointerType: "pen", pointerId: 7, isPrimary: true, bubbles: true, cancelable: true, clientX, clientY, buttons: type === "pointerup" ? 0 : 1 }),
+        );
+      pen("pointerdown", x + rx, y);
+      for (let step = 1; step <= 12; step++) {
+        const angle = (step / 12) * Math.PI;
+        pen("pointermove", x + rx * Math.cos(angle), y + ry * Math.sin(angle));
+      }
+      pen("pointerup", x - rx, y);
+      await new Promise((resolve) => setTimeout(resolve, 500)); // ratechange and the event would have arrived by now
+      return { rates, events };
+    },
+    record,
+  );
+  expect(heard).toEqual({ rates: [], events: [] });
+  expect((await audioState(page)).rate).toBe(1);
+  expect(await deckState(page)).toMatchObject({ want: LONG_TRACK, playing: LONG_TRACK });
+});
+
 test("a plain click on the spinning record stops it", async ({ page }) => {
   const record = await platterOnScreen(page);
   await page.mouse.click(record.x + record.rx, record.y);

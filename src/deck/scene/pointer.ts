@@ -115,7 +115,7 @@ export function bindPointer(canvas: HTMLCanvasElement, { deck, stage, journeys, 
 
   canvas.addEventListener("pointerdown", (event) => {
     suppressClick = false; // a new gesture: a scratch that ended without a click must not swallow this one
-    if (event.pointerType === "touch") return; // touch keeps scrolling the page
+    if (event.pointerType !== "mouse") return; // touch and pen keep scrolling the page; a pen tap still stops the record (click)
     const state = deck.getState();
     if (state.busy || state.current === null || state.want !== state.current) return;
     if (pick(event) !== "record") return;
