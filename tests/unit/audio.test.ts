@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { createAudioPort, FADE_IN_MS, FADE_OUT_MS, START_TIMEOUT_MS } from "../../src/deck/audio";
+import { createAudioPort, prepareAfterLoad, FADE_IN_MS, FADE_OUT_MS, START_TIMEOUT_MS } from "../../src/deck/audio";
 
 class FakeAudio extends EventTarget {
   src = "";
@@ -80,6 +80,16 @@ describe("audio port", () => {
     expect(ctx.make).toHaveBeenCalledTimes(1);
     expect(ctx.context.resume).toHaveBeenCalledTimes(1);
     expect(element.play).toHaveBeenCalledTimes(1);
+  });
+
+  test("a press before prepare builds the graph once, in the press; a later prepare does nothing", () => {
+    const { ctx, port } = setup();
+    port.unlock("/media/audio/a.mp3");
+    expect(ctx.make).toHaveBeenCalledTimes(1);
+    port.prepare();
+    expect(port.ready).toBe(true);
+    expect(ctx.make).toHaveBeenCalledTimes(1);
+    expect(ctx.context.createMediaElementSource).toHaveBeenCalledTimes(1);
   });
 
   test("a graph that can't be built still leaves the port ready, fading with the element's volume", async () => {
@@ -181,5 +191,41 @@ describe("audio port", () => {
     expect(element.volume).toBe(0);
     await port.start("/media/audio/a.mp3", () => true);
     expect(element.volume).toBe(1);
+  });
+});
+
+describe("prepareAfterLoad", () => {
+  const audio = () => ({ prepare: vi.fn() });
+
+  test("waits for load, then builds in an idle callback", () => {
+    const port = audio();
+    let onLoad = () => {};
+    let idle = () => {};
+    const requestIdleCallback = vi.fn((callback: () => void) => {
+      idle = callback;
+    });
+    prepareAfterLoad(port, {
+      document: { readyState: "loading" },
+      addEventListener: (_type, listener) => {
+        onLoad = listener;
+      },
+      requestIdleCallback,
+    });
+    expect(requestIdleCallback).not.toHaveBeenCalled();
+    onLoad();
+    expect(requestIdleCallback).toHaveBeenCalledWith(expect.any(Function), { timeout: 2000 });
+    expect(port.prepare).not.toHaveBeenCalled();
+    idle();
+    expect(port.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  test("without requestIdleCallback (Safari's default) a 200ms timer runs prepare", () => {
+    const port = audio();
+    prepareAfterLoad(port, { document: { readyState: "complete" }, addEventListener: vi.fn() });
+    expect(port.prepare).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(199);
+    expect(port.prepare).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(port.prepare).toHaveBeenCalledTimes(1);
   });
 });

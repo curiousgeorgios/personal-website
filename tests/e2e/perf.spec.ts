@@ -18,7 +18,8 @@ async function throttled(page: Page) {
     await page.evaluate(() => window.scrollTo(0, 0));
   }
   // The deck builds its audio graph in an idle moment after load; the press is measured once that's done, as a visitor's is
-  await expect.poll(() => page.evaluate(() => window.__deck?.audio().ready ?? false), { timeout: 10_000 * SLOW }).toBe(true);
+  expect(await page.evaluate(() => !!window.__deck), "a test build (bun run build:test) installs the __deck hook").toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__deck!.audio().ready), { timeout: 10_000 * SLOW }).toBe(true);
   await page.evaluate(() => {
     const store = window as unknown as { latencies: Map<number, number> };
     store.latencies = new Map();

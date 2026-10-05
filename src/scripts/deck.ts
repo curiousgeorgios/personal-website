@@ -1,4 +1,4 @@
-import { createAudioPort } from "../deck/audio";
+import { createAudioPort, prepareAfterLoad } from "../deck/audio";
 import { bindList } from "../deck/list";
 import { playedProperties, trackOf, upgradeRows } from "../deck/rows";
 import { createDeck } from "../deck/runner";
@@ -17,14 +17,9 @@ if (host && list && element && status) {
   const buttons = upgradeRows(list);
   const ids = buttons.map((button) => button.dataset.id);
   const audio = createAudioPort(element);
-  // The audio graph is built in an idle moment once the page has loaded, not inside the first press, where it cost about
-  // 200ms at 4× CPU. It starts suspended; the press resumes it
-  const prepare = () => {
-    if ("requestIdleCallback" in window) requestIdleCallback(() => audio.prepare(), { timeout: 2000 });
-    else setTimeout(() => audio.prepare(), 200);
-  };
-  if (document.readyState === "complete") prepare();
-  else addEventListener("load", prepare, { once: true });
+  // Builds the audio graph in an idle moment after load. Real Chrome and Firefox log a console warning for a context made
+  // before any gesture; that is accepted: nobody sees it, the context stays suspended and the press resumes it
+  prepareAfterLoad(audio);
   const deck = createDeck({
     tracks: buttons.map(trackOf),
     audio,

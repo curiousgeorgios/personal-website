@@ -26,6 +26,27 @@ export interface DeckAudio extends AudioPort {
   readonly ready: boolean;
 }
 
+/** What prepareAfterLoad needs of the window, so a test can stand in for it */
+export interface LoadScope {
+  document: { readyState: string };
+  addEventListener(type: "load", listener: () => void, options: { once: true }): void;
+  requestIdleCallback?: (callback: () => void, options: { timeout: number }) => unknown;
+}
+
+/** Builds the graph in an idle moment once the page has loaded, not inside the first press, where it cost about 200ms at
+ *  4× CPU. Without requestIdleCallback (Safari's default) a short timer stands in for it. */
+export function prepareAfterLoad(audio: Pick<DeckAudio, "prepare">, scope: LoadScope = window): void {
+  // Building a context before any gesture logs a console warning in real Chrome and Firefox; that is accepted. The context
+  // starts suspended and stays silent until the press resumes it, and gating on prior activation would put the cost back
+  // in the press
+  const prepare = () => {
+    if (scope.requestIdleCallback) scope.requestIdleCallback(() => audio.prepare(), { timeout: 2000 });
+    else setTimeout(() => audio.prepare(), 200);
+  };
+  if (scope.document.readyState === "complete") prepare();
+  else scope.addEventListener("load", prepare, { once: true });
+}
+
 // One shared <audio> element for every record, routed through a gain node (spec 5.3)
 export function createAudioPort(element: HTMLAudioElement, makeContext: () => AudioContext = () => new AudioContext()): DeckAudio {
   let graph: Graph | null = null;
