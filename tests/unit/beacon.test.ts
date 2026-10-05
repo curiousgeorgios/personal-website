@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { eventBody, uuidv7 } from "../../src/lib/beacon";
 
 describe("uuidv7", () => {
@@ -55,7 +55,60 @@ describe("eventBody", () => {
     }
   });
 
+  test("the url sent keeps only the origin, the path and the utm parameters", () => {
+    const sent = (href: string) => (eventBody("$pageview", { ...visit, href }, {}, now) as { properties: Record<string, unknown> }).properties;
+    expect(sent("https://curiousgeorge.dev/?gclid=abc&ref=abc&utm_source=instagram#section")).toMatchObject({
+      $current_url: "https://curiousgeorge.dev/?utm_source=instagram",
+      $host: "curiousgeorge.dev",
+      $pathname: "/",
+    });
+    expect(sent("https://curiousgeorge.dev/?ref=abc#section").$current_url).toBe("https://curiousgeorge.dev/");
+    // In the list's order, whatever order the visitor's link had
+    expect(sent("https://curiousgeorge.dev/?utm_medium=social&utm_source=instagram").$current_url).toBe("https://curiousgeorge.dev/?utm_source=instagram&utm_medium=social");
+  });
+
   test("an event's own properties come along", () => {
     expect(eventBody("label_opened", visit, { slug: "canberra-events" }, now)).toMatchObject({ event: "label_opened", properties: { slug: "canberra-events", $session_id: visit.sessionId } });
+  });
+});
+
+describe("the beacon script", () => {
+  const ENDPOINT = "/ingest/i/v0/e/";
+
+  // The script runs when it loads, so each test stubs the browser it finds and imports it fresh
+  async function load(sendBeacon?: (url: string, body: string) => boolean) {
+    const beacon = sendBeacon && vi.fn(sendBeacon);
+    const fetched = vi.fn((_url: string, _init: RequestInit) => Promise.resolve(new Response(null, { status: 204 })));
+    vi.stubGlobal("navigator", { userAgent: "UA/1", sendBeacon: beacon });
+    vi.stubGlobal("location", { href: "https://curiousgeorge.dev/" });
+    vi.stubGlobal("document", { referrer: "", addEventListener: vi.fn() });
+    vi.stubGlobal("fetch", fetched);
+    vi.resetModules();
+    await import("../../src/scripts/beacon");
+    return { beacon, fetched };
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("a beacon the browser accepts is all that is sent", async () => {
+    const { beacon, fetched } = await load(() => true);
+    expect(beacon).toHaveBeenCalledTimes(1);
+    expect(beacon?.mock.calls[0][0]).toBe(ENDPOINT);
+    expect(typeof beacon?.mock.calls[0][1]).toBe("string");
+    expect(fetched).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["is missing", undefined],
+    ["refuses it", () => false],
+  ])("falls back to fetch with the same text body and keepalive when sendBeacon %s", async (_name, sendBeacon) => {
+    const { beacon, fetched } = await load(sendBeacon);
+    expect(fetched).toHaveBeenCalledTimes(1);
+    const [url, init] = fetched.mock.calls[0];
+    expect(url).toBe(ENDPOINT);
+    expect(init).toMatchObject({ method: "POST", keepalive: true, headers: { "Content-Type": "text/plain" } });
+    expect(typeof init.body).toBe("string");
+    expect(JSON.parse(init.body as string)).toMatchObject({ event: "$pageview", distinct_id: "$posthog_cookieless" });
+    if (beacon) expect(beacon.mock.calls[0]).toEqual([ENDPOINT, init.body]);
   });
 });

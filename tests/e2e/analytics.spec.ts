@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
 import { SLOW } from "./deck";
+import { withGpc } from "./gpc";
 
 // The local test build has no PostHog key: /ingest drops what it accepts, so these specs only watch what the page sends
 test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "would send events to PostHog from the live site");
@@ -38,7 +39,7 @@ test("playing a record is counted with its id", async ({ page, browserName }) =>
 });
 
 test("Global Privacy Control means nothing is sent", async ({ page }) => {
-  await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "globalPrivacyControl", { get: () => true }));
+  await withGpc(page);
   const sent: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("/ingest/")) sent.push(request.url());

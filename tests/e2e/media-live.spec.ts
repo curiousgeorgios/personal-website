@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { withGpc } from "./gpc";
 
 // CI runs this after a deploy, against the live site (PLAYWRIGHT_BASE_URL), to catch a forgotten `seed:media --remote`:
 // the records come from D1, so without the files in R2 every one of them would fail with "couldn't play". Locally it
@@ -7,9 +8,7 @@ test.skip(({ browserName }) => browserName !== "chromium", "HTTP behaviour, chec
 
 test("every record's audio streams with a range and its cover is WebP", async ({ page, request }) => {
   // Against the live site the beacon would count this check as a visit; Global Privacy Control switches it off
-  if (process.env.PLAYWRIGHT_BASE_URL) {
-    await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "globalPrivacyControl", { get: () => true }));
-  }
+  if (process.env.PLAYWRIGHT_BASE_URL) await withGpc(page);
   // A unique query (set by CI after a deploy) bypasses the edge cache, so the new version's records are what gets checked
   await page.goto(process.env.PRIVACY_PATH ?? "/");
   const media = await page.locator(".tracks button").evaluateAll((buttons) =>

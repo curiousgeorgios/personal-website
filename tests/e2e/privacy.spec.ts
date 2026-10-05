@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { withGpc } from "./gpc";
 
 test("cookies none, storage empty, every request first party", async ({ page, baseURL }) => {
   // Against the live site the beacon would count this check as a visit; Global Privacy Control switches it off (the
   // proxy is checked separately below)
-  if (process.env.PLAYWRIGHT_BASE_URL) {
-    await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "globalPrivacyControl", { get: () => true }));
-  }
+  if (process.env.PLAYWRIGHT_BASE_URL) await withGpc(page);
   const origin = new URL(baseURL!).origin;
   const setCookies: string[] = [];
   const foreign: string[] = [];

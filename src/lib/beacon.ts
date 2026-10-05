@@ -11,8 +11,6 @@ export interface Visit {
 }
 
 const UTM = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
-// Per-click identifiers from ad platforms: dropped from the URL sent, so no visit can be tied to an ad click
-const CLICK_IDS = ["fbclid", "gclid", "gbraid", "wbraid", "msclkid", "dclid", "ttclid"];
 
 /** A time-ordered UUID (RFC 9562 version 7), for PostHog's $session_id */
 export function uuidv7(now = Date.now(), random: (count: number) => Uint8Array = (count) => crypto.getRandomValues(new Uint8Array(count))): string {
@@ -38,19 +36,21 @@ function referringDomain(referrer: string): string {
 
 /**
  * One PostHog capture event in cookieless server hash mode (spec 10). The proxy adds the project key and the
- * country; PostHog derives a daily visitor from a hash of the IP, the user agent and a salt it rotates daily.
+ * country and replaces the timestamp with its own time (the client's is advisory); PostHog derives a daily visitor
+ * from a hash of the IP, the user agent and a salt it rotates daily.
  */
 export function eventBody(event: TrackEvent, visit: Visit, properties: TrackProperties = {}, now = new Date()) {
   const url = new URL(visit.href);
-  for (const name of CLICK_IDS) url.searchParams.delete(name);
   const domain = referringDomain(visit.referrer);
   const utm = Object.fromEntries(UTM.flatMap((name) => (url.searchParams.has(name) ? [[name, url.searchParams.get(name) ?? ""]] : [])));
+  // Only the origin, the path and the utm parameters are sent: any other query parameter or fragment can carry an identifier
+  const query = new URLSearchParams(utm).toString();
   return {
     event,
     distinct_id: "$posthog_cookieless",
     timestamp: now.toISOString(),
     properties: {
-      $current_url: url.href,
+      $current_url: `${url.origin}${url.pathname}${query ? `?${query}` : ""}`,
       $host: url.host,
       $pathname: url.pathname,
       $referrer: domain === "$direct" ? "$direct" : visit.referrer,

@@ -50,6 +50,39 @@ test("dragging the spinning record scratches it; letting go plays on at normal s
   await expectSeated(page);
 });
 
+test("scratching again later in the same visit is not counted again", async ({ page }) => {
+  const record = await platterOnScreen(page);
+  // The page records what it hears, as in the test above, so the drags don't wait on round trips
+  await page.evaluate(() => {
+    const events: string[] = [];
+    const rates: number[] = [];
+    Object.assign(window, { events, rates });
+    document.addEventListener("logbook:track", (event) => events.push(event.detail.event));
+    const element = document.querySelector<HTMLAudioElement>("audio[data-deck-audio]")!;
+    element.addEventListener("ratechange", () => rates.push(element.playbackRate));
+  });
+  const heard = () =>
+    page.evaluate(() => {
+      const seen = window as unknown as { events: string[]; rates: number[] };
+      return { events: [...seen.events], rates: [...seen.rates] };
+    });
+  for (const drag of [1, 2]) {
+    await page.mouse.move(record.x + record.rx, record.y);
+    await page.mouse.down();
+    for (let step = 1; step <= 12; step++) {
+      const angle = (step / 12) * Math.PI;
+      await page.mouse.move(record.x + record.rx * Math.cos(angle), record.y + record.ry * Math.sin(angle));
+    }
+    await page.mouse.up();
+    // Each drag really is a scratch: the record's speed bends while it lasts, then settles before the next one
+    const { rates } = await heard();
+    expect(rates.some((rate) => Math.abs(rate - 1) > 0.05), `drag ${drag} scratched`).toBe(true);
+    await expect.poll(async () => (await audioState(page)).rate, { timeout: 3000 * SLOW }).toBe(1);
+    await page.evaluate(() => ((window as unknown as { rates: number[] }).rates.length = 0));
+  }
+  expect((await heard()).events).toEqual(["scratch_found"]);
+});
+
 test("a plain click on the spinning record stops it", async ({ page }) => {
   const record = await platterOnScreen(page);
   await page.mouse.click(record.x + record.rx, record.y);

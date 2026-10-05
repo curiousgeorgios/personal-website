@@ -1,7 +1,5 @@
 import type { TrackDetail } from "../lib/track";
 
-export {};
-
 // Wall labels open in place. Closed drawers stay hidden="until-found" so find-in-page can still reach them.
 // The pill's aria-expanded is the state (the .open class lags a frame behind for the animation).
 const CLOSE_MS = 320;
