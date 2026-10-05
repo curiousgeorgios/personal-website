@@ -24,3 +24,30 @@ test("a same-frame open and close leaves the log closed and unstyled", async ({ 
   await expect(page.locator("#log .more")).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator("#log .log")).not.toHaveClass(/\bopen\b/);
 });
+
+test("closing, reopening and closing quickly lets the last close finish its animation", async ({ page }) => {
+  await page.goto("/");
+  const hiddenAfter = await page.locator("#log").evaluate(async (log) => {
+    const more = log.querySelector<HTMLButtonElement>(".more")!;
+    const older = log.querySelector<HTMLElement>(".older")!;
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    more.click();
+    await wait(400);
+    more.click();
+    await wait(100);
+    more.click();
+    await wait(100);
+    more.click();
+    const closedAt = performance.now();
+    await new Promise<void>((resolve) =>
+      new MutationObserver((_records, observer) => {
+        if (older.hasAttribute("hidden")) {
+          observer.disconnect();
+          resolve();
+        }
+      }).observe(older, { attributes: true }),
+    );
+    return performance.now() - closedAt;
+  });
+  expect(hiddenAfter).toBeGreaterThanOrEqual(270);
+});

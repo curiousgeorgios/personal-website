@@ -6,7 +6,7 @@ import { render, text } from "./render";
 const items: Item[] = [
   {
     slug: "canberra-events", section: "now", text: "building [canberra.events](https://canberra.events)", aside: null,
-    label: { era: "2025 to now", status: "live", madeOf: "a city calendar", text: "one calendar.", kind: "decision", note: "start with organisers.", snapshotKey: null },
+    label: { era: "2025 to now", status: "live", madeOf: "a city calendar", text: "one calendar.", kind: "decision", note: "start with organisers.", snapshotKey: "snapshots/fixture-canberra-events" },
   },
   {
     slug: "onestack", section: "before", text: "founded [onestack.cloud](https://onestack.cloud)", aside: null,
@@ -46,4 +46,35 @@ test("lines without a label get no pill", async () => {
   const doc = await render(ItemLines, { items });
   expect(doc.querySelector('[data-slug="kpmg"] .peek')).toBeNull();
   expect(doc.querySelector('[data-slug="kpmg"]')!.classList.contains("labelled")).toBe(false);
+});
+
+test("a line with a snapshot gets a hover card that waits to load, and a framed, lazy snapshot in its label", async () => {
+  const doc = await render(ItemLines, { items });
+  const item = doc.querySelector('[data-slug="canberra-events"]')!;
+  const card = item.querySelector(".peekwrap > .hovercard")!;
+  expect(card.getAttribute("aria-hidden")).toBe("true");
+  expect(card.querySelector("source")!.getAttribute("data-srcset")).toBe("/media/snapshots/fixture-canberra-events-480.avif");
+  expect(card.querySelector("source")!.hasAttribute("srcset")).toBe(false);
+  expect(card.querySelector("img")!.getAttribute("data-src")).toBe("/media/snapshots/fixture-canberra-events-480.webp");
+  expect(card.querySelector("img")!.hasAttribute("src")).toBe(false);
+  expect(text(card.querySelector(".cap"))).toBe("click for the label");
+  const frame = item.querySelector(".drawer .wall.framed > button.frame")!;
+  expect(frame.getAttribute("aria-label")).toBe("look closer at canberra.events");
+  expect(frame.getAttribute("data-closer-avif")).toBe("/media/snapshots/fixture-canberra-events-1920.avif");
+  expect(frame.getAttribute("data-closer-webp")).toBe("/media/snapshots/fixture-canberra-events-1920.webp");
+  expect(frame.querySelector("source")!.getAttribute("srcset")).toBe(
+    "/media/snapshots/fixture-canberra-events-480.avif 480w, /media/snapshots/fixture-canberra-events-960.avif 960w",
+  );
+  const img = frame.querySelector("img")!;
+  expect(img.getAttribute("loading")).toBe("lazy");
+  expect(img.getAttribute("src")).toBe("/media/snapshots/fixture-canberra-events-480.webp");
+  expect(img.getAttribute("alt")).toBe("a snapshot of canberra.events");
+});
+
+test("a line without a snapshot has no hover card and no frame", async () => {
+  const doc = await render(ItemLines, { items });
+  const item = doc.querySelector('[data-slug="onestack"]')!;
+  expect(item.querySelector(".hovercard")).toBeNull();
+  expect(item.querySelector(".frame")).toBeNull();
+  expect(item.querySelector(".wall")!.classList.contains("framed")).toBe(false);
 });

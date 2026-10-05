@@ -30,6 +30,7 @@ jobs:
       - run: bun run test:unit
       - run: bun run db:migrate:local
       - run: bun run seed:media --local
+      - run: bun run seed:snapshots --local
       - run: bun run build:test
       # Local Browser Rendering (the snapshot specs) downloads Chrome on first use; keep it between runs
       - uses: actions/cache@v6

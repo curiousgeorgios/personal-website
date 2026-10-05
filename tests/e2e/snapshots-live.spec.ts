@@ -31,6 +31,26 @@ test("the nightly run captures a line's page even if it never goes quiet, and re
   await expect(page.locator(status("r4r-with-me"))).toHaveText("the capture came out blank · no good capture yet");
 });
 
+test("the logbook names the new capture, and its six files are within budget", async ({ page, request }) => {
+  await page.goto(`${SNAPS}/?fresh=${Date.now()}`);
+  const src = await page.locator('[data-slug="canberra-events"] .hovercard img').getAttribute("data-src");
+  expect(src).toMatch(/^\/media\/snapshots\/canberra-events-[0-9a-hjkmnp-tv-z]{26}-480\.webp$/);
+  const files: [string, string, number][] = [
+    ["480", "avif", 30 * 1024],
+    ["480", "webp", 30 * 1024],
+    ["960", "avif", 70 * 1024],
+    ["960", "webp", 70 * 1024],
+    ["1920", "avif", Infinity],
+    ["1920", "webp", Infinity],
+  ];
+  for (const [width, format, budget] of files) {
+    const response = await request.get(`${SNAPS}${src!.replace("-480.webp", `-${width}.${format}`)}`);
+    expect(response.status(), `${width}.${format}`).toBe(200);
+    expect(response.headers()["content-type"]).toBe(`image/${format}`);
+    expect((await response.body()).length, `${width}.${format}`).toBeLessThan(budget);
+  }
+});
+
 test("re-shoot now captures one line again and says it saved", async ({ page }) => {
   await page.goto(`${SNAPS}/admin/`);
   await page.getByRole("button", { name: "re-shoot now, canberra-events", exact: true }).click();

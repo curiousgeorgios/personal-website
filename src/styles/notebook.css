@@ -46,6 +46,8 @@ a:focus-visible, button:focus-visible { outline: 1.5px solid var(--ink); outline
 
 /* The notebook: labels in the margin, content right of the red rule */
 .book { max-width: 940px; margin: 0 auto; padding: clamp(56px, 12vh, 128px) 24px 120px; }
+/* A hover card near the window's edge is cut there rather than scrolling the page sideways */
+.book { overflow-x: clip; }
 .row { display: grid; grid-template-columns: var(--label-w) 1fr; }
 .row > .label {
   font: 400 12.5px/1.55 var(--mono); color: var(--muted); letter-spacing: .01em;
@@ -69,8 +71,9 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 /* Now and before lines, with wall labels */
 .lines > li { padding: 3px 0; }
 .line-item.labelled > .line { cursor: pointer; }
+.peekwrap { position: relative; display: inline-block; margin-left: 10px; vertical-align: 1px; }
 .peek {
-  margin-left: 10px; vertical-align: 1px; font: 11.5px/1 var(--mono); color: var(--muted); cursor: pointer;
+  font: 11.5px/1 var(--mono); color: var(--muted); cursor: pointer;
   background: rgba(251, 251, 248, .6); border: 1px solid var(--rule); border-radius: 999px; padding: 4px 9px 4px 8px;
   display: inline-flex; align-items: center; gap: 6px;
 }
@@ -84,6 +87,36 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 @media (hover: hover) and (pointer: fine) {
   .peek { transition: color 200ms ease, border-color 200ms ease, background-color 200ms ease; }
   .line-item.labelled > .line:hover .peek { color: var(--ink); border-color: color-mix(in oklab, var(--ink) 55%, transparent); background: var(--mat); }
+}
+/* The hover card: the snapshot grows out of the pill on fine pointers, after a 90ms intent delay (spec 4.1) */
+.hovercard {
+  position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 5; width: 232px; padding: 7px 7px 8px; pointer-events: none;
+  background: var(--mat); box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 4px rgba(0, 0, 0, .05), 0 18px 34px -14px rgba(0, 0, 0, .32);
+  opacity: 0; transform: translateX(-50%) translateY(6px) scale(.94); transform-origin: 50% 100%;
+  transition: opacity 140ms ease, transform 200ms var(--ease-out);
+}
+.hovercard img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; background: #ecebe5; box-shadow: 0 0 0 1px rgba(0, 0, 0, .07); }
+.hovercard .cap { display: block; margin-top: 6px; font: 11px/1.4 var(--mono); color: var(--muted); text-align: center; }
+@media (hover: hover) and (pointer: fine) {
+  .line-item:not(.open) > .line:hover .hovercard.ready,
+  .line-item:not(.open) .peek:focus-visible + .hovercard.ready { opacity: 1; transform: translateX(-50%); transition-delay: 90ms; }
+}
+@media (hover: none), (pointer: coarse) { .hovercard { display: none; } }
+
+/* The label's wall: the framed snapshot beside the tag; without a snapshot, or when it won't load, just the tag */
+.wall.framed { display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: start; padding-top: 16px; }
+.wall.framed:not(.no-shot) > .tag { padding-top: 0; }
+.wall.no-shot { display: block; padding-top: 0; }
+.wall.no-shot .frame { display: none; }
+.frame {
+  display: block; width: 100%; padding: 12px; border: 0; background: var(--mat); cursor: zoom-in;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .05), 0 1px 2px rgba(0, 0, 0, .04), 0 14px 28px -16px rgba(0, 0, 0, .28);
+}
+.frame img { display: block; width: 100%; height: auto; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); }
+.frame:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -6px; } /* inside the mat: the drawer clips anything outside */
+@media (hover: hover) and (pointer: fine) {
+  .frame { transition: box-shadow 200ms ease; }
+  .frame:hover { box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 3px rgba(0, 0, 0, .05), 0 20px 36px -16px rgba(0, 0, 0, .34); }
 }
 .drawer { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 300ms var(--ease-out-quint); }
 .drawer > .drawer-inner { overflow: hidden; }
@@ -111,6 +144,10 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 .log .older { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms var(--ease-out); }
 .log .older > .older-inner { overflow: hidden; }
 .log.open .older { grid-template-rows: 1fr; }
+/* Without JavaScript nothing adds .open, so whatever find-in-page reveals opens by itself */
+@media (scripting: none) {
+  .drawer:not([hidden]), .log .older:not([hidden]) { grid-template-rows: 1fr; }
+}
 .more { margin-top: 12px; font: 12.5px/1.55 var(--mono); color: var(--muted); background: none; border: 0; cursor: pointer; padding: 4px 0; display: inline-flex; gap: 8px; align-items: center; }
 /* Drawn chevron: DM Mono has no arrow glyphs */
 .more .chev { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform 220ms var(--ease-out); }
@@ -141,8 +178,11 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
   .facts { grid-template-columns: 1fr; }
   .fact + .fact { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
   .log li { grid-template-columns: 76px 1fr; }
+  .wall.framed { grid-template-columns: 1fr; gap: 14px; }
+  .frame { max-width: 320px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .drawer, .log .older, .peek .plus, .more .chev { transition: none; }
+  .hovercard { transform: translateX(-50%); transition: opacity 140ms ease; }
 }
