@@ -7,7 +7,7 @@ export interface RunDeps {
   db: D1Database;
   media: R2Bucket;
   images: ImagesBinding;
-  /** Starts a Browser Rendering session: one per run, a page per line */
+  /** Starts a Browser Rendering session: one to start a run, and a fresh one when it can't open a page, up to SESSIONS_PER_RUN */
   launch: () => Promise<CaptureBrowser>;
   now?: () => Date;
   /** The id in new keys (tests pass a fixed one) */
@@ -26,8 +26,20 @@ export type ShotOutcome = SnapshotStatus | "discarded";
 /** Files no line points at stay this long, so a cached page that still names them keeps working (spec 9) */
 export const KEEP_SUPERSEDED_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** A night's browser sessions at most: one to start, and a fresh one after each of two lines that error */
+/** A night's browser sessions at most: one to start, and a fresh one each time a session can't open a page, twice */
 export const SESSIONS_PER_RUN = 3;
+
+/** The session couldn't open a page: it has gone, and nothing of the line was captured */
+class SessionGone extends Error {}
+
+/** The session as a capture sees it, with a page that can't be opened told apart from a page's own failure */
+const watched = (browser: CaptureBrowser): CaptureBrowser => ({
+  newPage: () =>
+    browser.newPage().catch((error: unknown) => {
+      throw new SessionGone("the browser session is gone", { cause: error });
+    }),
+  close: () => browser.close(),
+});
 
 /** Every line with a page to snapshot, in section order; or just the one with this id */
 export async function shotTargets(db: D1Database, id?: number): Promise<ShotTarget[]> {
@@ -114,42 +126,50 @@ async function recordError(db: D1Database, target: ShotTarget): Promise<void> {
 }
 
 /**
- * The nightly run: every line, one session, then the clean-up. One line's error is logged and recorded, and the run goes
- * on. The error may have been the session dying, which would take every later line with it, so the next line starts a
- * fresh session: three sessions a night at most, so a Browser Rendering outage isn't hammered (a refused launch counts as
- * one). A line with no session to run in keeps its status, as a re-shoot's "no-browser" does: nothing was captured.
+ * The nightly run: every line in a browser session, then the clean-up. One line's error is logged and recorded, and the
+ * run goes on. A session that can't open a page has gone, and would take every later line with it, so the line it
+ * couldn't open (untouched) goes again in a fresh session: three sessions a night at most, so a Browser Rendering outage
+ * isn't hammered (a refused launch counts as one). A page's own failure is that line's outcome and never replaces the
+ * session. A line with no session to run in keeps its status, as a re-shoot's "no-browser" does: nothing was attempted.
  */
 export async function runAll(deps: RunDeps): Promise<Record<string, ShotOutcome | "error" | "no-browser">> {
   const targets = await shotTargets(deps.db);
   const outcomes: Record<string, ShotOutcome | "error" | "no-browser"> = {};
   let browser: CaptureBrowser | null = null;
   let sessions = 0;
+  // A fresh session while tonight has one to give; a refused launch counts as one
+  const open = async (slug: string): Promise<CaptureBrowser | null> => {
+    if (sessions >= SESSIONS_PER_RUN) return null;
+    sessions += 1;
+    return deps.launch().then(watched, (error: unknown) => {
+      console.error(`snapshots: no browser for ${slug}:`, error);
+      return null;
+    });
+  };
   try {
     for (const target of targets) {
-      if (!browser && sessions < SESSIONS_PER_RUN) {
-        sessions += 1;
-        browser = await deps.launch().catch((error: unknown) => {
-          console.error(`snapshots: no browser for ${target.slug}:`, error);
-          return null;
-        });
-      }
-      if (!browser) {
-        // Nothing was captured, so the line keeps its status, as a re-shoot's "no-browser" does
-        outcomes[target.slug] = "no-browser";
-        continue;
-      }
-      try {
-        outcomes[target.slug] = await shootOne(deps, browser, target);
-      } catch (error) {
-        console.error(`snapshots: ${target.slug} errored:`, error);
-        await recordError(deps.db, target);
-        outcomes[target.slug] = "error";
-        // The error may have been the session dying: the next line gets a fresh one, while tonight has one to give
-        if (sessions < SESSIONS_PER_RUN) {
-          await browser.close().catch(() => {});
-          browser = null;
+      let outcome: ShotOutcome | "error" | "no-browser" = "no-browser";
+      // Bounded: each retry spends a session, or `open` returns null
+      for (;;) {
+        browser ??= await open(target.slug);
+        if (!browser) break; // nothing was captured, so the line keeps its status
+        try {
+          outcome = await shootOne(deps, browser, target);
+        } catch (error) {
+          if (error instanceof SessionGone) {
+            // The session died, here or on an earlier line: this line wasn't touched, so it goes again in a fresh one
+            console.error(`snapshots: the session was gone for ${target.slug}:`, error.cause);
+            await browser.close().catch(() => {});
+            browser = null;
+            continue;
+          }
+          console.error(`snapshots: ${target.slug} errored:`, error);
+          await recordError(deps.db, target);
+          outcome = "error";
         }
+        break;
       }
+      outcomes[target.slug] = outcome;
     }
   } finally {
     await browser?.close().catch(() => {});

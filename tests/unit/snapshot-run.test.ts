@@ -77,6 +77,7 @@ const deps = (): RunDeps => ({
   images: fakeImages as unknown as ImagesBinding,
   launch: async () => {
     browser = fakeBrowser(site);
+    sessions.push(browser);
     launches += 1;
     return browser;
   },
@@ -84,6 +85,7 @@ const deps = (): RunDeps => ({
   id: () => ID,
 });
 let launches = 0;
+let sessions: ReturnType<typeof fakeBrowser>[] = [];
 const row = (slug: string) =>
   db.prepare("SELECT id, snapshot_url, snapshot_key, snapshot_at, snapshot_status FROM items WHERE slug = ?").bind(slug).first<{
     id: number;
@@ -97,6 +99,7 @@ beforeEach(() => {
   db = sqliteD1();
   bucket = fakeBucket();
   launches = 0;
+  sessions = [];
   site = () => ({});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -365,14 +368,26 @@ test("a session that dies mid-run is replaced, so the lines after it are still c
   site = (url) => (url.includes("digitalnachos") ? { kills: true } : {});
   expect(await runAll(deps())).toEqual({ "digital-nachos": "error", "canberra-events": "ok", "linear-gratis": "ok", onestack: "ok" });
   expect(launches).toBe(2);
-  expect(browser.closed).toBe(true);
+  expect(sessions.map((session) => session.closed)).toEqual([true, true]);
 });
 
-test("sessions that keep dying are replaced only twice a night; the lines after that error", async () => {
+test("sessions that keep dying are replaced only twice a night; the line left with no session keeps its status", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  site = () => ({ kills: true });
-  expect(Object.values(await runAll(deps()))).toEqual(["error", "error", "error", "error"]);
+  // linear-gratis is the last line in section order, and a healthy page: it never gets a session
+  await db.prepare("UPDATE items SET snapshot_status = 'ok' WHERE slug = 'linear-gratis'").run();
+  site = (url) => (url.includes("linear.gratis") ? {} : { kills: true });
+  expect(await runAll(deps())).toEqual({ onestack: "error", "digital-nachos": "error", "canberra-events": "error", "linear-gratis": "no-browser" });
   expect(launches).toBe(SESSIONS_PER_RUN);
+  expect(sessions.map((session) => session.closed)).toEqual([true, true, true]);
+  expect(await row("linear-gratis")).toMatchObject({ snapshot_status: "ok" });
+});
+
+test("a page's own failure never replaces the session: three broken pages and a healthy one use one", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) => (url.includes("linear.gratis") ? {} : { broken: true });
+  expect(await runAll(deps())).toEqual({ "digital-nachos": "error", "canberra-events": "error", "linear-gratis": "ok", onestack: "error" });
+  expect(launches).toBe(1);
+  expect(sessions[0].closed).toBe(true);
 });
 
 test("Browser Rendering refusing every session leaves every line as it was, after three tries at most; the clean-up still runs", async () => {
@@ -398,7 +413,13 @@ test("the clean-up deletes in batches of 1000 keys, as R2 allows", async () => {
       for (const format of ["avif", "webp"]) bucket.seed(`snapshots/gone-${String(i).padStart(3, "0")}-${width}.${format}`, old);
     }
   }
+  // R2 lists 1000 keys at most, so the 1002 come over two pages
+  const all = [...bucket.objects].map(([key, object]) => ({ key, uploaded: object.uploaded }));
+  bucket.list.mockImplementation(async ({ cursor }: { prefix?: string; cursor?: string }) =>
+    cursor === "next" ? { objects: all.slice(1000), truncated: false } : { objects: all.slice(0, 1000), truncated: true, cursor: "next" },
+  );
   expect(await sweep(deps())).toBe(1002);
+  expect(bucket.list).toHaveBeenCalledTimes(2);
   expect(bucket.delete.mock.calls.map(([keys]) => [keys].flat().length)).toEqual([1000, 2]);
   expect(bucket.objects.size).toBe(0);
 });
