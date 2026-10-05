@@ -25,7 +25,7 @@ declare namespace Cloudflare {
 interface Window {
   __deck?: {
     state(): import("./deck/types").DeckState;
-    audio(): { paused: boolean; src: string; rate: number };
+    audio(): { paused: boolean; src: string; rate: number; ready: boolean };
   };
   __deckScene?: import("./deck/scene/hooks").SceneHooks;
 }

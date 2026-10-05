@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { hasWebGL, settled } from "./deck";
+import { hasWebGL, settled, SLOW } from "./deck";
 
 // Spec 11 on every run: interaction to next paint under 200ms at 4× CPU and layout shift under 0.01 at phone width.
 // INP comes from the Event Timing API (an interaction's latency is its longest event entry), because Lighthouse's
@@ -13,10 +13,12 @@ async function throttled(page: Page) {
   // throttling: the gates measure the interactions, not the boot. Then back to the top, as a visitor starts.
   if (await hasWebGL(page)) {
     await page.locator("[data-deck]").scrollIntoViewIfNeeded();
-    await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 });
+    await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 * SLOW });
     await settled(page);
     await page.evaluate(() => window.scrollTo(0, 0));
   }
+  // The deck builds its audio graph in an idle moment after load; the press is measured once that's done, as a visitor's is
+  await expect.poll(() => page.evaluate(() => window.__deck?.audio().ready ?? false), { timeout: 10_000 * SLOW }).toBe(true);
   await page.evaluate(() => {
     const store = window as unknown as { latencies: Map<number, number> };
     store.latencies = new Map();
@@ -60,12 +62,12 @@ test("showing older log entries responds within 200ms at 4× CPU", async ({ page
   expect(latency).toBeLessThan(200);
 });
 
-// Reported, not gated: the first press builds the deck's AudioContext (plan 2 code), about 200ms at 4× CPU
-// here and more on CI's runners. The plan 4 follow-ups move that work out of the press, then this becomes a gate.
-test("pressing play: its interaction latency is reported", async ({ page }) => {
+test("pressing play responds within 200ms at 4× CPU", async ({ page }) => {
   await throttled(page);
   await page.locator(".tracks button").first().click();
-  test.info().annotations.push({ type: "inp", description: `pressing play: ${await slowest(page)}ms at 4× CPU` });
+  const latency = await slowest(page);
+  test.info().annotations.push({ type: "inp", description: `pressing play: ${latency}ms at 4× CPU` });
+  expect(latency).toBeLessThan(200);
 });
 
 // The click's latency runs to the next paint (the frame's busy state), not to the dialog opening: that waits for the

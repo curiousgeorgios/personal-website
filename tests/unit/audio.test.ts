@@ -66,6 +66,33 @@ describe("audio port", () => {
     expect(element.play).toHaveBeenCalledTimes(1);
   });
 
+  test("prepare builds the graph ahead of the press, suspended; the press then only resumes it", () => {
+    const { element, ctx, port } = setup();
+    expect(port.ready).toBe(false);
+    port.prepare();
+    port.prepare();
+    expect(port.ready).toBe(true);
+    expect(ctx.make).toHaveBeenCalledTimes(1);
+    expect(ctx.context.createMediaElementSource).toHaveBeenCalledTimes(1);
+    expect(ctx.context.resume).not.toHaveBeenCalled();
+    expect(element.play).not.toHaveBeenCalled();
+    port.unlock("/media/audio/a.mp3");
+    expect(ctx.make).toHaveBeenCalledTimes(1);
+    expect(ctx.context.resume).toHaveBeenCalledTimes(1);
+    expect(element.play).toHaveBeenCalledTimes(1);
+  });
+
+  test("a graph that can't be built still leaves the port ready, fading with the element's volume", async () => {
+    const element = new FakeAudio();
+    const port = createAudioPort(element as unknown as HTMLAudioElement, () => {
+      throw new Error("no Web Audio");
+    });
+    port.prepare();
+    expect(port.ready).toBe(true);
+    port.unlock("/media/audio/a.mp3");
+    expect(element.volume).toBe(0);
+  });
+
   test("start rewinds, plays and fades the gain up", async () => {
     const { element, ctx, port } = setup();
     port.unlock("/media/audio/a.mp3");

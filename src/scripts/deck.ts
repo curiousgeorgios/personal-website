@@ -16,9 +16,18 @@ if (host && list && element && status) {
   // Links to the MP3s in the HTML, play buttons from here on
   const buttons = upgradeRows(list);
   const ids = buttons.map((button) => button.dataset.id);
+  const audio = createAudioPort(element);
+  // The audio graph is built in an idle moment once the page has loaded, not inside the first press, where it cost about
+  // 200ms at 4× CPU. It starts suspended; the press resumes it
+  const prepare = () => {
+    if ("requestIdleCallback" in window) requestIdleCallback(() => audio.prepare(), { timeout: 2000 });
+    else setTimeout(() => audio.prepare(), 200);
+  };
+  if (document.readyState === "complete") prepare();
+  else addEventListener("load", prepare, { once: true });
   const deck = createDeck({
     tracks: buttons.map(trackOf),
-    audio: createAudioPort(element),
+    audio,
     // Cleared first and set on the next frame, so a repeated message is announced again
     announce: (message) => {
       status.textContent = "";
@@ -39,6 +48,7 @@ if (host && list && element && status) {
         paused: element.paused,
         src: element.currentSrc ? new URL(element.currentSrc).pathname : (element.getAttribute("src") ?? ""),
         rate: element.playbackRate,
+        ready: audio.ready,
       }),
     };
   }

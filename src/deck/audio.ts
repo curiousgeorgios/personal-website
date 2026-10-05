@@ -17,8 +17,17 @@ function settles(playing: Promise<void>, ms: number): Promise<boolean> {
   });
 }
 
+/** The deck's audio port, plus building its graph ahead of the first press */
+export interface DeckAudio extends AudioPort {
+  /** Builds the Web Audio graph now, suspended: a context made outside a gesture starts suspended, and the press resumes
+   *  it. Keeps that work out of the first press (spec 11's interaction budget). Safe to call more than once */
+  prepare(): void;
+  /** The graph has been built, or building it failed and fades use the element's volume */
+  readonly ready: boolean;
+}
+
 // One shared <audio> element for every record, routed through a gain node (spec 5.3)
-export function createAudioPort(element: HTMLAudioElement, makeContext: () => AudioContext = () => new AudioContext()): AudioPort {
+export function createAudioPort(element: HTMLAudioElement, makeContext: () => AudioContext = () => new AudioContext()): DeckAudio {
   let graph: Graph | null = null;
   let tried = false;
   let unlocked = false;
@@ -29,7 +38,8 @@ export function createAudioPort(element: HTMLAudioElement, makeContext: () => Au
   element.addEventListener("ended", () => ended());
   element.addEventListener("error", () => errored());
 
-  // Built inside the first press: browsers only let an AudioContext start from a user gesture
+  // Built once: ahead of the first press (prepare), or inside it. A context made outside a gesture starts suspended,
+  // and every press resumes it, because browsers only let audio start from a user gesture
   function connect(): Graph | null {
     if (tried) return graph;
     tried = true;
@@ -68,6 +78,12 @@ export function createAudioPort(element: HTMLAudioElement, makeContext: () => Au
   }
 
   return {
+    prepare() {
+      connect();
+    },
+    get ready() {
+      return tried;
+    },
     unlock(src) {
       // iOS mutes Web Audio with the ringer switch unless the page asks for a playback session
       const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
