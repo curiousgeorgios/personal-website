@@ -22,6 +22,8 @@ export interface SceneHooks {
   /** On-screen box of the browsed record's sleeve, in client pixels */
   coverRect(): { x: number; y: number; width: number; height: number };
   loseContext(): void;
+  /** The candle's set intensity: 9 by night, 4 by day and golden hour */
+  candle(): number;
   /** Leaves one plain, unprinted sleeve in the crate's front slot and hides the crate control, for `bun run poster` */
   poster(): void;
 }
@@ -77,6 +79,7 @@ export function installHooks({ renderer, stage, tweens, loop, deck }: { renderer
       return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
     },
     loseContext: () => renderer.getContext().getExtension("WEBGL_lose_context")?.loseContext(),
+    candle: () => stage.candle.intensity,
     poster: () => {
       // One plain sleeve (the colour a cover that fails to load gets) at rest in the front slot, the rest of the crate and
       // every disc hidden: true whatever /admin does, since the corner only shows with at least one active record

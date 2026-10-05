@@ -150,3 +150,23 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 375, height: 812 
     await expect(full).toBeHidden();
   });
 }
+
+// The poster is picked as the page loads and the scene starts later, when the row comes near; the scene keeps the
+// poster's mood, so a visit that crosses 19:00 or 06:00 doesn't swap the light at take-over
+for (const [loaded, started, night] of [
+  ["2026-10-05T07:59:00Z", "2026-10-05T08:01:00Z", false], // 18:59 then 19:01 in Sydney: day stays day
+  ["2026-10-04T18:59:00Z", "2026-10-04T19:01:00Z", true], // 05:59 then 06:01: night stays night
+] as const) {
+  test(`loaded at ${loaded} and started at ${started}, the scene keeps the ${night ? "night" : "day"} poster's light`, async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "checked once in Chromium");
+    test.skip(!(await hasWebGL(page)), "no WebGL in this browser here");
+    await page.setViewportSize({ width: 1280, height: 400 }); // the row starts out of reach, so the scene waits
+    await page.clock.setFixedTime(new Date(loaded));
+    await page.goto("/");
+    expect(await page.locator("[data-deck]").evaluate((deck) => deck.hasAttribute("data-night"))).toBe(night);
+    await page.clock.setFixedTime(new Date(started));
+    await page.locator("[data-deck]").scrollIntoViewIfNeeded();
+    await expect(page.locator("[data-deck].live")).toHaveCount(1, { timeout: 45_000 * SLOW });
+    expect(await page.evaluate(() => window.__deckScene!.candle())).toBe(night ? 9 : 4);
+  });
+}

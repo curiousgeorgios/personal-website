@@ -15,10 +15,12 @@ export function sydneyHour(date: Date): number {
   return part("hour") + part("minute") / 60;
 }
 
-// Daylight, golden hour from 16:00 to 19:00, night light from 19:00 to 06:00 with a brighter candle (spec 5.2)
-export function lightFor(date: Date): Light {
+// Daylight, golden hour from 16:00 to 19:00, night light from 19:00 to 06:00 with a brighter candle (spec 5.2). `night`,
+// when given, overrides the clock's say on night alone: the deck passes the mood its poster was picked by, so a visit that
+// crosses 19:00 or 06:00 keeps it (day past 19:00 stays golden, with the sun at its last angle)
+export function lightFor(date: Date, night?: boolean): Light {
   const hour = sydneyHour(date);
-  if (hour >= 19 || hour < 6) {
+  if (night ?? (hour >= 19 || hour < 6)) {
     return {
       mood: "night",
       key: { color: 0xffc58a, intensity: 1.4, position: [-5, 8, 6] },

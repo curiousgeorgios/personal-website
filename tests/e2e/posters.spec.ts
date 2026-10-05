@@ -39,11 +39,13 @@ test("at night, the night poster, and only it is fetched", async ({ page }) => {
   expect(posters).toEqual(["/posters/deck-desktop-night.webp"]);
 });
 
-test("on a phone at night, the phone's night poster", async ({ page }) => {
+test("on a phone at night, the phone's night poster, and only it is fetched", async ({ page }) => {
+  const posters = fetched(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.clock.setFixedTime(NIGHT);
   await page.goto("/");
   expect(await poster(page)).toBe("/posters/deck-phone-night.webp");
+  expect(posters).toEqual(["/posters/deck-phone-night.webp"]);
 });
 
 test.describe("without JavaScript", () => {

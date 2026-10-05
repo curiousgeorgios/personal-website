@@ -21,7 +21,8 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
   const canvas = renderer.domElement;
   canvas.setAttribute("aria-hidden", "true");
   const [textures, covers] = await Promise.all([makeTextures(renderer), loadCovers(deck.tracks.map((track) => track.cover))]);
-  const stage = await buildStage(renderer, textures, covers, lightFor(new Date()));
+  // Night if the poster's script picked the night poster, so the scene takes over in the light the poster shows
+  const stage = await buildStage(renderer, textures, covers, lightFor(new Date(), host.hasAttribute("data-night")));
   await renderer.compileAsync(stage.scene, stage.camera);
   // Every texture goes to the GPU in an idle moment of its own, so the first frame doesn't upload them all at once
   for (const texture of [...textures.walnut, textures.grooves, textures.fur, textures.glow, ...covers]) {
