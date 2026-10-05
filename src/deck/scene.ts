@@ -8,7 +8,7 @@ import { HUD_ANCHOR } from "./scene/layout";
 import { lightFor } from "./scene/lighting";
 import { createLoop } from "./scene/loop";
 import { bindPointer } from "./scene/pointer";
-import { loadCovers, makeTextures } from "./scene/textures";
+import { idle, loadCovers, makeTextures } from "./scene/textures";
 import { createTweens } from "./scene/tween";
 
 const PHONE_WIDTH = "(max-width: 680px)";
@@ -23,6 +23,11 @@ export async function mount(host: HTMLElement, deck: Deck): Promise<DeckView> {
   const [textures, covers] = await Promise.all([makeTextures(renderer), loadCovers(deck.tracks.map((track) => track.cover))]);
   const stage = await buildStage(renderer, textures, covers, lightFor(new Date()));
   await renderer.compileAsync(stage.scene, stage.camera);
+  // Every texture goes to the GPU in an idle moment of its own, so the first frame doesn't upload them all at once
+  for (const texture of [...textures.walnut, textures.grooves, textures.fur, textures.glow, ...covers]) {
+    await idle();
+    renderer.initTexture(texture);
+  }
 
   const tweens = createTweens(() => loop.invalidate());
   const loop = createLoop({ renderer, stage, tweens, reduce, onFrame: () => host.classList.add("live") });
