@@ -25,6 +25,7 @@ test("on a 375px phone the canvas is full bleed, the cover is at least 90px tall
 test("without WebGL a phone gets the phone poster", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "checked once in Chromium");
   await withoutWebGL(page);
+  await page.clock.setFixedTime(new Date("2026-10-05T02:00:00Z")); // 13:00 in Sydney: the day poster
   await page.goto("/");
   const poster = page.locator("[data-deck] .poster img");
   await poster.scrollIntoViewIfNeeded();

@@ -1,6 +1,8 @@
 import { defineConfig } from "astro/config";
 import cloudflare from "@astrojs/cloudflare";
 import { cacheCloudflare } from "@astrojs/cloudflare/cache";
+import { createHash } from "node:crypto";
+import { NIGHT_POSTER } from "./src/scripts/night-poster.mjs";
 
 // Test builds carry hooks for the e2e suite (TEST_HOOKS). ADMIN_BYPASS also skips Cloudflare Access on /admin, and is
 // refused without TEST_HOOKS, so a production build can never contain it (spec 7).
@@ -42,7 +44,9 @@ export default defineConfig({
         "form-action 'self'",
         "frame-ancestors 'none'",
       ],
-      scriptDirective: { resources: ["'self'"] },
+      // Astro hashes the scripts it bundles but not inline ones, so the night poster's script is hashed here, from the
+      // same string Turntable.astro renders: an edit to one is an edit to both
+      scriptDirective: { resources: ["'self'"], hashes: [`sha256-${createHash("sha256").update(NIGHT_POSTER).digest("base64")}`] },
       styleDirective: { resources: ["'self'"] },
     },
   },

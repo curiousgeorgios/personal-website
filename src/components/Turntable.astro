@@ -1,6 +1,7 @@
 ---
 import "../styles/deck.css";
 import type { Track } from "../lib/logbook";
+import { NIGHT_POSTER } from "../scripts/night-poster.mjs";
 
 interface Props {
   records: Track[];
@@ -17,6 +18,7 @@ const media = (key: string) => `/media/${key}`;
         <source media="(max-width: 680px)" srcset="/posters/deck-phone.webp" />
         <img src="/posters/deck-desktop.webp" alt="" decoding="async" loading="lazy" />
       </picture>
+      <script is:inline set:html={NIGHT_POSTER}></script>
     </div>
     <ol class="tracks" aria-label="records">
       {records.map((record, index) => (

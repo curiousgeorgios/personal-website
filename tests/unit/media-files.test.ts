@@ -21,6 +21,8 @@ describe("the posters", () => {
   test.each([
     ["deck-desktop", 16 / 10.8],
     ["deck-phone", 375 / 320],
+    ["deck-desktop-night", 16 / 10.8],
+    ["deck-phone-night", 375 / 320],
   ])("%s is a WebP under 60KB in the deck's shape", async (name, aspect) => {
     const file = `public/posters/${name}.webp`;
     expect(statSync(file).size).toBeLessThan(60 * 1024);

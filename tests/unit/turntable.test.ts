@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import Turntable from "../../src/components/Turntable.astro";
 import type { Track } from "../../src/lib/logbook";
+import { NIGHT_POSTER } from "../../src/scripts/night-poster.mjs";
 import { render, text } from "./render";
 
 const records: Track[] = [
@@ -40,6 +41,8 @@ describe("Turntable", () => {
     const poster = doc.querySelector("[data-deck] .poster img")!;
     expect([poster.getAttribute("src"), poster.getAttribute("alt"), poster.getAttribute("loading")]).toEqual(["/posters/deck-desktop.webp", "", "lazy"]);
     expect(doc.querySelector('[data-deck] .poster source[media="(max-width: 680px)"]')?.getAttribute("srcset")).toBe("/posters/deck-phone.webp");
+    // The night poster's script runs straight after the picture, before it paints, with exactly the text the CSP hashes
+    expect(doc.querySelector("[data-deck] .poster + script")?.textContent).toBe(NIGHT_POSTER);
   });
 
   test("shows only the empty line when there are no records", async () => {
