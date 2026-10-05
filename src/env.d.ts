@@ -13,6 +13,13 @@ declare namespace App {
   }
 }
 
+declare namespace Cloudflare {
+  interface Env {
+    /** The PostHog project key, a Worker secret (wrangler secret put POSTHOG_KEY). Unset locally, so /ingest drops events */
+    POSTHOG_KEY?: string;
+  }
+}
+
 interface Window {
   __deck?: {
     state(): import("./deck/types").DeckState;
