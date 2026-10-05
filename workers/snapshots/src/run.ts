@@ -97,7 +97,20 @@ async function discard(media: R2Bucket, target: ShotTarget, keys: string[]): Pro
   }
 }
 
-/** The nightly run: every line, one session, then the clean-up. One line's error is logged and the run goes on */
+/**
+ * A capture that threw (an Images, R2 or session error) is recorded as "error" on the same terms as a failure, so the
+ * admin shows it rather than an old "captured"; the error itself is in the logs. A database fault here is only logged
+ */
+async function recordError(db: D1Database, target: ShotTarget): Promise<void> {
+  const status: SnapshotStatus = "error";
+  try {
+    await db.prepare("UPDATE items SET snapshot_status = ? WHERE id = ? AND snapshot_url = ?").bind(status, target.id, target.url).run();
+  } catch (error) {
+    console.error(`snapshots: ${target.slug} couldn't record its error:`, error);
+  }
+}
+
+/** The nightly run: every line, one session, then the clean-up. One line's error is logged and recorded, and the run goes on */
 export async function runAll(deps: RunDeps): Promise<Record<string, ShotOutcome | "error">> {
   const targets = await shotTargets(deps.db);
   const outcomes: Record<string, ShotOutcome | "error"> = {};
@@ -109,6 +122,7 @@ export async function runAll(deps: RunDeps): Promise<Record<string, ShotOutcome 
           outcomes[target.slug] = await shootOne(deps, browser, target);
         } catch (error) {
           console.error(`snapshots: ${target.slug} errored:`, error);
+          await recordError(deps.db, target);
           outcomes[target.slug] = "error";
         }
       }
@@ -125,13 +139,19 @@ export async function runAll(deps: RunDeps): Promise<Record<string, ShotOutcome 
   return outcomes;
 }
 
-/** The admin's "re-shoot now": one line, its own session; "gone" when it has no page to snapshot */
+/**
+ * The admin's "re-shoot now": one line, its own session; "gone" when it has no page to snapshot. A capture that throws
+ * is recorded on the line and thrown on, so the admin says the worker hit an error (the Worker's RPC method logs it)
+ */
 export async function reshootOne(deps: RunDeps, id: number): Promise<ShotOutcome | "gone"> {
   const [target] = await shotTargets(deps.db, id);
   if (!target) return "gone";
   const browser = await deps.launch();
   try {
     return await shootOne(deps, browser, target);
+  } catch (error) {
+    await recordError(deps.db, target);
+    throw error;
   } finally {
     await browser.close().catch(() => {});
   }

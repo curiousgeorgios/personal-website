@@ -6,6 +6,7 @@ test.each([
   ["ok", "2026-10-04T17:00:12.000Z", "captured 2026-10-05"],
   ["challenge", "2026-10-01T17:00:00.000Z", "a bot check blocked it · last good capture 2026-10-02"],
   ["too-small", null, "the capture came out blank · no good capture yet"],
+  ["error", "2026-10-01T17:00:00.000Z", "the capture broke, see the worker's logs · last good capture 2026-10-02"],
   ["something-new", null, "something-new · no good capture yet"],
   ["ok", "not a date", "captured"],
   [null, "not a date", "not captured yet"],

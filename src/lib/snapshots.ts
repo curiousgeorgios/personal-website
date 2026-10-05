@@ -5,6 +5,7 @@ export const SNAPSHOT_STATUSES = {
   "http-error": "the page returned an error",
   challenge: "a bot check blocked it",
   "too-small": "the capture came out blank",
+  error: "the capture broke, see the worker's logs",
 } as const;
 
 export type SnapshotStatus = keyof typeof SNAPSHOT_STATUSES;

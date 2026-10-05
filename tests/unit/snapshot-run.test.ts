@@ -155,6 +155,49 @@ test("one line's unexpected error doesn't stop the others, and the session still
   expect(console.error).toHaveBeenCalledWith("snapshots: digital-nachos errored:", expect.any(Error));
 });
 
+test("a capture that throws records the error on its line, so the admin doesn't go on saying it was captured", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await db.prepare("UPDATE items SET snapshot_key = 'snapshots/digital-nachos-old', snapshot_at = '2026-10-01T17:00:00.000Z', snapshot_status = 'ok' WHERE slug = 'digital-nachos'").run();
+  site = (url) => (url.includes("digitalnachos") ? { broken: true } : {});
+  expect((await runAll(deps()))["digital-nachos"]).toBe("error");
+  expect(await row("digital-nachos")).toMatchObject({ snapshot_key: "snapshots/digital-nachos-old", snapshot_at: "2026-10-01T17:00:00.000Z", snapshot_status: "error" });
+});
+
+test("a line given a new address while its capture threw doesn't get the error", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) =>
+    url.includes("canberra.events")
+      ? { broken: true, during: async () => void (await db.prepare("UPDATE items SET snapshot_url = 'https://canberra.events/new' WHERE slug = 'canberra-events'").run()) }
+      : {};
+  expect((await runAll(deps()))["canberra-events"]).toBe("error");
+  expect(await row("canberra-events")).toMatchObject({ snapshot_url: "https://canberra.events/new", snapshot_status: null });
+});
+
+test("an error that can't be recorded is logged, and the run goes on", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) => (url.includes("digitalnachos") ? { broken: true } : {});
+  const real = db;
+  const failing = {
+    prepare: (sql: string) => {
+      if (sql.startsWith("UPDATE items SET snapshot_status = ?")) throw new Error("D1_ERROR: Network connection lost.");
+      return real.prepare(sql);
+    },
+  } as unknown as D1Database;
+  const outcomes = await runAll({ ...deps(), db: failing });
+  expect(outcomes).toEqual({ "digital-nachos": "error", "canberra-events": "ok", "linear-gratis": "ok", onestack: "ok" });
+  expect(console.error).toHaveBeenCalledWith("snapshots: digital-nachos errored:", expect.any(Error));
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining("digital-nachos couldn't record"), expect.any(Error));
+});
+
+test("a re-shoot that throws records the error on its line and still throws, so the admin says the worker hit one", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  site = (url) => (url.includes("canberra.events") ? { broken: true } : {});
+  const canberra = (await row("canberra-events"))!.id;
+  await expect(reshootOne(deps(), canberra)).rejects.toThrow("Target closed");
+  expect(browser.closed).toBe(true);
+  expect(await row("canberra-events")).toMatchObject({ snapshot_status: "error" });
+});
+
 test("re-shoots one line by id, and says when it has no page to snapshot", async () => {
   const canberra = (await row("canberra-events"))!.id;
   const kpmg = (await db.prepare("SELECT id FROM items WHERE slug = 'kpmg'").first<{ id: number }>())!.id;
@@ -201,7 +244,7 @@ test("a capture is kept for a week after the next one replaced it, however old i
   expect([...bucket.objects.keys()].filter((key) => key.startsWith(previous))).toHaveLength(6);
 });
 
-test("an upload that fails part-way deletes the files already stored and leaves the line as it was", async () => {
+test("an upload that fails part-way deletes the files already stored, and the line keeps its snapshot and says it broke", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   const store = bucket.put.getMockImplementation()!;
   let puts = 0;
@@ -213,7 +256,7 @@ test("an upload that fails part-way deletes the files already stored and leaves 
   // onestack comes first in section order, so its fourth file is the one that fails
   expect(outcomes).toEqual({ "digital-nachos": "ok", "canberra-events": "ok", "linear-gratis": "ok", onestack: "error" });
   expect([...bucket.objects.keys()].some((key) => key.startsWith("snapshots/onestack-"))).toBe(false);
-  expect(await row("onestack")).toMatchObject({ snapshot_key: null, snapshot_at: null, snapshot_status: null });
+  expect(await row("onestack")).toMatchObject({ snapshot_key: null, snapshot_at: null, snapshot_status: "error" });
   expect(bucket.objects.size).toBe(18);
 });
 
@@ -258,7 +301,8 @@ test("an update that commits and then rejects leaves the line and the files it n
   vi.spyOn(console, "error").mockImplementation(() => {});
   const outcomes = await runAll({ ...deps(), db: flakyDb(db, { committed: true }) });
   expect(outcomes).toEqual({ "digital-nachos": "error", "canberra-events": "error", "linear-gratis": "error", onestack: "error" });
-  expect(await row("canberra-events")).toMatchObject({ snapshot_key: `snapshots/canberra-events-${ID}`, snapshot_status: "ok" });
+  // The run can't tell the update committed, so the line says the capture broke, beside the date that shows it landed
+  expect(await row("canberra-events")).toMatchObject({ snapshot_key: `snapshots/canberra-events-${ID}`, snapshot_at: "2026-10-04T17:00:05.000Z", snapshot_status: "error" });
   const files = [...bucket.objects.keys()].filter((key) => key.startsWith(`snapshots/canberra-events-${ID}`));
   expect(files).toHaveLength(6);
   expect(bucket.objects.size).toBe(24);
@@ -268,7 +312,7 @@ test("an update that rejects before it commits deletes the files, since no line 
   vi.spyOn(console, "error").mockImplementation(() => {});
   const outcomes = await runAll({ ...deps(), db: flakyDb(db, { committed: false }) });
   expect(outcomes["canberra-events"]).toBe("error");
-  expect(await row("canberra-events")).toMatchObject({ snapshot_key: null, snapshot_status: null });
+  expect(await row("canberra-events")).toMatchObject({ snapshot_key: null, snapshot_status: "error" });
   expect(bucket.objects.size).toBe(0);
 });
 
