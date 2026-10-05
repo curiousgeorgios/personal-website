@@ -26,11 +26,14 @@ export function uuidv7(now = Date.now(), random: (count: number) => Uint8Array =
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function referringDomain(referrer: string): string {
+// Only the referrer's origin is sent: its path and query string can carry an identifier. Nothing, or something with
+// no host to name (about:blank), is a direct visit
+function referrerOf(referrer: string): { origin: string; domain: string } | null {
   try {
-    return referrer ? new URL(referrer).host : "$direct";
+    const { protocol, host } = new URL(referrer);
+    return host ? { origin: `${protocol}//${host}`, domain: host } : null;
   } catch {
-    return "$direct";
+    return null;
   }
 }
 
@@ -41,7 +44,7 @@ function referringDomain(referrer: string): string {
  */
 export function eventBody(event: TrackEvent, visit: Visit, properties: TrackProperties = {}, now = new Date()) {
   const url = new URL(visit.href);
-  const domain = referringDomain(visit.referrer);
+  const from = referrerOf(visit.referrer);
   const utm = Object.fromEntries(UTM.flatMap((name) => (url.searchParams.has(name) ? [[name, url.searchParams.get(name) ?? ""]] : [])));
   // Only the origin, the path and the utm parameters are sent: any other query parameter or fragment can carry an identifier
   const query = new URLSearchParams(utm).toString();
@@ -53,8 +56,8 @@ export function eventBody(event: TrackEvent, visit: Visit, properties: TrackProp
       $current_url: `${url.origin}${url.pathname}${query ? `?${query}` : ""}`,
       $host: url.host,
       $pathname: url.pathname,
-      $referrer: domain === "$direct" ? "$direct" : visit.referrer,
-      $referring_domain: domain,
+      $referrer: from?.origin ?? "$direct",
+      $referring_domain: from?.domain ?? "$direct",
       $raw_user_agent: visit.userAgent,
       $timezone: visit.timeZone,
       $session_id: visit.sessionId,

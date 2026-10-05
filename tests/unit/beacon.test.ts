@@ -33,7 +33,7 @@ describe("eventBody", () => {
         $current_url: "https://curiousgeorge.dev/?utm_source=instagram&utm_medium=social&utm_campaign=bio_link",
         $host: "curiousgeorge.dev",
         $pathname: "/",
-        $referrer: "https://l.instagram.com/?u=x",
+        $referrer: "https://l.instagram.com",
         $referring_domain: "l.instagram.com",
         $raw_user_agent: "UA/1",
         $timezone: "Australia/Sydney",
@@ -48,11 +48,24 @@ describe("eventBody", () => {
   });
 
   test("no referrer, or one that isn't a URL, is a direct visit", () => {
-    for (const referrer of ["", "not a url"]) {
+    for (const referrer of ["", "not a url", "about:blank"]) {
       const { properties } = eventBody("$pageview", { ...visit, referrer, href: "https://curiousgeorge.dev/" }, {}, now) as { properties: Record<string, unknown> };
       expect(properties).toMatchObject({ $referrer: "$direct", $referring_domain: "$direct" });
       expect(properties).not.toHaveProperty("utm_source");
     }
+  });
+
+  test("the referrer sent is its origin, never its path, query or fragment", () => {
+    const sent = (referrer: string) => (eventBody("$pageview", { ...visit, referrer }, {}, now) as { properties: Record<string, unknown> }).properties;
+    expect(sent("https://www.google.com/search?q=curious+george&gclid=abc#top")).toMatchObject({
+      $referrer: "https://www.google.com",
+      $referring_domain: "www.google.com",
+    });
+    expect(sent("http://localhost:3000/a/b?c=d")).toMatchObject({ $referrer: "http://localhost:3000", $referring_domain: "localhost:3000" });
+    expect(sent("android-app://com.google.android.googlequicksearchbox/")).toMatchObject({
+      $referrer: "android-app://com.google.android.googlequicksearchbox",
+      $referring_domain: "com.google.android.googlequicksearchbox",
+    });
   });
 
   test("the url sent keeps only the origin, the path and the utm parameters", () => {
