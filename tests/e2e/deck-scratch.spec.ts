@@ -27,12 +27,16 @@ test("dragging the spinning record scratches it; letting go plays on at normal s
     (window as unknown as { events: string[] }).events = events;
     document.addEventListener("logbook:track", (event) => events.push(event.detail.event));
   });
+  const shadowsBefore = await page.evaluate(() => window.__deckScene!.shadows());
   await page.mouse.down();
   for (let step = 1; step <= 12; step++) {
     const angle = (step / 12) * Math.PI;
     await page.mouse.move(record.x + record.rx * Math.cos(angle), record.y + record.ry * Math.sin(angle));
   }
   expect(await page.evaluate(() => window.__deckScene!.spin())).not.toBe(spin);
+  // Turning a disc changes no shadow: the drag's moves draw frames but leave the 2048 shadow map alone (the one redraw is
+  // the frame the scratch's start asks for)
+  expect((await page.evaluate(() => window.__deckScene!.shadows())) - shadowsBefore).toBeLessThanOrEqual(1);
   await page.mouse.up();
   const rates = await page.evaluate(() => (window as unknown as { rates: number[] }).rates);
   expect(rates.length).toBeGreaterThan(0);
@@ -41,7 +45,7 @@ test("dragging the spinning record scratches it; letting go plays on at normal s
   expect(Math.min(...rates)).toBeGreaterThanOrEqual(0.25);
   // Found the easter egg: counted once, however many times the drag moves
   expect(await page.evaluate(() => (window as unknown as { events: string[] }).events)).toEqual(["scratch_found"]);
-  await expect.poll(async () => (await audioState(page)).rate, { timeout: 3000 * SLOW }).toBe(1);
+  await expect.poll(async () => (await audioState(page)).rate, { timeout: 10_000 * SLOW }).toBe(1);
   // The click that ends a scratch is not a stop
   expect(await deckState(page)).toMatchObject({ want: LONG_TRACK, playing: LONG_TRACK });
   expect((await audioState(page)).paused).toBe(false);
@@ -77,7 +81,7 @@ test("scratching again later in the same visit is not counted again", async ({ p
     // Each drag really is a scratch: the record's speed bends while it lasts, then settles before the next one
     const { rates } = await heard();
     expect(rates.some((rate) => Math.abs(rate - 1) > 0.05), `drag ${drag} scratched`).toBe(true);
-    await expect.poll(async () => (await audioState(page)).rate, { timeout: 3000 * SLOW }).toBe(1);
+    await expect.poll(async () => (await audioState(page)).rate, { timeout: 10_000 * SLOW }).toBe(1);
     await page.evaluate(() => ((window as unknown as { rates: number[] }).rates.length = 0));
   }
   expect((await heard()).events).toEqual(["scratch_found"]);

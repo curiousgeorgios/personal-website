@@ -74,3 +74,19 @@ test("the frame a tween ends on still redraws the shadow map, because it draws t
   expect(shadows.slice(before)).toEqual([true, true, true]);
   loop.stop();
 });
+
+test("a scratch draws every frame and redraws the shadow map only on its first, and the loop counts the redraws", async () => {
+  const { loop, shadows } = setup();
+  loop.setVisible(true);
+  await vi.advanceTimersByTimeAsync(20);
+  expect(loop.shadows).toBe(1);
+  const before = shadows.length;
+  loop.setScratching(true);
+  await vi.advanceTimersByTimeAsync(200);
+  const scratching = shadows.slice(before);
+  expect(scratching.length).toBeGreaterThan(8); // every frame, not capped at 30 a second
+  expect(scratching[0]).toBe(true); // the frame setScratching asked for
+  expect(scratching.slice(1).every((redrawn) => redrawn === false)).toBe(true);
+  expect(loop.shadows).toBe(2);
+  loop.stop();
+});

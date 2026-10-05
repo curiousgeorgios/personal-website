@@ -11,6 +11,8 @@ export interface Loop {
   setVisible(visible: boolean): void;
   stop(): void;
   readonly frames: number;
+  /** Frames that redrew the shadow map, for the test hooks */
+  readonly shadows: number;
 }
 
 const SPIN_FPS = 30;
@@ -29,11 +31,12 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
   let stopped = false;
   let dirty = true;
   let frames = 0;
+  let shadows = 0;
 
-  // The shadow map is redrawn only when something casting a shadow may have moved: a tween, or a frame asked for
-  // (and every scratch move asks for one: pointer.ts invalidates). Spinning and the candle's flicker change nothing a
-  // shadow shows (the record's shadow is a disc), so the 2048 map isn't redrawn 30 times a second for a whole track
-  // (plan 2 follow-up).
+  // The shadow map is redrawn only when something casting a shadow may have moved: a tween, or a frame asked for.
+  // Spinning, a scratch turning the platter by hand and the candle's flicker change nothing a shadow shows (the record's
+  // shadow is a disc), so the 2048 map isn't redrawn 30 times a second for a whole track, or on every move of a scratch
+  // (plan 2 and plan 4 follow-ups).
   renderer.shadowMap.autoUpdate = false;
 
   function flicker(now: number) {
@@ -61,6 +64,7 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
     if (dirty || !spinningOnly || now - lastDraw >= 1000 / SPIN_FPS - 1) {
       if (moving && !reduce) flicker(now);
       renderer.shadowMap.needsUpdate = dirty || stepping;
+      if (renderer.shadowMap.needsUpdate) shadows += 1;
       renderer.render(scene, camera);
       frames += 1;
       lastDraw = now;
@@ -107,6 +111,9 @@ export function createLoop({ renderer, stage, tweens, reduce, onFrame }: { rende
     },
     get frames() {
       return frames;
+    },
+    get shadows() {
+      return shadows;
     },
   };
 }

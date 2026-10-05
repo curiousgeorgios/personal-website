@@ -9,6 +9,8 @@ type Point = { x: number; y: number; z: number };
 
 export interface SceneHooks {
   frames(): number;
+  /** Frames that redrew the shadow map */
+  shadows(): number;
   tweens(): number;
   tilts(): number[];
   spin(): number;
@@ -43,6 +45,7 @@ export function installHooks({ renderer, stage, tweens, loop, deck }: { renderer
   };
   window.__deckScene = {
     frames: () => loop.frames,
+    shadows: () => loop.shadows,
     tweens: () => tweens.count,
     tilts: () => stage.records.map((r) => +r.holder.rotation.x.toFixed(3)),
     spin: () => +stage.platter.rotation.y.toFixed(3),

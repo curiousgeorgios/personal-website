@@ -95,7 +95,6 @@ export function bindPointer(canvas: HTMLCanvasElement, { deck, stage, journeys, 
     deck.setRate(drag.rate);
     drag.angle = angle;
     drag.at = at;
-    loop.invalidate();
   }
 
   function endDrag(event: PointerEvent) {
