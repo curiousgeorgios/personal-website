@@ -33,6 +33,8 @@ if (host && list && element && status) {
     played: (index) => {
       document.dispatchEvent(new CustomEvent<TrackDetail>("logbook:track", { detail: { event: "record_played", properties: playedProperties(ids[index]) } }));
     },
+    // Test builds can hold the runner's clock, so the double-press check doesn't hang on when a loaded renderer runs a press
+    now: __TEST_HOOKS__ ? () => window.__deckClock ?? performance.now() : undefined,
   });
   host.deck = deck;
   bindList(list, deck);
@@ -45,6 +47,9 @@ if (host && list && element && status) {
         rate: element.playbackRate,
         ready: audio.ready,
       }),
+      hold: (at) => {
+        window.__deckClock = at ?? undefined;
+      },
     };
   }
 }

@@ -26,6 +26,10 @@ interface Window {
   __deck?: {
     state(): import("./deck/types").DeckState;
     audio(): { paused: boolean; src: string; rate: number; ready: boolean };
+    /** Holds the runner's clock at `at` (a performance.now() time) until called with null */
+    hold(at: number | null): void;
   };
+  /** The runner's held clock, test builds only */
+  __deckClock?: number;
   __deckScene?: import("./deck/scene/hooks").SceneHooks;
 }
