@@ -18,6 +18,17 @@ test("events the logbook doesn't send are refused", async ({ request, baseURL })
   expect(response.status()).toBe(400);
 });
 
+test("a body over 32KB is refused with a 413 and never cached", async ({ request, baseURL }) => {
+  const response = await request.post("/ingest/i/v0/e/", { data: "x".repeat(40 * 1024), headers: { Origin: new URL(baseURL!).origin } });
+  expect(response.status()).toBe(413);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+});
+
+test("a body that isn't JSON is refused", async ({ request, baseURL }) => {
+  const response = await request.post("/ingest/i/v0/e/", { data: "not json", headers: { Origin: new URL(baseURL!).origin } });
+  expect(response.status()).toBe(400);
+});
+
 test("anything else under /ingest is a 404", async ({ request, baseURL }) => {
   const origin = new URL(baseURL!).origin;
   expect((await request.get("/ingest/i/v0/e/")).status()).toBe(404);
@@ -25,8 +36,9 @@ test("anything else under /ingest is a 404", async ({ request, baseURL }) => {
   expect((await request.post("/ingest/decide/", { data: "{}", headers: { Origin: origin } })).status()).toBe(404);
 });
 
-test("a beacon from another site is refused before it reaches the proxy", async () => {
-  // Node's fetch sends no Origin unless asked, unlike a browser
-  const response = await fetch(new URL("/ingest/i/v0/e/", "http://localhost:4331"), { method: "POST", body: event("$pageview") });
-  expect(response.status).toBe(403);
+test("a beacon from another site is refused before it reaches the proxy", async ({ baseURL }) => {
+  const url = new URL("/ingest/i/v0/e/", baseURL!);
+  // Node's fetch sends no Origin unless asked, unlike a browser; check both a missing one and a foreign one
+  expect((await fetch(url, { method: "POST", body: event("$pageview") })).status).toBe(403);
+  expect((await fetch(url, { method: "POST", body: event("$pageview"), headers: { Origin: "https://example.com" } })).status).toBe(403);
 });
