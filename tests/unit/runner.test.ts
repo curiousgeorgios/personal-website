@@ -317,7 +317,39 @@ describe("deck runner with a scene", () => {
     await settle(5000);
     expect(scene.calls).toEqual([]);
     expect(starts(audio.calls)).toEqual([]);
+    expect(audio.calls).toContain("stop"); // the press unlocked the element; it must not keep streaming unheard
     expect(deck.getState()).toMatchObject({ want: null, current: null, busy: false });
+  });
+
+  test("pressing the first record, another, then the first again plays only the first", async () => {
+    const audio = fakeAudio();
+    const played: number[] = [];
+    const deck = createDeck({ tracks, audio, announce: () => {}, now: () => clock, played: (index) => played.push(index) });
+    const scene = fakeView(100);
+    let resolve!: (view: DeckView) => void;
+    deck.connect(new Promise((r) => (resolve = r)));
+    deck.toggle(0);
+    clock = 500;
+    deck.toggle(1);
+    clock = 1000;
+    deck.toggle(0);
+    resolve(scene.view);
+    await settle(5000);
+    expect(scene.calls).toEqual(["load 0"]);
+    expect(starts(audio.calls)).toEqual(["start /media/audio/a.mp3"]);
+    expect(played).toEqual([0]);
+    expect(deck.getState()).toMatchObject({ want: 0, current: 0, playing: 0, busy: false });
+  });
+
+  test("a different press while a scene never arrives plays the second record after the wait, with no first journey", async () => {
+    const { deck, audio } = setup();
+    deck.connect(new Promise(() => {}));
+    deck.toggle(0);
+    clock = 500;
+    deck.toggle(1);
+    await settle(VIEW_WAIT_MS);
+    expect(starts(audio.calls)).toEqual(["start /media/audio/b.mp3"]);
+    expect(deck.getState()).toMatchObject({ want: 1, current: 1, playing: 1, scene: false });
   });
 
   test("a record taken back on its way to the platter is never counted as played", async () => {
@@ -343,6 +375,7 @@ describe("deck runner with a scene", () => {
     deck.toggle(2); // and is taken back before it lands
     await settle(10_000);
     expect(played).toEqual([1]);
+    expect(starts(audio.calls)).toEqual(["start /media/audio/b.mp3"]); // record 2 never reached the audio either
     expect(deck.getState()).toMatchObject({ want: null, current: null, playing: null });
   });
 

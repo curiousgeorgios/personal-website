@@ -55,7 +55,7 @@ export function createDeck({ tracks, audio, announce, played, now = () => perfor
   }
 
   // A step waits for a scene that is still downloading, so the first record still makes its journey. load() waits here
-  // before anything leaves the crate, so a press undone during the download moves nothing (plan 2's question 4)
+  // before anything leaves the crate, so a press undone during the download moves nothing
   async function viewForStep(): Promise<DeckView | null> {
     const waiting = pending;
     if (waiting) {
@@ -99,7 +99,12 @@ export function createDeck({ tracks, audio, announce, played, now = () => perfor
     if (pending) {
       // Only while a scene downloads: with one attached, or none coming, presses run exactly as before
       await viewForStep();
-      if (want !== index) return; // they changed their mind while it downloaded: nothing moved, nothing to take back
+      if (want !== index) {
+        // They changed their mind while it downloaded: nothing moved, nothing to take back. A stop still pauses the
+        // element the press unlocked, which would otherwise keep streaming at zero gain
+        if (want === null) audio.stop();
+        return;
+      }
     }
     current = index;
     const flip = browsed !== index;
