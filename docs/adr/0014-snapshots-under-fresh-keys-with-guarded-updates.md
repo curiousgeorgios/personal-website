@@ -17,7 +17,7 @@ ADR-0002 chose always-fresh snapshots: a separate Worker captures each line's pa
 
 ## Consequences
 
-A cached page never names a missing or half-replaced file, and George's edits always win over a capture that was already running. R2 holds each line's previous capture for a week after it was replaced, a few hundred KB per line per day, which costs next to nothing. Changing a line's page to snapshot clears its old snapshot at once (plan 3), and the old files go with the next week-old clean-up. The design depends on keys never being reused, which the ULID guarantees. Moving to Playwright later would mean a larger Worker for the same capture.
+A cached page never names a missing or half-replaced file, and George's edits always win over a capture that was already running. R2 holds each line's previous capture for a week after it was replaced, a few hundred KB per line per day, which costs next to nothing. Changing a line's page to snapshot clears its old snapshot at once (plan 3), and the old files go with the next week-old clean-up. The design depends on keys never being reused, which the ULID guarantees. Two faults together (a capture's clean-up failing, then a later capture of the same line) can start a file's week early, and the re-read after a failed update assumes D1 reads come from the primary; turning on read replication would mean pinning that read to it. Moving to Playwright later would mean a larger Worker for the same capture.
 
 ## Alternatives considered
 
