@@ -29,7 +29,7 @@ bun run check
 
 ## Snapshots and analytics
 
-The snapshots Worker lives in `workers/snapshots/`. `bun run dev:snapshots` runs it on its own; the end-to-end suite runs it beside the site on port 4334, with local Browser Rendering (wrangler downloads Chrome on first use) capturing a fixture site on port 4400. Run scripts under Node 24 (`mise exec node@24 --` outside your home directory): wrangler's Chrome download has hung under Node 26.
+The snapshots Worker lives in `workers/snapshots/`. `bun run dev:snapshots` runs it on its own, with its own store (`.wrangler/snapshots-dev`, migrated first) and its own dev registry, so the site's servers never reach it; its nightly run, started with `curl http://localhost:8790/__scheduled`, captures the lines' real pages into that store. The end-to-end suite runs it beside the site on port 4334, with local Browser Rendering (wrangler downloads Chrome on first use) capturing a fixture site on port 4400. Run scripts under Node 24 (`mise exec node@24 --` outside your home directory): wrangler's Chrome download has hung under Node 26.
 
 `bun run seed:snapshots --local` gives two labelled lines a snapshot in the local store, so the e2e server shows hover cards and the closer look.
 

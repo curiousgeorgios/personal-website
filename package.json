@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "dev:admin": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro dev",
-    "dev:snapshots": "wrangler dev -c workers/snapshots/wrangler.jsonc --port 8790 --persist-to .wrangler/state --test-scheduled",
+    "dev:snapshots": "wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/snapshots-dev && WRANGLER_REGISTRY_PATH=.wrangler/snapshots-dev/registry wrangler dev -c workers/snapshots/wrangler.jsonc --port 8790 --persist-to .wrangler/snapshots-dev --test-scheduled",
     "build": "astro build",
     "build:test": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro build",
     "typecheck": "astro check",
