@@ -15,15 +15,18 @@ describe("Turntable", () => {
       "a1 simple things - loom room play",
       "a2 nyc in 1940 - berlioz, ted jasper play",
     ]);
-    const button = doc.querySelector(".tracks button")!;
-    expect(button.getAttribute("type")).toBe("button");
-    expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.getAttribute("data-index")).toBe("0");
-    expect(button.getAttribute("data-id")).toBe("1");
-    expect(button.getAttribute("data-src")).toBe("/media/audio/simple-things.mp3");
-    expect(button.getAttribute("data-cover")).toBe("/media/covers/simple-things.webp");
-    expect(button.getAttribute("data-title")).toBe("simple things");
-    expect(button.getAttribute("data-artist")).toBe("loom room");
+    // A link to the MP3, so the row plays without JavaScript; the deck script makes it a button
+    const link = doc.querySelector(".tracks a.pick")!;
+    expect(link.getAttribute("href")).toBe("/media/audio/simple-things.mp3");
+    expect(link.hasAttribute("type")).toBe(false);
+    expect(link.hasAttribute("aria-pressed")).toBe(false);
+    expect(link.getAttribute("data-index")).toBe("0");
+    expect(link.getAttribute("data-id")).toBe("1");
+    expect(link.getAttribute("data-src")).toBe("/media/audio/simple-things.mp3");
+    expect(link.getAttribute("data-cover")).toBe("/media/covers/simple-things.webp");
+    expect(link.getAttribute("data-title")).toBe("simple things");
+    expect(link.getAttribute("data-artist")).toBe("loom room");
+    expect(doc.querySelector(".tracks button")).toBeNull();
   });
 
   test("has the deck, the hint, a polite live region and one audio element that preloads nothing", async () => {

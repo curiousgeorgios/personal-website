@@ -21,9 +21,9 @@ const media = (key: string) => `/media/${key}`;
     <ol class="tracks" aria-label="records">
       {records.map((record, index) => (
         <li>
-          <button
-            type="button"
-            aria-pressed="false"
+          <a
+            class="pick"
+            href={media(record.audioKey)}
             data-index={index}
             data-id={record.id}
             data-src={media(record.audioKey)}
@@ -34,7 +34,7 @@ const media = (key: string) => `/media/${key}`;
             <span class="side mono">{record.side}</span>{" "}
             <span class="tt">{record.title} <span class="aside">- {record.artist}</span></span>{" "}
             <span class="st mono">play</span>
-          </button>
+          </a>
         </li>
       ))}
     </ol>

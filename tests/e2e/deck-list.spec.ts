@@ -56,3 +56,37 @@ test("without a scene nothing is marked in view", async ({ page }) => {
   await page.locator(".tracks button").nth(2).hover();
   await expect(page.locator(".tracks li.browsed")).toHaveCount(0);
 });
+
+test("the script turns each track's link into a play button before anything binds", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".tracks a.pick")).toHaveCount(0);
+  const first = page.locator(".tracks .pick").first();
+  await expect(first).toHaveJSProperty("tagName", "BUTTON");
+  await expect(first).toHaveAttribute("type", "button");
+  await expect(first).toHaveAttribute("aria-pressed", "false");
+  await expect(first).not.toHaveAttribute("href", /.*/);
+});
+
+test.describe("without JavaScript", () => {
+  test.use({ javaScriptEnabled: false });
+
+  test("each track is a link to its MP3, served first party with no cookie, and the hint says only what's true", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator(".tracks li")).toHaveCount(4);
+    await expect(page.locator(".tracks button")).toHaveCount(0);
+    const hrefs = await page.locator(".tracks a.pick").evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
+    expect(hrefs).toHaveLength(4);
+    for (const href of hrefs) {
+      // First party, on this site's own /media/, never another host
+      expect(href, href).toMatch(/^\/media\/audio\/[^/]+\.mp3$/);
+      // Two bytes are enough to show the browser would get the file, as audio, ready to stream
+      const response = await request.get(href, { headers: { Range: "bytes=0-1" } });
+      expect(response.status(), href).toBe(206);
+      expect(response.headers()["content-type"], href).toBe("audio/mpeg");
+      expect(response.headers()["set-cookie"], href).toBeUndefined();
+    }
+    expect(await page.context().cookies()).toEqual([]);
+    await expect(page.locator(".corner > .hint .hint-list")).toBeVisible();
+    await expect(page.locator(".corner > .hint .hint-scene")).toBeHidden();
+  });
+});
