@@ -500,15 +500,46 @@ test("a big file that arrives after the look has closed changes nothing", async 
   await item.locator(".peek").click();
   await expect(item.locator(".frame img")).toBeVisible();
   const dialog = page.locator("dialog.closer");
+  const arrived = page.waitForResponse(BIG);
   await item.locator(".frame").click();
   await expect(dialog).toHaveAttribute("open", "");
   await dialog.locator(".closer-close").click();
   await expect(dialog).not.toHaveAttribute("open", "");
-  await page.waitForTimeout(2500); // the big file has arrived by now
+  // The big file arrives, and is decoded as closer.ts's loader decodes it, a frame after which its swap would have run
+  const url = (await arrived).url();
+  await page.evaluate(async (src) => {
+    const loader = new Image();
+    loader.src = src;
+    await loader.decode();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }, url);
   await expect(dialog).not.toHaveAttribute("open", "");
   await expect(dialog.locator("img")).not.toHaveAttribute("src", /.*/);
   await expect(item.locator(".frame img")).toHaveCSS("visibility", "visible");
   await expect(item.locator(".frame")).toBeFocused();
+});
+
+test("a frame whose own picture never arrives opens nothing, and holds no other frame up", async ({ page }) => {
+  await page.route(/fixture-digital-nachos-(480|960)\.(avif|webp)$/, () => {}); // never answered
+  await page.goto("/");
+  const first = page.locator('[data-slug="digital-nachos"]');
+  const second = page.locator('[data-slug="canberra-events"]');
+  await first.locator(".peek").click();
+  await second.locator(".peek").click();
+  await expect(second.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  // A click on the empty mat waits a bounded while for its picture, and then lets go
+  await first.locator(".frame").click();
+  // Within a few seconds the other frame opens its own look, never the first's
+  await expect(async () => {
+    await second.locator(".frame").click();
+    await expect(dialog).toHaveAttribute("open", "", { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of canberra.events");
+  await dialog.locator(".closer-close").click();
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(second.locator(".frame")).toBeFocused();
+  await expect(dialog.locator("img")).not.toHaveAttribute("src", /.*/);
 });
 
 test("a closer look whose big file won't load keeps the frame's own picture, grown to fit the window", async ({ page }) => {

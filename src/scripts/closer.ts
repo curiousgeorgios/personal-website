@@ -19,6 +19,7 @@ function restBox(img: HTMLElement) {
   img.getBoundingClientRect(); // settles the style, so the transition that follows starts from `now`
   return box;
 }
+const PICTURE_WAIT = 3000; // ms a click waits for its frame's own picture
 let frame: HTMLAnchorElement | null = null; // the frame whose snapshot is in the dialog
 let opening = false; // a frame's picture is still decoding: one open at a time
 let closing = false;
@@ -48,14 +49,15 @@ async function open(link: HTMLAnchorElement) {
   const shot = link.querySelector("img");
   if (!shot) return;
   opening = true;
-  // Decoded already once the frame shows; this waits only for a frame clicked the moment its picture arrives
-  await shot.decode().catch(() => {});
   const own = shot.currentSrc;
   if (own) {
     big.src = own;
     big.alt = shot.alt;
     dialog.setAttribute("aria-label", `closer look: ${shot.alt}`);
-    await big.decode().catch(() => {});
+    // Decoded already once the frame shows. A frame clicked before its picture arrived waits for it (fetched here too, as
+    // a lazy frame out of view never fetches its own), but only a few seconds, so a picture that never comes doesn't hold
+    // every other frame up. Nothing opens then: a look appearing long after the click would be a surprise
+    await Promise.race([big.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, PICTURE_WAIT))]);
   }
   opening = false;
   // The label may have been closed meanwhile (its pill's aria-expanded is the state), and nothing opens over that
