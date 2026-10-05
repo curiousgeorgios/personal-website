@@ -53,7 +53,9 @@ function loadCard(item: HTMLElement) {
   item.querySelector(".hovercard")?.classList.add("ready");
 }
 
-document.querySelectorAll<HTMLElement>(".line-item.labelled").forEach((item) => {
+const labelled = document.querySelectorAll<HTMLElement>(".line-item.labelled");
+
+labelled.forEach((item) => {
   const line = item.querySelector<HTMLElement>(".line");
   const drawer = item.querySelector<HTMLElement>(".drawer");
   const pill = item.querySelector<HTMLButtonElement>(".peek");
@@ -72,6 +74,9 @@ document.querySelectorAll<HTMLElement>(".line-item.labelled").forEach((item) => 
   });
   line.addEventListener("pointerenter", () => loadCard(item));
   pill.addEventListener("focus", () => loadCard(item));
+  // Escape's dismissal of the hover card lasts until the pointer leaves the line or focus leaves it
+  line.addEventListener("pointerleave", () => item.classList.remove("dismissed"));
+  line.addEventListener("focusout", () => item.classList.remove("dismissed"));
   // A snapshot that won't load: the label shows just its tag (spec 4.1), and the hover card goes
   item.querySelector(".frame img")?.addEventListener("error", () => item.querySelector(".wall")?.classList.add("no-shot"));
   item.querySelector(".hovercard img")?.addEventListener("error", () => item.querySelector(".hovercard")?.remove());
@@ -84,6 +89,16 @@ document.querySelectorAll<HTMLElement>(".line-item.labelled").forEach((item) => 
   item.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !isOpen(item)) return;
     setOpen(item, false);
+    // Back on the pill, its focus would otherwise bring the hover card up over the lines above
+    item.classList.add("dismissed");
     pill.focus();
+  });
+});
+
+// Escape dismisses a hover card shown by hover or by the pill's focus, without moving either (WCAG 1.4.13)
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  labelled.forEach((item) => {
+    if (item.querySelector(".line:hover, .peek:focus")) item.classList.add("dismissed");
   });
 });

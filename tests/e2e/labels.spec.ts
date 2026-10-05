@@ -85,6 +85,85 @@ test("a phone shows no hover card", async ({ page, isMobile }) => {
   await expect(page.locator('[data-slug="canberra-events"] .hovercard')).toBeHidden();
 });
 
+test("a second hover fetches nothing new", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  const fetched: string[] = [];
+  page.on("request", (request) => {
+    if (SNAPSHOT.test(request.url())) fetched.push(request.url());
+  });
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.locator("h1").hover();
+  await expect(card).toBeHidden();
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.waitForLoadState("networkidle");
+  expect(fetched).toHaveLength(1);
+});
+
+test("at rest a hover card is out of the page's text, so it isn't copied or found", async ({ page }) => {
+  await page.goto("/");
+  const copied = await page.locator('[data-slug="canberra-events"]').evaluate((item) => {
+    getSelection()!.selectAllChildren(item);
+    return getSelection()!.toString();
+  });
+  expect(copied).toContain("canberra.events");
+  expect(copied).not.toContain("click for the label");
+});
+
+test("Escape dismisses a hovered card until the pointer leaves the line", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Escape");
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toBeHidden();
+  await page.locator("h1").hover();
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+});
+
+test("focusing the pill shows the card; Escape dismisses it until focus leaves the line", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const pill = item.locator(".peek");
+  const card = item.locator(".hovercard");
+  // Focus from script counts as visible focus in both engines (WebKit on macOS doesn't Tab to buttons)
+  await pill.focus();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Escape");
+  await expect(pill).toBeFocused();
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toBeHidden();
+  await page.locator('[data-slug="linear-gratis"] .peek').focus();
+  await pill.focus();
+  await expect(card).toHaveCSS("opacity", "1");
+});
+
+test("Escape on an open label closes it and returns focus to the pill without bringing its card up", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const pill = item.locator(".peek");
+  const card = item.locator(".hovercard");
+  await pill.focus();
+  await page.keyboard.press("Enter");
+  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(card).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(pill).toHaveAttribute("aria-expanded", "false");
+  await expect(pill).toBeFocused();
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toBeHidden();
+});
+
 test("a line without a snapshot has no hover card, and its label no frame", async ({ page }) => {
   await page.goto("/");
   const item = page.locator('[data-slug="linear-gratis"]');
@@ -148,6 +227,22 @@ test("find-in-page opens a label at once", async ({ page }) => {
     return item.classList.contains("open") && item.querySelector(".peek")!.getAttribute("aria-expanded") === "true";
   });
   expect(opened).toBe(true);
+});
+
+test("find-in-page with JavaScript on loads the frame's snapshot", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  const [request] = await Promise.all([
+    page.waitForRequest(SNAPSHOT),
+    // What find-in-page does to a match inside hidden="until-found": beforematch, then the attribute goes
+    item.locator(".drawer").evaluate((drawer) => {
+      drawer.dispatchEvent(new Event("beforematch"));
+      drawer.removeAttribute("hidden");
+    }),
+  ]);
+  expect(request.url()).toMatch(/fixture-digital-nachos-(480|960)\.(avif|webp)$/);
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(() => item.locator(".frame img").evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)).toBe(true);
 });
 
 test.describe("snapshots without JavaScript", () => {

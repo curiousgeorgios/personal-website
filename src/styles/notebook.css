@@ -92,14 +92,15 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 .hovercard {
   position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 5; width: 232px; padding: 7px 7px 8px; pointer-events: none;
   background: var(--mat); box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 4px rgba(0, 0, 0, .05), 0 18px 34px -14px rgba(0, 0, 0, .32);
-  opacity: 0; transform: translateX(-50%) translateY(6px) scale(.94); transform-origin: 50% 100%;
-  transition: opacity 140ms ease, transform 200ms var(--ease-out);
+  opacity: 0; visibility: hidden; transform: translateX(-50%) translateY(6px) scale(.94); transform-origin: 50% 100%;
+  /* Visible only while shown or fading out, so at rest its caption is neither copied nor found by find-in-page */
+  transition: opacity 140ms ease, transform 200ms var(--ease-out), visibility 0s linear 140ms;
 }
 .hovercard img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; background: #ecebe5; box-shadow: 0 0 0 1px rgba(0, 0, 0, .07); }
 .hovercard .cap { display: block; margin-top: 6px; font: 11px/1.4 var(--mono); color: var(--muted); text-align: center; }
 @media (hover: hover) and (pointer: fine) {
-  .line-item:not(.open) > .line:hover .hovercard.ready,
-  .line-item:not(.open) .peek:focus-visible + .hovercard.ready { opacity: 1; transform: translateX(-50%); transition-delay: 90ms; }
+  .line-item:not(.open):not(.dismissed) > .line:hover .hovercard.ready,
+  .line-item:not(.open):not(.dismissed) .peek:focus-visible + .hovercard.ready { opacity: 1; visibility: visible; transform: translateX(-50%); transition-delay: 90ms; }
 }
 @media (hover: none), (pointer: coarse) { .hovercard { display: none; } }
 
@@ -110,16 +111,19 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 .wall.no-shot .frame { display: none; }
 .frame {
   display: block; width: 100%; padding: 12px; border: 0; background: var(--mat); cursor: zoom-in;
+  margin-bottom: 48px; /* room for its hover shadow, which paints 48px below it, when the tag beside it is shorter */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, .05), 0 1px 2px rgba(0, 0, 0, .04), 0 14px 28px -16px rgba(0, 0, 0, .28);
 }
 .frame img { display: block; width: 100%; height: auto; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); }
-.frame:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -6px; } /* inside the mat: the drawer clips anything outside */
+.frame:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -6px; border-radius: 0; } /* inside the mat, and square like it */
 @media (hover: hover) and (pointer: fine) {
   .frame { transition: box-shadow 200ms ease; }
   .frame:hover { box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 3px rgba(0, 0, 0, .05), 0 20px 36px -16px rgba(0, 0, 0, .34); }
 }
 .drawer { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 300ms var(--ease-out-quint); }
-.drawer > .drawer-inner { overflow: hidden; }
+/* The frame's ring and shadows paint past its box (its hover shadow 28px either side), so the clipping box reaches out
+   sideways to leave them room. Only sideways: vertical padding would keep a closed drawer from shrinking to 0px */
+.drawer > .drawer-inner { overflow: hidden; margin-inline: -28px; padding-inline: 28px; }
 .line-item.open > .drawer { grid-template-rows: 1fr; }
 .tag { padding: 14px 0 20px; font-size: 14.5px; line-height: 1.5; max-width: 30rem; }
 .tag .status { font: 11.5px/1.5 var(--mono); color: var(--muted); display: flex; align-items: center; gap: 7px; }
@@ -179,10 +183,10 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
   .fact + .fact { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
   .log li { grid-template-columns: 76px 1fr; }
   .wall.framed { grid-template-columns: 1fr; gap: 14px; }
-  .frame { max-width: 320px; }
+  .frame { max-width: 320px; margin-bottom: 0; } /* the tag below it leaves its shadow room */
 }
 
 @media (prefers-reduced-motion: reduce) {
   .drawer, .log .older, .peek .plus, .more .chev { transition: none; }
-  .hovercard { transform: translateX(-50%); transition: opacity 140ms ease; }
+  .hovercard { transform: translateX(-50%); transition: opacity 140ms ease, visibility 0s linear 140ms; }
 }
