@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { contextOptions } from "../../src/deck/webgl";
 import { hasWebGL, settled, SLOW } from "./deck";
 
 // Spec 11 on every run: interaction to next paint under 200ms at 4× CPU and layout shift under 0.01 at phone width.
@@ -8,6 +9,15 @@ test.skip(({ browserName }) => browserName !== "chromium", "CPU throttling and E
 test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured locally");
 
 async function throttled(page: Page) {
+  // Timing uses production's context policy; the functional scene specs still accept software WebGL.
+  await page.addInitScript((productionOptions) => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      value(this: HTMLCanvasElement, type: string, options?: object) {
+        return original.call(this, type, type.startsWith("webgl") ? { ...options, ...productionOptions } : options);
+      },
+    });
+  }, contextOptions(false));
   await page.goto("/", { waitUntil: "load" });
   // The scene boots in an idle callback once the turntable row is near (long tasks of its own), so let it finish before
   // throttling: the gates measure the interactions, not the boot. Then back to the top, as a visitor starts.
