@@ -10,14 +10,15 @@ const FORMATS = [
 
 export interface Variant {
   key: string;
-  type: "image/avif" | "image/webp";
+  type: string;
   bytes: Uint8Array;
 }
 
 /**
- * A capture's six files: AVIF and WebP at 480, 960 and 1920 wide (scaled down, aspect kept), each stepped down in
+ * A capture's six files: requested AVIF and WebP at 480, 960 and 1920 wide (scaled down, aspect kept), each stepped down in
  * quality until it fits its budget. One that never fits keeps the smallest it tried, which needn't be the last (an
  * encoder isn't always monotonic in quality); the snapshot matters more than a budget, and the warning lands in Workers Logs.
+ * Images can return WebP or JPEG for a large AVIF request, so the stored type follows the selected encoded bytes.
  */
 export async function makeVariants(images: ImagesBinding, png: Uint8Array, base: string): Promise<Variant[]> {
   const source = new Blob([png.slice()]);
@@ -25,17 +26,17 @@ export async function makeVariants(images: ImagesBinding, png: Uint8Array, base:
   for (const width of SNAPSHOT_WIDTHS) {
     const budget = VARIANT_BUDGETS[width];
     for (const { format, type } of FORMATS) {
-      let smallest: Uint8Array | undefined;
+      let smallest: Pick<Variant, "bytes" | "type"> | undefined;
       for (const quality of QUALITIES) {
         const result = await images.input(source.stream()).transform({ width, fit: "scale-down" }).output({ format: type, quality });
         const attempt = new Uint8Array(await new Response(result.image()).arrayBuffer());
-        if (!smallest || attempt.byteLength < smallest.byteLength) smallest = attempt;
+        if (!smallest || attempt.byteLength < smallest.bytes.byteLength) smallest = { bytes: attempt, type: result.contentType() };
         if (budget === undefined || attempt.byteLength < budget) break;
       }
-      const bytes = smallest!;
+      const { bytes, type: contentType } = smallest!;
       const key = snapshotVariant(base, width, format);
       if (budget !== undefined && bytes.byteLength >= budget) console.warn(`snapshots: ${key} is ${bytes.byteLength} bytes, over its ${budget} budget`);
-      variants.push({ key, type, bytes });
+      variants.push({ key, type: contentType, bytes });
     }
   }
   return variants;

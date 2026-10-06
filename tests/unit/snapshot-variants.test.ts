@@ -2,7 +2,10 @@ import { afterEach, expect, test, vi } from "vitest";
 import { makeVariants, VARIANT_BUDGETS } from "../../workers/snapshots/src/variants";
 
 // The Images binding: the size of each output comes from `size(width, format, quality)`
-function fakeImages(size: (width: number, format: string, quality: number) => number) {
+function fakeImages(
+  size: (width: number, format: string, quality: number) => number,
+  contentType: (width: number, format: string, quality: number) => string = (_width, format) => format,
+) {
   const asked: string[] = [];
   return {
     asked,
@@ -17,7 +20,7 @@ function fakeImages(size: (width: number, format: string, quality: number) => nu
         async output({ format, quality }: { format: string; quality: number }) {
           asked.push(`output ${width} ${format} ${quality}`);
           const bytes = new Uint8Array(size(width, format, quality));
-          return { image: () => new Blob([bytes]).stream(), contentType: () => format, response: () => new Response() };
+          return { image: () => new Blob([bytes]).stream(), contentType: () => contentType(width, format, quality), response: () => new Response() };
         },
       };
     },
@@ -28,6 +31,25 @@ afterEach(() => vi.restoreAllMocks());
 
 const png = new Uint8Array(600_000);
 const base = "snapshots/canberra-events-01k6d4x3n9e5r2q7w8y0z1a2b3";
+
+test.each(["image/webp", "image/jpeg"])("keeps the actual %s type when Images falls back from AVIF", async (fallback) => {
+  const images = fakeImages(() => 5_000, (width, format) => width === 1920 && format === "image/avif" ? fallback : format);
+  const variants = await makeVariants(images as unknown as ImagesBinding, png, base);
+  expect(variants.find((variant) => variant.key === `${base}-1920.avif`)?.type).toBe(fallback);
+  expect(variants.find((variant) => variant.key === `${base}-960.avif`)?.type).toBe("image/avif");
+});
+
+test("keeps the encoded type of the smallest attempt when a later attempt is larger", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const sizes: Record<number, number> = { 70: 50_000, 60: 40_000, 50: 35_000, 40: 36_000 };
+  const images = fakeImages(
+    (width, format, quality) => width === 480 && format === "image/avif" ? sizes[quality] : 1_000,
+    (_width, format, quality) => format === "image/avif" ? quality === 50 ? "image/webp" : "image/jpeg" : format,
+  );
+  const variants = await makeVariants(images as unknown as ImagesBinding, png, base);
+  expect(variants[0].bytes.length).toBe(35_000);
+  expect(variants[0].type).toBe("image/webp");
+});
 
 test("makes AVIF and WebP at 480, 960 and 1920 wide, keeping the aspect ratio", async () => {
   const images = fakeImages(() => 5_000);
