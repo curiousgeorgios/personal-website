@@ -307,6 +307,8 @@ Deployment (ADR-0008): GitHub Actions on every push to `main` runs typecheck, un
 
 Launch checklist (only George can do these):
 
+Production setup verified on 6 October 2026: all four D1 migrations applied (11 items, 4 records, 5 log entries), the eight starting-crate files uploaded to R2, all three GitHub deployment secrets present, Workers Builds disconnected, PostHog cookieless mode enabled in the Digital Nachos project (220769), and `POSTHOG_KEY` saved on `personal-website`. Zone checks found Bot Fight Mode and Precursor off, Rocket Loader off, Zaraz inactive, and no custom or rate-limiting rules; Email Address Obfuscation and Cloudflare Web Analytics injection were disabled. The Access application is prepared but awaits approval. The site has not yet been deployed.
+
 - [ ] The real "decision" or "lesson" sentence for each label (Digital Nachos, canberra.events, linear.gratis, onestack.cloud). The prototype's lines are placeholders.
 - [ ] Confirm or rewrite the seeded log entries (dates and wording).
 - [ ] Confirm the shelf and kettle entries.
@@ -315,12 +317,12 @@ Launch checklist (only George can do these):
 - [ ] Create the Cloudflare Access application for `/admin*` (George's identity only, as `hello@curiousgeorge.dev`, the address `ADMIN_EMAIL` names, a 1 month session (`730h` through the API) and its cookie set to SameSite Lax with HttpOnly on: when the session runs out, a save in progress is lost, and `/admin` shows the day it ends), then put its team domain (the host only, like `<team>.cloudflareaccess.com`, no `https://`) and AUD tag in `wrangler.jsonc` under `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), not in the dashboard: each deploy replaces dashboard vars with the file's. Until both are set, `/admin` refuses everyone.
 - [ ] Check the account can use the Images binding (the admin converts record covers with it).
 - [ ] Check the account can use Browser Rendering (the nightly snapshots and "re-shoot now").
-- [ ] Check the Workers plan suits a 15MB upload (`formData()` buffers the whole body; Workers Paid removes the doubt).
-- [ ] Switch on "Cookieless server hash mode" in the PostHog project, then set the project key as a Worker secret: `bunx wrangler secret put POSTHOG_KEY`. Remove the old `NEXT_PUBLIC_POSTHOG_*` lines from your local `.env`.
+- [x] Check the Workers plan suits a 15MB upload (`formData()` buffers the whole body; Workers Paid removes the doubt).
+- [x] Switch on "Cookieless server hash mode" in the PostHog project, then set the project key as a Worker secret: `bunx wrangler secret put POSTHOG_KEY`. Remove the old `NEXT_PUBLIC_POSTHOG_*` lines from your local `.env`.
 - [ ] Apply the zone settings in section 10.
-- [ ] Before the first deploy, create the D1 database (`bunx wrangler d1 create curiousgeorge-logbook --location oc`) and put its id in `wrangler.jsonc` and in `workers/snapshots/wrangler.jsonc`.
-- [ ] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets. Disconnect the Cloudflare dashboard's Git build of the old `personal-website` Worker ("Workers Builds"): it fails on every commit, and GitHub Actions deploys.
-- [ ] Before the first deploy, create the R2 bucket (`bunx wrangler r2 bucket create curiousgeorge-media --location oc`) and upload the starting crate (`bun run seed:media --remote`); the deploy applies the records migration, whose rows point at those files.
+- [x] Before the first deploy, create the D1 database (`bunx wrangler d1 create curiousgeorge-logbook --location oc`) and put its id in `wrangler.jsonc` and in `workers/snapshots/wrangler.jsonc`.
+- [x] Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions secrets. Disconnect the Cloudflare dashboard's Git build of the old `personal-website` Worker ("Workers Builds"): it fails on every commit, and GitHub Actions deploys.
+- [x] Before the first deploy, create the R2 bucket (`bunx wrangler r2 bucket create curiousgeorge-media --location oc`) and upload the starting crate (`bun run seed:media --remote`); the deploy applies the records migration, whose rows point at those files.
 - [ ] Add `CLOUDFLARE_ZONE_ID` to GitHub Actions secrets and give the API token the zone's Cache Purge permission (each deploy purges the cached home page, ADR-0010); after the first deploy, confirm a request to `/` straight after the purge is a cache miss (`cf-cache-status: MISS`).
 - [ ] After the first deploy, open the site once and check PostHog shows the pageview with a country and that no cookie came back. Check that one event from iOS Safari arrives, and one from Firefox. Check that PostHog hashes the visitor's IP from `X-Forwarded-For`: two visits from different networks on the same day count as two visitors, and one visit reloaded counts as one.
 - [ ] After the first real admin save, check `/` shows the change on the next visit (local runs only prove the purge's failure path).

@@ -3,6 +3,7 @@
   // The snapshots Worker (spec 9): a nightly capture of every line with a page to snapshot, and the admin's re-shoot
   // over the main Worker's SNAPSHOTS service binding. No public route.
   "name": "curiousgeorge-snapshots",
+  "account_id": "663b85e4f509df63c1735f6e77db4370",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -13,7 +14,7 @@
   "triggers": { "crons": ["0 17 * * *"] },
   "browser": { "binding": "BROWSER" },
   "images": { "binding": "IMAGES" },
-  // The same database and bucket as the main Worker (the id is filled in at launch, in both files)
+  // The same production database and bucket as the main Worker
   "d1_databases": [
     {
       "binding": "DB",
