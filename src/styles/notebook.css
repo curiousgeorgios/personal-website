@@ -1,0 +1,221 @@
+@font-face { font-family: "Schibsted Grotesk"; src: url("/fonts/schibsted-grotesk.woff2") format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "DM Mono"; src: url("/fonts/dm-mono.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+/* Metric-matched fallbacks (Capsize) so the swap to the web fonts does not move text */
+@font-face { font-family: "Schibsted Grotesk Fallback"; src: local("Arial"), local("ArialMT"); ascent-override: 93.4593%; descent-override: 24.6733%; line-gap-override: 0%; size-adjust: 104.4907%; }
+@font-face { font-family: "DM Mono Fallback"; src: local("Courier New"), local("CourierNewPSMT"); ascent-override: 99.2161%; descent-override: 31.005%; size-adjust: 99.9837%; }
+
+:root {
+  --paper: #f3f2ec;
+  --ink: #1f201c;
+  --muted: #6b6b63;
+  --faint: #b4b3aa;
+  --rule: #dddcd3;
+  --red: #c94a31;
+  --mat: #fbfbf8;
+  --dot: rgba(31, 32, 28, .075);
+  --sans: "Schibsted Grotesk", "Schibsted Grotesk Fallback", Arial, sans-serif;
+  --mono: "DM Mono", "DM Mono Fallback", "Courier New", monospace;
+  --ease-out: cubic-bezier(.215, .61, .355, 1);
+  --ease-out-quint: cubic-bezier(.23, 1, .32, 1);
+  --label-w: 150px;
+  --gap: 40px;
+  color-scheme: light;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; background: var(--paper); }
+body {
+  font-family: var(--sans); font-size: 17px; line-height: 1.55; color: var(--ink);
+  background-color: var(--paper);
+  background-image: radial-gradient(var(--dot) 1px, transparent 1.4px);
+  background-size: 24px 24px;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: #f0d7cf; }
+ul, ol { list-style: none; }
+button { font: inherit; color: inherit; }
+.mono { font-family: var(--mono); }
+
+a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--faint); }
+@media (hover: hover) and (pointer: fine) {
+  a { transition: text-decoration-color 200ms ease; }
+  a:hover { text-decoration-color: var(--red); }
+}
+a:focus-visible, button:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 3px; border-radius: 3px; }
+
+/* The notebook: labels in the margin, content right of the red rule */
+.book { max-width: 940px; margin: 0 auto; padding: clamp(56px, 12vh, 128px) 24px 120px; }
+/* A hover card near the window's edge is cut there rather than scrolling the page sideways */
+.book { overflow-x: clip; }
+.row { display: grid; grid-template-columns: var(--label-w) 1fr; }
+.row > .label {
+  font: 400 12.5px/1.55 var(--mono); color: var(--muted); letter-spacing: .01em;
+  text-align: right; padding: 28px var(--gap) 0 0;
+  display: flex; justify-content: flex-end; align-items: baseline; gap: 8px;
+}
+.row > .body {
+  border-left: 1px solid color-mix(in oklab, var(--red) 62%, transparent);
+  padding: 24px 0 20px var(--gap); min-width: 0; overflow-wrap: anywhere;
+}
+.row.head > .body { padding-top: 0; padding-bottom: 36px; }
+.row.head > .label { padding-top: 14px; }
+.now-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); transform: translateY(-1px); }
+
+h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.018em; line-height: 1.1; }
+.intro { margin-top: 14px; max-width: 30rem; color: #3a3b36; font-size: 18px; }
+.where { margin-top: 18px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.clock { display: inline-block; min-width: 8ch; font-variant-numeric: tabular-nums; }
+.aside { color: var(--muted); }
+
+/* Now and before lines, with wall labels */
+.lines > li { padding: 3px 0; }
+.line-item.labelled > .line { cursor: pointer; }
+.peekwrap { position: relative; display: inline-block; margin-left: 10px; vertical-align: 1px; }
+.peek {
+  font: 11.5px/1 var(--mono); color: var(--muted); cursor: pointer;
+  background: rgba(251, 251, 248, .6); border: 1px solid var(--rule); border-radius: 999px; padding: 4px 9px 4px 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.peek .plus { width: 9px; height: 9px; position: relative; display: inline-block; transition: transform 220ms var(--ease-out); }
+.peek .plus::before, .peek .plus::after { content: ""; position: absolute; background: currentColor; }
+.peek .plus::before { left: 0; right: 0; top: 4px; height: 1px; }
+.peek .plus::after { top: 0; bottom: 0; left: 4px; width: 1px; }
+.line-item.open .peek { color: var(--ink); }
+.line-item.open .peek .plus { transform: rotate(45deg); }
+.peek:active { background: #ebe8df; }
+@media (hover: hover) and (pointer: fine) {
+  .peek { transition: color 200ms ease, border-color 200ms ease, background-color 200ms ease; }
+  .line-item.labelled > .line:hover .peek { color: var(--ink); border-color: color-mix(in oklab, var(--ink) 55%, transparent); background: var(--mat); }
+}
+/* The hover card: the snapshot grows out of the pill on fine pointers, after a 90ms intent delay (spec 4.1). Near the page's
+   edge --nudge (labels.ts) slides it back inside by moving its left, which doesn't animate, so a nudge that changes on the
+   hover that shows it never makes the card slide sideways; the transform origin moves with it, so it still grows from the pill */
+.hovercard {
+  position: absolute; left: calc(50% + var(--nudge, 0px)); bottom: calc(100% + 10px); z-index: 5; width: 232px; padding: 7px 7px 8px; pointer-events: none;
+  background: var(--mat); box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 4px rgba(0, 0, 0, .05), 0 18px 34px -14px rgba(0, 0, 0, .32);
+  opacity: 0; visibility: hidden; transform: translateX(-50%) translateY(6px) scale(.94); transform-origin: calc(50% - var(--nudge, 0px)) 100%;
+  /* Visible only while shown or fading out, so at rest its caption is neither copied nor found by find-in-page */
+  transition: opacity 140ms ease, transform 200ms var(--ease-out), visibility 0s linear 140ms;
+}
+/* Shown, the card takes the pointer and this bridge spans the 10px gap to the pill: both are inside the line, so moving
+   onto the card keeps the line hovered (WCAG 1.4.13), and a click on it opens the line's label */
+.hovercard::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+.hovercard img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; background: #ecebe5; box-shadow: 0 0 0 1px rgba(0, 0, 0, .07); }
+.hovercard .cap { display: block; margin-top: 6px; font: 11px/1.4 var(--mono); color: var(--muted); text-align: center; }
+@media (hover: hover) and (pointer: fine) {
+  .line-item:not(.open):not(.dismissed) > .line:hover .hovercard.ready,
+  .line-item:not(.open):not(.dismissed) .peek:focus-visible + .hovercard.ready { opacity: 1; visibility: visible; transform: translateX(-50%); transition-delay: 90ms; pointer-events: auto; }
+}
+@media (hover: none), (pointer: coarse) { .hovercard { display: none; } }
+
+/* The label's wall: the framed snapshot beside the tag; without a snapshot, or when it won't load, just the tag */
+.wall.framed { display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: start; padding-top: 16px; }
+.wall.framed:not(.no-shot) > .tag { padding-top: 0; }
+.wall.no-shot { display: block; padding-top: 0; }
+.wall.no-shot .frame { display: none; }
+.frame {
+  display: block; width: 100%; padding: 12px; border: 0; background: var(--mat); cursor: zoom-in;
+  margin-bottom: 48px; /* room for its hover shadow, which paints 48px below it, when the tag beside it is shorter */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .05), 0 1px 2px rgba(0, 0, 0, .04), 0 14px 28px -16px rgba(0, 0, 0, .28);
+}
+.frame img { display: block; width: 100%; height: auto; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); }
+.frame:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -6px; border-radius: 0; } /* inside the mat, and square like it */
+@media (hover: hover) and (pointer: fine) {
+  .frame { transition: box-shadow 200ms ease; }
+  .frame:hover { box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 2px 3px rgba(0, 0, 0, .05), 0 20px 36px -16px rgba(0, 0, 0, .34); }
+}
+.drawer { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 300ms var(--ease-out-quint); }
+/* The frame's ring and shadows paint past its box (its hover shadow 28px either side), so the clipping box reaches out
+   sideways to leave them room. Only sideways: vertical padding would keep a closed drawer from shrinking to 0px */
+.drawer > .drawer-inner { overflow: hidden; margin-inline: -28px; padding-inline: 28px; }
+.line-item.open > .drawer { grid-template-rows: 1fr; }
+.tag { padding: 14px 0 20px; font-size: 14.5px; line-height: 1.5; max-width: 30rem; }
+.tag .status { font: 11.5px/1.5 var(--mono); color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.tag .live { width: 7px; height: 7px; border-radius: 50%; background: var(--red); display: inline-block; }
+.tag .made { margin-top: 4px; color: var(--muted); }
+.tag .text { margin-top: 10px; }
+.tag .decision { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.tag .decision span { font: 11.5px/1.5 var(--mono); color: var(--muted); display: block; margin-bottom: 2px; }
+
+/* Lately */
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.fact { padding: 14px 18px 16px 0; }
+.fact + .fact { padding-left: 18px; border-left: 1px solid var(--rule); }
+.fact .k { font: 11.5px/1.5 var(--mono); color: var(--muted); }
+.fact .v { margin-top: 6px; font-size: 15.5px; line-height: 1.4; }
+.fact .v small { display: block; color: var(--muted); font-size: 14px; }
+
+/* Log */
+.log li { display: grid; grid-template-columns: 92px 1fr; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+.log > ul > li:first-child { border-top: 1px solid var(--rule); }
+.log .d { font: 12.5px/1.55 var(--mono); color: var(--muted); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.log .older { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms var(--ease-out); }
+.log .older > .older-inner { overflow: hidden; }
+.log.open .older { grid-template-rows: 1fr; }
+/* Without JavaScript nothing adds .open, so whatever find-in-page reveals opens by itself */
+@media (scripting: none) {
+  .drawer:not([hidden]), .log .older:not([hidden]) { grid-template-rows: 1fr; }
+}
+.more { margin-top: 12px; font: 12.5px/1.55 var(--mono); color: var(--muted); background: none; border: 0; cursor: pointer; padding: 4px 0; display: inline-flex; gap: 8px; align-items: center; }
+/* Drawn chevron: DM Mono has no arrow glyphs */
+.more .chev { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform 220ms var(--ease-out); }
+.log.open .more .chev { transform: translateY(1px) rotate(-135deg); }
+@media (hover: hover) and (pointer: fine) {
+  .more { transition: color 200ms ease; }
+  .more:hover { color: var(--ink); }
+}
+
+/* Turntable empty state, say hi, visitor info */
+.empty { color: var(--muted); }
+.links { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.visitor { display: grid; grid-template-columns: 96px 1fr; font-size: 14.5px; border-top: 1px solid var(--rule); max-width: 30rem; }
+.visitor dt, .visitor dd { padding: 7px 0; border-bottom: 1px solid var(--rule); }
+.visitor dt { font: 12px/1.5 var(--mono); color: var(--muted); padding-top: 9px; }
+.signoff { margin-top: 18px; font-size: 14px; color: var(--muted); }
+.home { margin-top: 10px; }
+
+/* The closer look: a modal dialog over a paper veil; the image grows from its frame and goes back (spec 4.1) */
+.closer {
+  --room: max(6vh, 72px); /* above and below the picture; the close pill (16px from the top, 44px tall) always has its room */
+  position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0;
+  padding: var(--room) 6vw; border: 0; background: transparent; color: var(--ink); place-items: center; cursor: zoom-out; overflow: hidden;
+}
+.closer[open] { display: grid; }
+.closer::backdrop { background: transparent; }
+.closer::before { content: ""; position: fixed; inset: 0; background: rgba(243, 242, 236, .96); opacity: 0; transition: opacity 260ms ease; }
+.closer.on::before { opacity: 1; }
+.closer picture { position: relative; display: block; max-width: 100%; max-height: 100%; }
+.closer img {
+  /* The window sets its size, not the file it shows (the frame's own picture first, then the 1920): every snapshot is
+     16:10, so the width alone fixes the box, and swapping the big file in can't move it */
+  display: block; width: min(88vw, calc((100vh - 2 * var(--room)) * 1.6)); height: auto; aspect-ratio: 16 / 10; transform-origin: 0 0;
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .4), 0 0 0 1px rgba(0, 0, 0, .08);
+}
+.closer-close {
+  position: fixed; top: 16px; right: 16px; z-index: 1; min-height: 44px; padding: 0 14px; cursor: pointer;
+  font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat); border: 1px solid var(--rule); border-radius: 999px;
+}
+html:has(.closer[open]) { overflow: hidden; } /* closer.ts holds a classic scrollbar's width as padding, so the page stays put */
+
+@media (max-width: 680px) {
+  :root { --label-w: 0px; --gap: 18px; }
+  .row { grid-template-columns: 1fr; }
+  .row > .label {
+    text-align: left; justify-content: flex-start; padding: 22px 0 0 calc(var(--gap) + 1px);
+    border-left: 1px solid color-mix(in oklab, var(--red) 62%, transparent);
+  }
+  .row > .body { padding-top: 8px; }
+  .row.head > .label { display: none; }
+  .facts { grid-template-columns: 1fr; }
+  .fact + .fact { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .log li { grid-template-columns: 76px 1fr; }
+  .wall.framed { grid-template-columns: 1fr; gap: 14px; }
+  .frame { max-width: 320px; margin-bottom: 0; } /* the tag below it leaves its shadow room */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .log .older, .peek .plus, .more .chev { transition: none; }
+  .hovercard { transform: translateX(-50%); transition: opacity 140ms ease, visibility 0s linear 140ms; }
+  .closer::before { transition: none; }
+}

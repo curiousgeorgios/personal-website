@@ -1,0 +1,81 @@
+---
+import Inline from "./Inline.astro";
+import { primaryName } from "../lib/text";
+import { snapshotVariant, type SnapshotFormat, type SnapshotWidth } from "../lib/snapshots";
+import type { Item } from "../lib/logbook";
+interface Props {
+  items: Item[];
+}
+const { items } = Astro.props;
+// Snapshots (spec 4.1). The hover card's picture waits in data attributes until the first hover or focus on a fine
+// pointer (src/scripts/labels.ts). The frame's is lazy inside a hidden drawer, so it loads
+// only when the label opens (browsers ignore lazy loading without JavaScript, so then it comes with the page). The frame
+// links to the big file, so without JavaScript it opens that; with it, src/scripts/closer.ts opens the closer look instead.
+const file = (base: string, width: SnapshotWidth, format: SnapshotFormat) => `/media/${snapshotVariant(base, width, format)}`;
+const FRAME_SIZES = "(max-width: 680px) 320px, 240px";
+---
+<ul class="lines">
+  {items.map((item) => {
+    const name = primaryName(item.text);
+    const shot = item.label?.snapshotKey ?? null;
+    return (
+      <li class:list={["line-item", { labelled: item.label }]} data-slug={item.slug}>
+        <div class="line">
+          <Inline source={item.text} />{item.aside && <span class="aside"> - {item.aside}</span>}
+          {item.label && (
+            <span class="peekwrap">
+              <button class="peek" type="button" aria-expanded="false" aria-controls={`label-${item.slug}`} aria-label={`label for ${name}`}>
+                <span class="plus" aria-hidden="true"></span>label
+              </button>
+              {shot && (
+                <span class="hovercard" aria-hidden="true">
+                  <picture>
+                    <source type="image/avif" data-srcset={file(shot, 480, "avif")} />
+                    <img data-src={file(shot, 480, "webp")} alt="" width="218" height="136" decoding="async" />
+                  </picture>
+                  <span class="cap">click for the label</span>
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        {item.label && (
+          <div class="drawer" id={`label-${item.slug}`} hidden="until-found">
+            <div class="drawer-inner">
+              <div class:list={["wall", { framed: shot }]}>
+                {shot && (
+                  <a class="frame" href={file(shot, 1920, "webp")} aria-label={`look closer at ${name}`} data-closer-avif={file(shot, 1920, "avif")} data-closer-webp={file(shot, 1920, "webp")}>
+                    <picture>
+                      <source type="image/avif" srcset={`${file(shot, 480, "avif")} 480w, ${file(shot, 960, "avif")} 960w`} sizes={FRAME_SIZES} />
+                      <img
+                        src={file(shot, 480, "webp")}
+                        srcset={`${file(shot, 480, "webp")} 480w, ${file(shot, 960, "webp")} 960w`}
+                        sizes={FRAME_SIZES}
+                        alt={`a snapshot of ${name}`}
+                        width="1440"
+                        height="900"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </picture>
+                  </a>
+                )}
+                <div class="tag">
+                  <p class="status">
+                    {item.label.status === "live" ? <><span class="live" aria-hidden="true"></span>live and in use</> : "retired"}{item.label.era && <> · {item.label.era}</>}
+                  </p>
+                  {item.label.madeOf && <p class="made">made of {item.label.madeOf}</p>}
+                  {item.label.text && <p class="text">{item.label.text}</p>}
+                  {item.label.kind && item.label.note && <p class="decision"><span>the {item.label.kind}</span>{item.label.note}</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  })}
+</ul>
+<script>
+  import "../scripts/labels";
+</script>

@@ -1,0 +1,38 @@
+---
+import { formatLogDate } from "../lib/text";
+import type { LogEntry } from "../lib/logbook";
+interface Props {
+  entries: LogEntry[];
+}
+const { entries } = Astro.props;
+const visible = entries.slice(0, 3);
+const older = entries.slice(3);
+---
+<div class="log">
+  <ul>
+    {visible.map((entry) => (
+      <li><time class="d" datetime={entry.precision === "month" ? entry.date.slice(0, 7) : entry.date}>{formatLogDate(entry.date, entry.precision)}</time><span>{entry.text}</span></li>
+    ))}
+  </ul>
+  {older.length > 0 && (
+    <>
+      <div class="older" id="older-entries" hidden="until-found">
+        <div class="older-inner">
+          <ul>
+            {older.map((entry) => (
+              <li><time class="d" datetime={entry.precision === "month" ? entry.date.slice(0, 7) : entry.date}>{formatLogDate(entry.date, entry.precision)}</time><span>{entry.text}</span></li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <button class="more" type="button" aria-expanded="false" aria-controls="older-entries">
+        <span class="chev" aria-hidden="true"></span><span class="lbl">older entries</span>
+      </button>
+    </>
+  )}
+</div>
+{older.length > 0 && (
+  <script>
+    import "../scripts/log-toggle";
+  </script>
+)}

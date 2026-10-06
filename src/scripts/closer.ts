@@ -1,0 +1,165 @@
+// The closer look (spec 4.1): a framed snapshot grows from its frame to fit the window over a paper veil (FLIP, 420ms
+// ease-out-quint), and goes back into its frame (300ms ease-out) on a click, the close button or Esc. It opens at once
+// with the frame's own picture, which is already here, and the 1920px file takes its place once it has arrived, so a slow
+// or missing file never holds anything up. The dialog is modal, so focus moves into it, and returns to the frame.
+// Nothing moves under reduced motion.
+const dialog = document.querySelector<HTMLDialogElement>("dialog.closer");
+const big = dialog?.querySelector("img");
+const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+// The transform that puts `to` where `from` is
+const flip = (from: DOMRect, to: DOMRect) => `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
+// The image's box with no transform, for a FLIP to aim at. A grow still running when it's closed is put back as it was,
+// with no frame painted between, so the close starts from where the image has got to
+function restBox(img: HTMLElement) {
+  const now = getComputedStyle(img).transform;
+  img.style.transition = "none";
+  img.style.transform = "none";
+  const box = img.getBoundingClientRect();
+  img.style.transform = now;
+  img.getBoundingClientRect(); // settles the style, so the transition that follows starts from `now`
+  return box;
+}
+const PICTURE_WAIT = 3000; // ms a click waits for its frame's own picture
+let frame: HTMLAnchorElement | null = null; // the frame whose snapshot is in the dialog
+let opening = false; // a frame's picture is still decoding: one open at a time
+let closing = false;
+let timer = 0;
+
+const empty = () => big?.removeAttribute("src");
+
+// The big file in the format the frame's own picture chose (AVIF where the browser takes it)
+const bigFile = (link: HTMLAnchorElement, shot: HTMLImageElement) => (shot.currentSrc.endsWith(".avif") ? link.dataset.closerAvif : link.dataset.closerWebp) ?? "";
+
+// Loads the big file on the side and swaps it in once decoded, unless this look has closed meanwhile. The window sets the
+// image's box, not the file, so the swap moves nothing; a file that won't load leaves the frame's picture, which fits too
+function swapIn(link: HTMLAnchorElement, url: string) {
+  if (!url) return;
+  const loader = new Image();
+  loader.src = url;
+  loader.decode().then(
+    () => {
+      if (frame === link && !closing && big) big.src = url;
+    },
+    () => {},
+  );
+}
+
+// Resolves once the frame's own picture has loaded or failed, or after `ms`
+function arrival(shot: HTMLImageElement, ms: number) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(wait);
+      shot.removeEventListener("load", done);
+      shot.removeEventListener("error", done);
+      resolve();
+    };
+    const wait = setTimeout(done, ms);
+    shot.addEventListener("load", done);
+    shot.addEventListener("error", done);
+  });
+}
+
+async function open(link: HTMLAnchorElement) {
+  if (!dialog || !big || dialog.open || opening) return;
+  const shot = link.querySelector("img");
+  if (!shot) return;
+  opening = true;
+  // One deadline for both waits below, so a click lets go within PICTURE_WAIT in all
+  const until = performance.now() + PICTURE_WAIT;
+  // Chromium leaves currentSrc empty until the frame's own picture has arrived, so a click on a frame just shown, or on a
+  // slow file, waits for it within the same few seconds. Eager, so a lazy frame out of view fetches it too
+  if (!shot.currentSrc && !shot.complete) {
+    shot.loading = "eager";
+    await arrival(shot, PICTURE_WAIT);
+  }
+  const own = shot.currentSrc;
+  if (own) {
+    big.src = own;
+    big.alt = shot.alt;
+    dialog.setAttribute("aria-label", `closer look: ${shot.alt}`);
+    // Decoded already once the frame shows. A frame clicked before its picture arrived waits for it (fetched here too, as
+    // a lazy frame out of view never fetches its own), but only a few seconds, so a picture that never comes doesn't hold
+    // every other frame up. Nothing opens then: a look appearing long after the click would be a surprise
+    await Promise.race([big.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, Math.max(0, until - performance.now())))]);
+  }
+  opening = false;
+  // The label may have been closed meanwhile (its pill's aria-expanded is the state), and nothing opens over that
+  const labelOpen = link.isConnected && link.closest(".line-item")?.querySelector(".peek")?.getAttribute("aria-expanded") === "true";
+  if (!own || !labelOpen || big.naturalWidth === 0) return empty();
+  frame = link;
+  // A classic scrollbar goes while the dialog is open (overflow: hidden), and the page would shift under the picture and
+  // its frame. Its width stays as padding instead: scrollbar-gutter doesn't hold on the root in Chromium (ADR-0015)
+  const bar = Math.max(0, innerWidth - document.documentElement.clientWidth);
+  if (bar) document.documentElement.style.paddingRight = `${bar}px`;
+  dialog.showModal();
+  const from = shot.getBoundingClientRect(); // reading a rect also settles the dialog's first style, so the veil fades in from clear
+  dialog.classList.add("on");
+  shot.style.visibility = "hidden";
+  swapIn(link, bigFile(link, shot));
+  if (reduced()) return;
+  big.style.transition = "none";
+  big.style.transform = flip(from, big.getBoundingClientRect());
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      if (closing) return; // closed in these two frames: the close has its own transform
+      big.style.transition = "transform 420ms var(--ease-out-quint)";
+      big.style.transform = "none";
+    }),
+  );
+}
+
+// Back in the frame: its snapshot shown, the dialog emptied and focus on the frame. A close the browser forces comes
+// here too, as it cuts the return short
+function restore() {
+  if (!dialog || !big || !frame) return;
+  const link = frame;
+  const shot = link.querySelector("img");
+  window.clearTimeout(timer);
+  big.removeEventListener("transitionend", restore);
+  if (dialog.open) dialog.close();
+  if (shot) shot.style.visibility = "";
+  big.style.transition = "none";
+  big.style.transform = "";
+  empty();
+  document.documentElement.style.paddingRight = "";
+  closing = false;
+  frame = null;
+  link.focus();
+}
+
+function close() {
+  if (!dialog?.open || !big || !frame || closing) return;
+  const shot = frame.querySelector("img");
+  closing = true;
+  dialog.classList.remove("on");
+  if (reduced() || !shot) return restore();
+  const rest = restBox(big);
+  big.style.transition = "transform 300ms var(--ease-out)";
+  big.style.transform = flip(shot.getBoundingClientRect(), rest);
+  big.addEventListener("transitionend", restore, { once: true });
+  timer = window.setTimeout(restore, 400); // in case the transition never ends (a tab in the background)
+}
+
+if (dialog) {
+  // A frame is a link to its big file, which is what it opens without this script (or with a modifier key, in a new tab)
+  document.querySelectorAll<HTMLAnchorElement>("a.frame").forEach((link) =>
+    link.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      void open(link);
+    }),
+  );
+  // The veil, the image and the close button all put it back. The second click of a double click on a frame lands here
+  // once the look has opened, and isn't a request to close it (a keyboard press on the close button has detail 0)
+  dialog.addEventListener("click", (event) => {
+    if (event.detail > 1) return;
+    close();
+  });
+  // Esc closes the closer look first; the label's own Esc handler only hears the next one, once focus is back in it
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    close();
+  });
+  // A second Esc inside the return can't be stopped: the browser closes the dialog itself, so settle it at once
+  dialog.addEventListener("close", restore);
+}

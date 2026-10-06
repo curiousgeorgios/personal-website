@@ -1,13 +1,28 @@
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "personal-website",
-  "compatibility_date": "2024-09-23",
+  "account_id": "663b85e4f509df63c1735f6e77db4370",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "main": ".open-next/worker.js",
-  "assets": {
-    "directory": ".open-next/assets",
-    "binding": "ASSETS"
-  },
-  "build": {
-    "command": "npm install && npm run cf:build"
-  }
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  "observability": { "logs": { "enabled": true } },
+  // Cloudflare Access for /admin (spec 7), and the one address it
+  // lets in (ADR-0016; empty refuses everyone); and PostHog's US ingestion host for the /ingest proxy, whose project key
+  // is a secret (wrangler secret put POSTHOG_KEY).
+  "vars": { "ACCESS_TEAM_DOMAIN": "digitalnachos.cloudflareaccess.com", "ACCESS_AUD": "ce587b3b3fbc4cbda410abd08f68a66dbc10a6379a99a6a162832246146c90fa", "ADMIN_EMAIL": "hello@curiousgeorge.dev", "POSTHOG_HOST": "https://us.i.posthog.com" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "curiousgeorge-logbook",
+      "database_id": "20080574-8bbc-41c5-899e-543143d10bc7",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "curiousgeorge-media" }],
+  "images": { "binding": "IMAGES" },
+  // The admin's "re-shoot now" calls the snapshots Worker over RPC (spec 9)
+  "services": [{ "binding": "SNAPSHOTS", "service": "curiousgeorge-snapshots" }]
 }

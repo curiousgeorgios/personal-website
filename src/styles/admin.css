@@ -1,0 +1,101 @@
+/* The admin page: the logbook's paper and type, with forms that work on a phone (spec 7) */
+:root {
+  /* --red is under 4.5:1 on paper for small text; this darker red is 5.6:1 */
+  --error: #a83a24;
+  /* A form control's edge has to be 3:1 against the page (WCAG 1.4.11); --rule is 1.3:1, so it stays for decorative lines. This is 3.3:1 on paper and 3.6:1 on --mat */
+  --field-line: #85857d;
+}
+
+.admin h3 { font: 400 12.5px/1.55 var(--mono); color: var(--muted); }
+.admin .hint { font-size: 14px; color: var(--muted); }
+.admin .error { font-size: 14px; color: var(--error); }
+/* A message about the page, not one form: first in the page and stuck to the top, because a failed post reloads at its
+   own form's #id and would scroll it out of sight above the viewport */
+.admin .page-error {
+  position: sticky; top: 0; z-index: 1;
+  font-size: 14px; line-height: 1.5; color: var(--error); background: var(--mat);
+  border: 1px solid var(--error); border-radius: 4px; padding: 10px 14px; margin-bottom: 14px;
+}
+.admin .notice {
+  font: 12.5px/1.55 var(--mono); color: var(--ink); background: var(--mat);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; max-width: 34rem;
+}
+
+.admin-form { display: grid; gap: 12px; padding: 12px 0 20px; max-width: 34rem; }
+/* Breathing room above a form the fragment scroll lands on. With a stuck page message showing, scroll-padding clears it
+   (for the fragment scroll and for focus scrolls alike), so the two don't add up. */
+.admin-form, .admin details, .snapshots .reshoot { scroll-margin-top: 1rem; }
+html:has(.page-error) { scroll-padding-top: 4.5rem; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field label { font: 12px/1.5 var(--mono); color: var(--muted); }
+.field input, .field textarea, .field select {
+  /* 16px keeps iOS from zooming into a focused field */
+  font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink);
+  background: var(--mat); border: 1px solid var(--field-line); border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+.field textarea { resize: vertical; min-height: 4.6em; }
+.field input[type="file"] { background: transparent; padding: 6px 0; border: 0; }
+.field.invalid input, .field.invalid textarea, .field.invalid select { border-color: var(--error); }
+.field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible, .button:focus-visible, .admin summary:focus-visible {
+  outline: 1.5px solid var(--ink); outline-offset: 2px;
+}
+/* notebook.css squares every focused button to 3px, which would turn the pill square under the keyboard */
+.button:focus-visible { border-radius: 999px; }
+
+.button {
+  justify-self: start; min-height: 44px; padding: 0 16px; cursor: pointer;
+  font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat);
+  border: 1px solid var(--rule); border-radius: 999px;
+}
+.button.quiet { background: transparent; }
+.button:disabled { color: var(--faint); cursor: default; }
+.button:active:not(:disabled) { background: #ebe8df; }
+@media (hover: hover) and (pointer: fine) {
+  .button { transition: border-color 200ms ease, background-color 200ms ease; }
+  .button:hover:not(:disabled) { border-color: color-mix(in oklab, var(--ink) 55%, transparent); }
+}
+
+.facts-admin { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; max-width: 40rem; }
+.snapshots { border-top: 1px solid var(--rule); max-width: 40rem; margin-bottom: 10px; }
+.snapshots li { display: grid; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 14.5px; }
+.snapshots .url { color: var(--muted); }
+.snapshots .status { font: 12px/1.5 var(--mono); color: var(--muted); }
+
+@media (max-width: 680px) {
+  .facts-admin { grid-template-columns: 1fr; }
+}
+
+/* Lines, log entries and records: each opens in place to edit, with its move buttons beside it */
+.entries { border-top: 1px solid var(--rule); max-width: 40rem; }
+.entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.entry > details { min-width: 0; }
+.entry summary { cursor: pointer; padding: 8px 0; min-height: 44px; }
+.entry .tagged { margin-left: 8px; font: 11.5px/1 var(--mono); color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 7px; }
+.move { display: flex; gap: 6px; padding-top: 2px; }
+.add { margin-top: 16px; max-width: 40rem; }
+.add > summary { cursor: pointer; font: 12.5px/1.55 var(--mono); color: var(--muted); padding: 12px 0; min-height: 44px; }
+.label-fields { border: 0; border-top: 1px solid var(--rule); padding-top: 12px; display: grid; gap: 12px; min-width: 0; }
+.label-fields legend { font: 12px/1.5 var(--mono); color: var(--muted); padding-right: 8px; }
+.remove { border-top: 1px dashed var(--rule); }
+.confirm { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 14.5px; }
+.confirm input { width: 18px; height: 18px; accent-color: var(--error); }
+
+@media (max-width: 680px) {
+  .entry { grid-template-columns: minmax(0, 1fr); }
+}
+.entry .when { font: 12.5px/1.55 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+/* Records: a small cover beside each, and its controls */
+.admin .count { font: 12.5px/1.55 var(--mono); color: var(--muted); margin-bottom: 10px; }
+.admin h3 + .records-admin { margin-top: 6px; }
+.records-admin + h3 { margin-top: 20px; }
+.records-admin .entry { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.records-admin .cover { width: 40px; height: 40px; margin-top: 4px; border-radius: 3px; object-fit: cover; background: var(--rule); }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (max-width: 680px) {
+  .records-admin .entry { grid-template-columns: 40px minmax(0, 1fr); }
+  .records-admin .controls { grid-column: 2; }
+}
+
+.snapshots .reshoot { display: grid; gap: 6px; justify-items: start; margin-top: 6px; }

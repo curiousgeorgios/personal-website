@@ -1,0 +1,16 @@
+---
+import type { Fact } from "../lib/logbook";
+interface Props {
+  facts: Fact[];
+}
+const names = { shelf: "on the shelf", kettle: "in the kettle" } as const;
+const { facts } = Astro.props;
+---
+<div class="facts">
+  {facts.map((fact) => (
+    <div class="fact">
+      <div class="k">{names[fact.key]}</div>
+      <div class="v">{fact.title}{fact.subtitle && <small>{fact.subtitle}</small>}</div>
+    </div>
+  ))}
+</div>

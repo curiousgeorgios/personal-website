@@ -1,0 +1,18 @@
+---
+interface Props {
+  label: string;
+  id?: string;
+  now?: boolean;
+  head?: boolean;
+}
+const { label, id, now = false, head = false } = Astro.props;
+const labelId = id ? `${id}-label` : undefined;
+---
+<section class:list={["row", { head }]} id={id} aria-labelledby={labelId}>
+  {head ? (
+    <p class="label">{label}</p>
+  ) : (
+    <h2 class="label" id={labelId}>{now && <span class="now-dot" aria-hidden="true"></span>}{label}</h2>
+  )}
+  <div class="body"><slot /></div>
+</section>

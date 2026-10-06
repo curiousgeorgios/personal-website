@@ -1,0 +1,16 @@
+---
+import { formatLogDate } from "../lib/text";
+import type { LogEntry } from "../lib/logbook";
+interface Props {
+  lastEntry: LogEntry | null;
+}
+const { lastEntry } = Astro.props;
+---
+<h1>george vlachos</h1>
+<p class="intro">i build software that does the hard part, so people can get back to the human part.</p>
+<p class="where">
+  sydney · <span class="clock" data-sydney-time>–</span>{lastEntry && <> · last entry {formatLogDate(lastEntry.date, lastEntry.precision)}</>}
+</p>
+<script>
+  import "../scripts/clock";
+</script>

@@ -1,0 +1,53 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../../layouts/Notebook.astro";
+import Row from "../../components/Row.astro";
+import AdminRow from "../../components/admin/AdminRow.astro";
+import ItemsAdmin from "../../components/admin/ItemsAdmin.astro";
+import LogAdmin from "../../components/admin/LogAdmin.astro";
+import RecordsAdmin from "../../components/admin/RecordsAdmin.astro";
+import LatelyAdmin from "../../components/admin/LatelyAdmin.astro";
+import SnapshotsAdmin from "../../components/admin/SnapshotsAdmin.astro";
+import { sessionEnds } from "../../lib/admin/access";
+import type { ActionFailure, AdminSection } from "../../lib/admin/actions";
+import { loadAdmin } from "../../lib/admin/store";
+import { submitForm } from "../../lib/admin/submit";
+import "../../styles/admin.css";
+
+const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records", "snapshots"];
+
+// Every write (spec 7). Success redirects with 303 (post, redirect, get), so a reload never repeats a write; a failure
+// renders the page again below with its status (422, or 500 when something unexpected broke) and the failed form open.
+let failure: ActionFailure | null = null;
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData().catch(() => null);
+  const deps = { db: env.DB, media: env.MEDIA, images: env.IMAGES, snapshots: env.SNAPSHOTS };
+  const outcome = await submitForm(form, deps, Astro.cache, (promise) => Astro.locals.cfContext.waitUntil(promise));
+  if ("redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
+  failure = outcome.failure;
+  Astro.response.status = outcome.status;
+}
+
+const data = await loadAdmin(env.DB);
+const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url.searchParams.get("saved")) ?? null);
+const savedLine = Astro.url.searchParams.has("later") ? "saved - the logbook may show the old version for a little while." : "saved - it's on the logbook now.";
+const notice = (section: AdminSection) => (section === saved ? savedLine : null);
+// When the Access session runs out (its time on the last day), so George can reload before typing rather than lose a save; none under the local bypass
+const until = Astro.locals.adminUntil === undefined ? null : sessionEnds(Astro.locals.adminUntil);
+---
+<Notebook title="admin · george vlachos" noindex>
+  <main class="book admin">
+    {/* First in the page and stuck to the top: every form posts to its own #id, so the browser scrolls past the head row */}
+    {failure && failure.section === null && <p class="page-error" role="alert">{failure.errors.form}</p>}
+    <Row label="admin" head>
+      <h1>admin</h1>
+      <p class="where">signed in as {Astro.locals.adminEmail}{until && ` until ${until}`} · <a href="/">the logbook</a></p>
+    </Row>
+    <AdminRow label="now" id="now" notice={notice("now")}><ItemsAdmin section="now" items={data.now} failure={failure} /></AdminRow>
+    <AdminRow label="lately" id="lately" notice={notice("lately")}><LatelyAdmin facts={data.facts} failure={failure} /></AdminRow>
+    <AdminRow label="log" id="log" notice={notice("log")}><LogAdmin entries={data.log} failure={failure} /></AdminRow>
+    <AdminRow label="records" id="records" notice={notice("records")}><RecordsAdmin records={data.records} failure={failure} /></AdminRow>
+    <AdminRow label="before" id="before" notice={notice("before")}><ItemsAdmin section="before" items={data.before} failure={failure} /></AdminRow>
+    <AdminRow label="snapshots" id="snapshots" notice={notice("snapshots")}><SnapshotsAdmin items={[...data.now, ...data.before]} failure={failure} /></AdminRow>
+  </main>
+</Notebook>

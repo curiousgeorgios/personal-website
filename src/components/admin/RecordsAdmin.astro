@@ -1,0 +1,80 @@
+---
+import Field from "./Field.astro";
+import MoveForm from "./MoveForm.astro";
+import RemoveForm from "./RemoveForm.astro";
+import { formState, recordFields } from "../../lib/admin/form-state";
+import { RECORD_CAP, type AdminRecord } from "../../lib/admin/store";
+import type { ActionFailure } from "../../lib/admin/actions";
+
+interface Props {
+  records: AdminRecord[];
+  failure: ActionFailure | null;
+}
+
+const { records, failure } = Astro.props;
+const active = records.filter((record) => record.active);
+const groups = [
+  { group: "active", heading: null, list: active },
+  { group: "inactive", heading: "inactive", list: records.filter((record) => !record.active) },
+] as const;
+const full = active.length >= RECORD_CAP;
+const fresh = formState(failure, "record-new", { title: "", artist: "" });
+// An add that just failed on a full crate has already said so in the alert, so the hint below shows only without one
+const cover = (key: string) => `/media/${key}`;
+---
+<p class="count">{active.length} of {RECORD_CAP} in the crate</p>
+{groups.map(({ group, heading, list }) => list.length > 0 && (
+  <>
+    {heading && <h3>{heading}</h3>}
+    <ol class="entries records-admin" data-group={group}>
+      {list.map((record, index) => {
+        const id = `record-${record.id}`;
+        const state = formState(failure, id, recordFields(record));
+        const toggle = record.active ? "deactivate" : "activate";
+        return (
+          <li class="entry">
+            <img class="cover" src={cover(record.coverKey)} width="40" height="40" alt="" loading="lazy" />
+            <details id={id} open={state.open}>
+              <summary><span class="what">{record.title}</span> <span class="aside">- {record.artist}</span></summary>
+              {state.errors.form && <p class="error" role="alert">{state.errors.form}</p>}
+              <form method="post" action={`/admin/#${id}`} class="admin-form">
+                <input type="hidden" name="intent" value="record.update" />
+                <input type="hidden" name="id" value={record.id} />
+                <Field form={id} name="title" label="title" value={state.values.title} error={state.errors.title} required maxlength={60} />
+                <Field form={id} name="artist" label="artist" value={state.values.artist} error={state.errors.artist} required maxlength={60} />
+                <button type="submit" class="button">save</button>
+              </form>
+              <RemoveForm form={id} intent="record.remove" id={record.id} confirm="yes, remove this record and its files" error={state.errors.confirm} />
+            </details>
+            <div class="controls">
+              <MoveForm intent="record.move" id={record.id} name={record.title} first={index === 0} last={index === list.length - 1} />
+              <form method="post" action={`/admin/#${id}`} class="move">
+                <input type="hidden" name="intent" value={`record.${toggle}`} />
+                <input type="hidden" name="id" value={record.id} />
+                <button type="submit" class="button quiet" aria-label={`${toggle} ${record.title}`}>{toggle}</button>
+              </form>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  </>
+))}
+<details id="record-new" class="add" open={fresh.open}>
+  <summary>add a record</summary>
+  {fresh.errors.form && <p class="error" role="alert">{fresh.errors.form}</p>}
+  {full ? (
+    !fresh.errors.form && <p class="hint">the crate holds six records. deactivate one to add another.</p>
+  ) : (
+    <form method="post" action="/admin/#record-new" enctype="multipart/form-data" class="admin-form">
+      <input type="hidden" name="intent" value="record.create" />
+      <Field form="record-new" name="title" label="title" value={fresh.values.title} error={fresh.errors.title} required maxlength={60} />
+      <Field form="record-new" name="artist" label="artist" value={fresh.values.artist} error={fresh.errors.artist} required maxlength={60} />
+      <Field form="record-new" name="audio" label="mp3" kind="file" accept="audio/mpeg,.mp3" error={fresh.errors.audio} required hint="up to 15MB." />
+      <Field form="record-new" name="cover" label="cover" kind="file" accept="image/jpeg,image/png,image/webp" error={fresh.errors.cover} required
+        hint="JPEG, PNG or WebP up to 10MB. it's cropped to a square, so keep what matters in the middle." />
+      {fresh.open && <p class="hint">choose the files again - browsers don't keep them after a problem.</p>}
+      <button type="submit" class="button">add to the crate</button>
+    </form>
+  )}
+</details>

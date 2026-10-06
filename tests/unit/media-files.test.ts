@@ -1,0 +1,33 @@
+import { readdirSync, statSync } from "node:fs";
+import sharp from "sharp";
+import { describe, expect, test } from "vitest";
+
+const SLUGS = ["simple-things", "nyc-in-1940", "no-bad-feelings-today", "light-it-up"];
+
+describe("the starting crate's media", () => {
+  test("has exactly the four tracks", () => {
+    expect(readdirSync("media/audio").sort()).toEqual(SLUGS.map((slug) => `${slug}.mp3`).sort());
+  });
+
+  test.each(SLUGS)("%s has a 512px WebP cover under 40KB", async (slug) => {
+    const file = `media/covers/${slug}.webp`;
+    expect(statSync(file).size).toBeLessThan(40 * 1024);
+    const meta = await sharp(file).metadata();
+    expect([meta.format, meta.width, meta.height]).toEqual(["webp", 512, 512]);
+  });
+});
+
+describe("the posters", () => {
+  test.each([
+    ["deck-desktop", 16 / 10.8],
+    ["deck-phone", 375 / 320],
+    ["deck-desktop-night", 16 / 10.8],
+    ["deck-phone-night", 375 / 320],
+  ])("%s is a WebP under 60KB in the deck's shape", async (name, aspect) => {
+    const file = `public/posters/${name}.webp`;
+    expect(statSync(file).size).toBeLessThan(60 * 1024);
+    const meta = await sharp(file).metadata();
+    expect(meta.format).toBe("webp");
+    expect(Math.abs(meta.width! / meta.height! - aspect)).toBeLessThan(0.02);
+  });
+});

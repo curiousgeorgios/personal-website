@@ -1,0 +1,20 @@
+---
+interface Props {
+  intent: "item.move" | "record.move";
+  id: number;
+  /** Names the thing in the buttons' accessible names: "move <name> up" */
+  name: string;
+  section?: string;
+  first: boolean;
+  last: boolean;
+}
+
+const { intent, id, name, section, first, last } = Astro.props;
+---
+<form method="post" action="/admin/" class="move">
+  <input type="hidden" name="intent" value={intent} />
+  <input type="hidden" name="id" value={id} />
+  {section && <input type="hidden" name="section" value={section} />}
+  <button type="submit" name="direction" value="up" class="button quiet" disabled={first} aria-label={`move ${name} up`}>up</button>
+  <button type="submit" name="direction" value="down" class="button quiet" disabled={last} aria-label={`move ${name} down`}>down</button>
+</form>

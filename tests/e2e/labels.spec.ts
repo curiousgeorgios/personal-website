@@ -1,0 +1,767 @@
+import { chromium, expect, test, type Page } from "@playwright/test";
+import { STALL_MS } from "./load";
+
+// The 3D scene's first frame can block the main thread for seconds under software WebGL (headless CI), landing just after
+// load, where these tests hover. None of them is about the scene, so it stays out
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/_astro\/scene\.[^/]+\.js$/, (route) => route.abort());
+});
+
+test("clicking a labelled line opens its label in place; Esc closes and returns focus", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const pill = item.locator(".peek");
+  const drawer = page.locator("#label-canberra-events");
+  await expect(drawer).toHaveAttribute("hidden", "until-found");
+  await item.locator(".aside").click();
+  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(drawer).not.toHaveAttribute("hidden", /.*/);
+  await expect(drawer.locator(".made")).toBeVisible();
+  await pill.focus();
+  await page.keyboard.press("Escape");
+  await expect(pill).toHaveAttribute("aria-expanded", "false");
+  await expect(pill).toBeFocused();
+  await expect(drawer).toHaveAttribute("hidden", "until-found", { timeout: STALL_MS }); // a 320ms timer, which load can delay
+});
+
+test("the pill toggles with the keyboard and several labels can be open", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-slug="digital-nachos"] .peek').press("Enter");
+  await page.locator('[data-slug="linear-gratis"] .peek').press("Enter");
+  await expect(page.locator(".line-item.open")).toHaveCount(2);
+});
+
+test("a same-frame open and close leaves the label closed and unstyled", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.evaluate((el) => {
+    const line = el.querySelector<HTMLElement>(".line")!;
+    line.click();
+    line.click();
+  });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "false");
+  await expect(item).not.toHaveClass(/\bopen\b/);
+});
+
+test("links inside a labelled line navigate instead of toggling", async ({ page }) => {
+  await page.goto("/");
+  const link = page.locator('[data-slug="canberra-events"] .line a');
+  await expect(link).toHaveAttribute("href", "https://canberra.events");
+  await page.route("https://canberra.events/**", (route) => route.fulfill({ body: "ok" }));
+  await link.click();
+  await expect(page).toHaveURL("https://canberra.events/");
+});
+
+test.describe("without JavaScript", () => {
+  test.use({ javaScriptEnabled: false });
+  test("label contents stay in the page for find-in-page", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("#label-canberra-events")).toHaveAttribute("hidden", "until-found");
+    await expect(page.locator("#label-canberra-events .made")).toHaveCount(1);
+  });
+});
+
+const SNAPSHOT = /\/media\/snapshots\//;
+
+test("no snapshot is fetched before a label is hovered or opened", async ({ page }) => {
+  const fetched: string[] = [];
+  page.on("request", (request) => {
+    if (SNAPSHOT.test(request.url())) fetched.push(request.url());
+  });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  expect(fetched).toEqual([]);
+});
+
+test("hovering a labelled line grows its snapshot out of the pill; it goes when the label opens", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  const [request] = await Promise.all([page.waitForRequest(SNAPSHOT), item.locator(".aside").hover()]);
+  expect(request.url()).toMatch(/fixture-canberra-events-480\.(avif|webp)$/);
+  await expect(card).toHaveCSS("opacity", "1");
+  await item.locator(".aside").click();
+  await expect(card).toHaveCSS("opacity", "0");
+});
+
+test("a phone shows no hover card", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "phones only");
+  await page.goto("/");
+  await expect(page.locator('[data-slug="canberra-events"] .hovercard')).toBeHidden();
+});
+
+test("a second hover fetches nothing new", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  const fetched: string[] = [];
+  page.on("request", (request) => {
+    if (SNAPSHOT.test(request.url())) fetched.push(request.url());
+  });
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.locator("h1").hover();
+  await expect(card).toBeHidden();
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.waitForLoadState("networkidle");
+  expect(fetched).toHaveLength(1);
+});
+
+test("at rest a hover card is out of the page's text, so it isn't copied or found", async ({ page }) => {
+  await page.goto("/");
+  const copied = await page.locator('[data-slug="canberra-events"]').evaluate((item) => {
+    getSelection()!.selectAllChildren(item);
+    return getSelection()!.toString();
+  });
+  expect(copied).toContain("canberra.events");
+  expect(copied).not.toContain("click for the label");
+});
+
+test("Escape dismisses a hovered card until the pointer leaves the line", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Escape");
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toBeHidden();
+  await page.locator("h1").hover();
+  await item.locator(".aside").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+});
+
+// Hovers the pill until its card is up, then gives the pointer's way to the card: a point in the gap between them,
+// and the card's centre
+async function hoverCard(page: Page, slug: string) {
+  const item = page.locator(`[data-slug="${slug}"]`);
+  const card = item.locator(".hovercard");
+  await item.locator(".peek").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+  const pill = (await item.locator(".peek").boundingBox())!;
+  const box = (await card.boundingBox())!;
+  const x = box.x + box.width / 2;
+  return { card, gap: { x, y: (box.y + box.height + pill.y) / 2 }, centre: { x, y: box.y + box.height / 2 } };
+}
+
+test("the hover card can be hovered: the pointer crosses the gap onto it and the card stays", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const { card, gap, centre } = await hoverCard(page, "canberra-events");
+  // The card's opacity on every frame from here, so a fade that starts anywhere on the way is caught
+  await card.evaluate((element) => {
+    const seen = new Set<string>();
+    const tick = () => {
+      seen.add(getComputedStyle(element).opacity);
+      requestAnimationFrame(tick);
+    };
+    tick();
+    (window as unknown as { seen: Set<string> }).seen = seen;
+  });
+  // Resting in the gap and then on the card, each for longer than the card's 140ms fade
+  await page.mouse.move(gap.x, gap.y, { steps: 4 });
+  await page.waitForTimeout(250);
+  await page.mouse.move(centre.x, centre.y, { steps: 8 });
+  await page.waitForTimeout(250);
+  expect(await page.evaluate(() => [...(window as unknown as { seen: Set<string> }).seen])).toEqual(["1"]);
+  expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest(".hovercard"), centre)).toBe(true);
+  // Escape still dismisses it with the pointer on it, until the pointer leaves the line and comes back
+  await page.keyboard.press("Escape");
+  await expect(card).toBeHidden();
+  await page.locator("h1").hover();
+  await item.locator(".peek").hover();
+  await expect(card).toHaveCSS("opacity", "1");
+});
+
+test("a click on the hover card opens its line's label, not whatever is under the card", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover on a phone");
+  await page.goto("/");
+  const { card, gap, centre } = await hoverCard(page, "canberra-events");
+  await page.mouse.move(gap.x, gap.y, { steps: 4 });
+  await page.mouse.move(centre.x, centre.y, { steps: 8 });
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.locator('[data-slug="canberra-events"] .peek')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".line-item.open")).toHaveCount(1);
+  await expect(card).toBeHidden();
+});
+
+test("focusing the pill shows the card; Escape dismisses it until focus leaves the line", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const pill = item.locator(".peek");
+  const card = item.locator(".hovercard");
+  // Focus from script counts as visible focus in both engines (WebKit on macOS doesn't Tab to buttons)
+  await pill.focus();
+  await expect(card).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Escape");
+  await expect(pill).toBeFocused();
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toBeHidden();
+  await page.locator('[data-slug="linear-gratis"] .peek').focus();
+  await pill.focus();
+  await expect(card).toHaveCSS("opacity", "1");
+});
+
+test("Escape on an open label closes it and returns focus to the pill without bringing its card up", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const pill = item.locator(".peek");
+  const card = item.locator(".hovercard");
+  await pill.focus();
+  await page.keyboard.press("Enter");
+  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(card).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(pill).toHaveAttribute("aria-expanded", "false");
+  await expect(pill).toBeFocused();
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toBeHidden();
+});
+
+test("a line without a snapshot has no hover card, and its label no frame", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="linear-gratis"]');
+  await expect(item.locator(".hovercard")).toHaveCount(0);
+  await item.locator(".peek").click();
+  await expect(item.locator(".made")).toBeVisible();
+  await expect(item.locator(".frame")).toHaveCount(0);
+});
+
+test("opening a label fetches its framed snapshot, and the drawer really opens", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  await expect.poll(() => item.locator(".frame img").evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)).toBe(true);
+  await expect.poll(() => item.locator(".drawer").evaluate((drawer) => drawer.getBoundingClientRect().height)).toBeGreaterThan(100);
+});
+
+test("a snapshot that won't load leaves the label without its frame", async ({ page }) => {
+  await page.route(SNAPSHOT, (route) => route.fulfill({ status: 404, body: "" }));
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".wall")).toHaveClass(/\bno-shot\b/);
+  await expect(item.locator(".frame")).toBeHidden();
+  await expect(item.locator(".made")).toBeVisible();
+});
+
+test("closing, reopening and closing quickly lets the last close finish its animation", async ({ page }) => {
+  await page.goto("/");
+  const hiddenAfter = await page.locator('[data-slug="canberra-events"]').evaluate(async (item) => {
+    const line = item.querySelector<HTMLElement>(".line")!;
+    const drawer = item.querySelector<HTMLElement>(".drawer")!;
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    line.click();
+    await wait(400);
+    line.click();
+    await wait(100);
+    line.click();
+    await wait(100);
+    line.click();
+    const closedAt = performance.now();
+    await new Promise<void>((resolve) =>
+      new MutationObserver((_records, observer) => {
+        if (drawer.hasAttribute("hidden")) {
+          observer.disconnect();
+          resolve();
+        }
+      }).observe(drawer, { attributes: true }),
+    );
+    return performance.now() - closedAt;
+  });
+  // The first close's timer used to hide the drawer about 120ms into the last close's 320ms animation
+  expect(hiddenAfter).toBeGreaterThanOrEqual(290);
+});
+
+test("find-in-page opens a label at once", async ({ page }) => {
+  await page.goto("/");
+  const opened = await page.locator('[data-slug="canberra-events"]').evaluate((item) => {
+    item.querySelector(".drawer")!.dispatchEvent(new Event("beforematch"));
+    return item.classList.contains("open") && item.querySelector(".peek")!.getAttribute("aria-expanded") === "true";
+  });
+  expect(opened).toBe(true);
+});
+
+test("find-in-page with JavaScript on loads the frame's snapshot", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  const [request] = await Promise.all([
+    page.waitForRequest(SNAPSHOT),
+    // What find-in-page does to a match inside hidden="until-found": beforematch, then the attribute goes
+    item.locator(".drawer").evaluate((drawer) => {
+      drawer.dispatchEvent(new Event("beforematch"));
+      drawer.removeAttribute("hidden");
+    }),
+  ]);
+  expect(request.url()).toMatch(/fixture-digital-nachos-(480|960)\.(avif|webp)$/);
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(() => item.locator(".frame img").evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)).toBe(true);
+});
+
+test("a snapshot opens a closer look; Esc returns it to its frame, then closes the label", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  const frame = item.locator(".frame");
+  await expect(frame.locator("img")).toBeVisible();
+  await frame.click();
+  const dialog = page.locator("dialog.closer");
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect(dialog.locator(".closer-close")).toBeFocused();
+  await expect(dialog.locator("img")).toHaveAttribute("src", /fixture-digital-nachos-1920\.(avif|webp)$/);
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of digital nachos");
+  expect(new URL(page.url()).pathname).toBe("/"); // the frame's link isn't followed
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(frame).toBeFocused();
+  await expect(frame.locator("img")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "false");
+  await expect(item.locator(".peek")).toBeFocused();
+});
+
+test("a click anywhere in the closer look, or its close button, puts the snapshot back", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  const dialog = page.locator("dialog.closer");
+  for (const close of [() => dialog.locator("img").click(), () => dialog.locator(".closer-close").click()]) {
+    await item.locator(".frame").click();
+    await expect(dialog).toHaveAttribute("open", "");
+    await close();
+    await expect(dialog).not.toHaveAttribute("open", "");
+    await expect(item.locator(".frame")).toBeFocused();
+  }
+});
+
+test("with reduced motion the closer look opens and closes without moving", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  // Every frame's transform from here on, so a movement is caught whenever it happens, in the open or the close
+  await dialog.locator("img").evaluate((big) => {
+    const seen = new Set<string>();
+    const note = () => seen.add(getComputedStyle(big).transform);
+    new MutationObserver(note).observe(big, { attributes: true });
+    const tick = () => {
+      note();
+      requestAnimationFrame(tick);
+    };
+    tick();
+    (window as unknown as { seen: Set<string> }).seen = seen;
+  });
+  await item.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toHaveAttribute("open", "");
+  expect(await page.evaluate(() => [...(window as unknown as { seen: Set<string> }).seen])).toEqual(["none"]);
+});
+
+test("the paper veil fades in over the page instead of appearing at once", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  // WebKit used to start the veil already opaque, as nothing had settled the dialog's style before the class went on
+  const fading = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const dialog = document.querySelector<HTMLDialogElement>("dialog.closer")!;
+        new MutationObserver((_records, observer) => {
+          if (!dialog.classList.contains("on")) return;
+          observer.disconnect();
+          requestAnimationFrame(() => resolve(dialog.getAnimations({ subtree: true }).some((animation) => animation instanceof CSSTransition && animation.transitionProperty === "opacity")));
+        }).observe(dialog, { attributes: true, attributeFilter: ["class"] });
+        document.querySelector<HTMLElement>('[data-slug="canberra-events"] .frame')!.click();
+      }),
+  );
+  expect(fading).toBe(true);
+});
+
+test("a closer look closed while it is still growing goes back to its frame, not to where it had got to", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const { landed, frame } = await item.locator(".frame").evaluate(async (element) => {
+    const link = element as HTMLAnchorElement;
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.closer")!;
+    const big = dialog.querySelector("img")!;
+    const box = (rect: DOMRect) => ({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    link.click();
+    while (!dialog.open) await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 100)); // part-way through the 420ms grow
+    const landed = new Promise<DOMRect>((resolve) => big.addEventListener("transitionend", () => resolve(big.getBoundingClientRect()), { once: true }));
+    big.click();
+    return { landed: box(await landed), frame: box(link.querySelector("img")!.getBoundingClientRect()) };
+  });
+  for (const key of ["left", "top", "width", "height"] as const) expect(Math.abs(landed[key] - frame[key])).toBeLessThan(1);
+});
+
+// The closer look's big file, held back so a click can be followed by others while it loads
+const BIG = /-1920\.(avif|webp)$/;
+const delayBig = (page: Page, ms: number) =>
+  page.route(BIG, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    await route.continue();
+  });
+
+test("a double click on a frame still grows the snapshot out of it, instead of popping it open", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  // The image's transform on each of the first frames after the dialog opens
+  await page.evaluate(() => {
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.closer")!;
+    const big = dialog.querySelector("img")!;
+    const frames: string[] = [];
+    (window as unknown as { frames: string[] }).frames = frames;
+    new MutationObserver((_records, observer) => {
+      if (!dialog.open) return;
+      observer.disconnect();
+      const note = () => {
+        frames.push(getComputedStyle(big).transform);
+        if (frames.length < 6) requestAnimationFrame(note);
+      };
+      note();
+    }).observe(dialog, { attributes: true, attributeFilter: ["open"] });
+  });
+  await item.locator(".frame").dblclick();
+  await expect(page.locator("dialog.closer")).toHaveAttribute("open", "");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { frames: string[] }).frames.length)).toBe(6);
+  // Every one of them is the grow on its way: scaled down from the frame's box, never full size. A second open measuring
+  // the image with the first's transform on made the grow's start the identity, so the picture popped to full size
+  const frames = await page.evaluate(() => (window as unknown as { frames: string[] }).frames);
+  expect(frames.filter((transform) => transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)")).toEqual([]);
+  // The double click's second click lands on the open look, and doesn't close it
+  await expect(page.locator("dialog.closer")).toHaveAttribute("open", "");
+  await expect(page.locator("dialog.closer")).toHaveClass(/\bon\b/);
+});
+
+test("the closer look opens at once with the frame's own picture, and the big file takes its place in the same box", async ({ page }) => {
+  await delayBig(page, 3000);
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  await item.locator(".frame").click();
+  const dialog = page.locator("dialog.closer");
+  const big = dialog.locator("img");
+  await expect(dialog).toHaveAttribute("open", "");
+  // Open before the 1920 could have arrived: the picture is the frame's own. Read once open, as Chromium leaves the
+  // frame's currentSrc empty until its picture has arrived, which a click can come before
+  const own = await item.locator(".frame img").evaluate((img: HTMLImageElement) => img.currentSrc);
+  expect(own).not.toBe("");
+  expect(await big.evaluate((img: HTMLImageElement) => img.currentSrc)).toBe(own);
+  await expect.poll(() => big.evaluate((img) => getComputedStyle(img).transform)).toBe("none");
+  const before = await big.boundingBox();
+  await expect(big).toHaveAttribute("src", /fixture-digital-nachos-1920\.(avif|webp)$/, { timeout: 10_000 });
+  expect(await big.boundingBox()).toEqual(before);
+});
+
+test("a big file that never arrives holds nothing up: the look closes, and the next frame opens its own", async ({ page }) => {
+  await page.route(BIG, () => {}); // never answered
+  await page.goto("/");
+  const first = page.locator('[data-slug="digital-nachos"]');
+  const second = page.locator('[data-slug="canberra-events"]');
+  await first.locator(".peek").click();
+  await second.locator(".peek").click();
+  await expect(first.locator(".frame img")).toBeVisible();
+  await expect(second.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  await first.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  await dialog.locator(".closer-close").click();
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(first.locator(".frame")).toBeFocused();
+  await second.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of canberra.events");
+  await dialog.locator(".closer-close").click();
+  await expect(second.locator(".frame")).toBeFocused();
+  await expect(first.locator(".frame img")).toHaveCSS("visibility", "visible");
+});
+
+test("a big file that arrives after the look has closed changes nothing", async ({ page }) => {
+  await delayBig(page, 1500);
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  const arrived = page.waitForResponse(BIG);
+  await item.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  await dialog.locator(".closer-close").click();
+  await expect(dialog).not.toHaveAttribute("open", "");
+  // The big file arrives, and is decoded as closer.ts's loader decodes it, a frame after which its swap would have run
+  const url = (await arrived).url();
+  await page.evaluate(async (src) => {
+    const loader = new Image();
+    loader.src = src;
+    await loader.decode();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }, url);
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(dialog.locator("img")).not.toHaveAttribute("src", /.*/);
+  await expect(item.locator(".frame img")).toHaveCSS("visibility", "visible");
+  await expect(item.locator(".frame")).toBeFocused();
+});
+
+test("a frame whose own picture never arrives opens nothing, and holds no other frame up", async ({ page }) => {
+  await page.route(/fixture-digital-nachos-(480|960)\.(avif|webp)$/, () => {}); // never answered
+  await page.goto("/");
+  const first = page.locator('[data-slug="digital-nachos"]');
+  const second = page.locator('[data-slug="canberra-events"]');
+  await first.locator(".peek").click();
+  await second.locator(".peek").click();
+  await expect(second.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  // A click on the empty mat waits a bounded while for its picture, and then lets go
+  await first.locator(".frame").click();
+  // Within a few seconds the other frame opens its own look, never the first's
+  await expect(async () => {
+    await second.locator(".frame").click();
+    await expect(dialog).toHaveAttribute("open", "", { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of canberra.events");
+  await dialog.locator(".closer-close").click();
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(second.locator(".frame")).toBeFocused();
+  await expect(dialog.locator("img")).not.toHaveAttribute("src", /.*/);
+});
+
+test("a frame clicked before its own picture has arrived opens its closer look once the picture comes", async ({ page, browserName }) => {
+  const OWN = /fixture-digital-nachos-(480|960)\.(avif|webp)$/;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route(OWN, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  const asked = page.waitForRequest(OWN);
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await asked;
+  // Chromium has no currentSrc until the response is in: the click below used to find no picture and open nothing
+  if (browserName === "chromium") expect(await item.locator(".frame img").evaluate((img: HTMLImageElement) => img.currentSrc)).toBe("");
+  await item.locator(".frame").click();
+  release();
+  const dialog = page.locator("dialog.closer");
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect(dialog).toHaveAccessibleName("closer look: a snapshot of digital nachos");
+  await expect(item.locator(".frame img")).toHaveCSS("visibility", "hidden");
+});
+
+test("a closer look whose big file won't load keeps the frame's own picture, grown to fit the window", async ({ page }) => {
+  await page.route(BIG, (route) => route.abort());
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  await item.locator(".frame").click();
+  const dialog = page.locator("dialog.closer");
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect.poll(() => dialog.locator("img").evaluate((big) => getComputedStyle(big).transform)).toBe("none");
+  const same = await item.locator(".frame").evaluate((frame) => {
+    const big = document.querySelector<HTMLImageElement>("dialog.closer img")!;
+    return { loaded: big.naturalWidth > 0, current: big.currentSrc === frame.querySelector("img")!.currentSrc };
+  });
+  expect(same).toEqual({ loaded: true, current: true });
+  // The window decides its size, not the file: 88vw, or the height left by the room above and below, at 16:10
+  const fit = await page.evaluate(() => Math.min(innerWidth * 0.88, (innerHeight - 2 * Math.max(innerHeight * 0.06, 72)) * 1.6));
+  expect(Math.abs((await dialog.locator("img").boundingBox())!.width - fit)).toBeLessThan(1);
+});
+
+test("two quick Escapes put the snapshot back and focus on the frame as the browser closes the dialog, then a third closes the label", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="digital-nachos"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  await item.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  await expect.poll(() => dialog.locator("img").evaluate((big) => getComputedStyle(big).transform)).toBe("none");
+  // Where things stand when the dialog's close event reaches a listener of the page's, whoever closed it. The browser
+  // won't let the second Escape's cancel be stopped, so it closes the dialog 300ms early
+  await dialog.evaluate((element) => {
+    element.addEventListener("close", () => {
+      const link = document.querySelector<HTMLElement>('[data-slug="digital-nachos"] .frame')!;
+      (window as unknown as { atClose: object }).atClose = { snapshot: getComputedStyle(link.querySelector("img")!).visibility, focused: document.activeElement === link };
+    });
+  });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toHaveAttribute("open", "");
+  await expect(item.locator(".frame")).toBeFocused();
+  // The browser returns focus to the frame as it closes the dialog, but dispatches "close" a task later: wait for it
+  await expect.poll(() => page.evaluate(() => (window as unknown as { atClose?: object }).atClose)).toEqual({ snapshot: "visible", focused: true });
+  await expect(item.locator(".frame img")).toHaveCSS("visibility", "visible");
+  await page.keyboard.press("Escape");
+  await expect(item.locator(".peek")).toHaveAttribute("aria-expanded", "false");
+  await expect(item.locator(".peek")).toBeFocused();
+});
+
+test("the close pill never covers the picture, at any size", async ({ page }) => {
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator(".peek").click();
+  await expect(item.locator(".frame img")).toBeVisible();
+  const dialog = page.locator("dialog.closer");
+  await item.locator(".frame").click();
+  await expect(dialog).toHaveAttribute("open", "");
+  for (const size of [{ width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(size);
+    await expect.poll(() => dialog.locator("img").evaluate((big) => getComputedStyle(big).transform)).toBe("none");
+    const [pill, picture] = await Promise.all([dialog.locator(".closer-close").boundingBox(), dialog.locator("img").boundingBox()]);
+    expect(picture!.y, `${size.width} x ${size.height}`).toBeGreaterThanOrEqual(pill!.y + pill!.height);
+  }
+});
+
+test("with a classic scrollbar the page doesn't shift under the closer look, so the snapshot lands in its frame", async ({ baseURL, browserName }) => {
+  test.skip(browserName !== "chromium", "the scrollbar is drawn through Chromium's ::-webkit-scrollbar");
+  // A Mac's Chromium only draws overlay scrollbars, so its own browser is launched with scrollbars shown, and the page
+  // gets a 15px one (an injected style needs the page's CSP out of the way)
+  const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
+  try {
+    const page = await (await browser.newContext({ baseURL, bypassCSP: true })).newPage();
+    await page.goto("/");
+    await page.addStyleTag({ content: "::-webkit-scrollbar { width: 15px; }" });
+    const bar = () => page.evaluate(() => innerWidth - document.documentElement.clientWidth);
+    expect(await bar()).toBe(15);
+    const item = page.locator('[data-slug="canberra-events"]');
+    await item.locator(".peek").click();
+    await expect(item.locator(".frame img")).toBeVisible();
+    const dialog = page.locator("dialog.closer");
+    const lefts = () => page.evaluate(() => ["[data-slug='canberra-events'] .line", "[data-slug='canberra-events'] .frame img"].map((selector) => document.querySelector(selector)!.getBoundingClientRect().left));
+    const before = await lefts();
+    await item.locator(".frame").click();
+    await expect(dialog).toHaveAttribute("open", "");
+    // The scrollbar goes while the dialog is open (overflow: hidden), and its width stays as padding, so nothing moves
+    expect(await bar()).toBe(0);
+    expect(Math.max(...(await lefts()).map((left, i) => Math.abs(left - before[i])))).toBeLessThan(0.5);
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toHaveAttribute("open", "");
+    expect(await bar()).toBe(15);
+    expect(Math.max(...(await lefts()).map((left, i) => Math.abs(left - before[i])))).toBeLessThan(0.5);
+  } finally {
+    await browser.close();
+  }
+});
+
+test.describe("snapshots without JavaScript", () => {
+  test.use({ javaScriptEnabled: false });
+  // Browsers ignore loading="lazy" while scripting is off (an anti-tracking rule in the HTML spec), so without
+  // JavaScript the frames' files come with the page; the hover cards' and the closer look's never do
+  test("only the frames' snapshots are fetched, and find-in-page opens a label to show its frame", async ({ page }) => {
+    const fetched: string[] = [];
+    page.on("request", (request) => {
+      if (SNAPSHOT.test(request.url())) fetched.push(request.url());
+    });
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    expect(fetched.length).toBeGreaterThan(0);
+    expect(fetched.every((url) => /fixture-(digital-nachos|canberra-events)-(480|960)\.avif$/.test(url))).toBe(true);
+    // What find-in-page does to a match inside hidden="until-found"
+    await page.locator("#label-digital-nachos").evaluate((drawer) => drawer.removeAttribute("hidden"));
+    await expect.poll(() => page.locator("#label-digital-nachos").evaluate((drawer) => drawer.getBoundingClientRect().height)).toBeGreaterThan(100);
+  });
+
+  test("a frame is a link that opens the big picture", async ({ page }) => {
+    await page.goto("/");
+    await page.locator("#label-digital-nachos").evaluate((drawer) => drawer.removeAttribute("hidden"));
+    const frame = page.getByRole("link", { name: "look closer at digital nachos" });
+    await expect(frame).toHaveAttribute("href", /fixture-digital-nachos-1920\.webp$/);
+    await frame.click();
+    await expect(page).toHaveURL(/\/media\/snapshots\/fixture-digital-nachos-1920\.webp$/);
+  });
+});
+
+test("the hover cards never scroll the page sideways", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  for (const width of [800, 820, 840]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  }
+});
+
+test("a hover card near the page's right edge slides back inside it, still growing out of its pill", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  for (const width of [800, 830, 860]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    // The labelled line with a snapshot whose pill sits furthest right
+    const slug = await page.evaluate(() => {
+      const items = [...document.querySelectorAll<HTMLElement>(".line-item.labelled")].filter((item) => item.querySelector(".hovercard"));
+      const right = (item: HTMLElement) => item.querySelector(".peek")!.getBoundingClientRect().right;
+      return items.sort((a, b) => right(b) - right(a))[0].dataset.slug!;
+    });
+    const item = page.locator(`[data-slug="${slug}"]`);
+    const card = item.locator(".hovercard");
+    await item.locator(".peek").hover();
+    await expect(card, `${width}px wide`).toHaveCSS("opacity", "1");
+    await card.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)).then(() => undefined));
+    const box = (await card.boundingBox())!;
+    const pill = (await item.locator(".peek").boundingBox())!;
+    expect(box.x, `${width}px wide`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${width}px wide`).toBeLessThanOrEqual(width - 7.5);
+    const centre = pill.x + pill.width / 2;
+    expect(centre, `${width}px wide: the pill is under the card`).toBeGreaterThan(box.x);
+    expect(centre, `${width}px wide: the pill is under the card`).toBeLessThan(box.x + box.width);
+    await page.locator("h1").hover();
+  }
+});
+
+test("a slow first hover shows the card only once its picture is ready, never an empty card", async ({ page, isMobile }) => {
+  test.skip(isMobile, "no hover cards on a phone");
+  await page.route(/fixture-canberra-events-480\.(avif|webp)$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  const card = item.locator(".hovercard");
+  await item.locator(".aside").hover();
+  await page.waitForTimeout(600); // well past the 90ms intent delay and the 140ms fade
+  await expect(card).toHaveCSS("opacity", "0");
+  await expect(card).toHaveCSS("opacity", "1", { timeout: 10_000 });
+  expect(await card.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+});
+
+test("a real Tab reaches the pill and brings its card up", async ({ page, browserName, isMobile }) => {
+  test.skip(isMobile || browserName !== "chromium", "WebKit on macOS doesn't Tab to buttons, and phones have no hover cards");
+  await page.goto("/");
+  const item = page.locator('[data-slug="canberra-events"]');
+  await item.locator("a").first().focus(); // the line's own link, just before its pill
+  await page.keyboard.press("Tab");
+  await expect(item.locator(".peek")).toBeFocused();
+  await expect(item.locator(".hovercard")).toHaveCSS("opacity", "1");
+});
+
+test("selecting a line's text doesn't toggle its label", async ({ page, isMobile }) => {
+  test.skip(isMobile, "a mouse selection");
+  await page.goto("/");
+  const aside = page.locator('[data-slug="canberra-events"] .aside');
+  const box = (await aside.boundingBox())!;
+  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator('[data-slug="canberra-events"] .peek')).toHaveAttribute("aria-expanded", "false");
+});

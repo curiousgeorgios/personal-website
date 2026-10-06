@@ -1,0 +1,35 @@
+---
+import Field from "./Field.astro";
+import type { FormState } from "../../lib/admin/form-state";
+
+interface Props {
+  form: string;
+  state: FormState;
+  /** Edit forms can move a line to the other section. An add form is fixed to its own: a failure reopens the form for the posted section, which has to be the one the browser scrolled to. */
+  chooseSection?: boolean;
+}
+
+const { form, state, chooseSection = true } = Astro.props;
+const { values, errors } = state;
+---
+<Field form={form} name="text" label="line" kind="textarea" value={values.text} error={errors.text} required maxlength={240}
+  hint="plain text. links look like [link text](https://example.com)." />
+<Field form={form} name="aside" label="aside (after the dash)" value={values.aside} error={errors.aside} maxlength={80} />
+<Field form={form} name="slug" label="slug" value={values.slug} error={errors.slug} required plain maxlength={40}
+  hint="lowercase-with-hyphens. used for analytics and the label's id." />
+{chooseSection
+  ? <Field form={form} name="section" label="section" kind="select" value={values.section} error={errors.section} options={[["now", "now"], ["before", "before"]]} />
+  : <input type="hidden" name="section" value={values.section} />}
+<fieldset class="label-fields">
+  <legend>wall label (optional)</legend>
+  <Field form={form} name="label_status" label="status" kind="select" value={values.label_status} error={errors.label_status}
+    options={[["", "no label"], ["live", "live and in use"], ["retired", "retired"]]} />
+  <Field form={form} name="label_era" label="era" value={values.label_era} error={errors.label_era} maxlength={40} hint="like 2025 to now, or founder." />
+  <Field form={form} name="label_made_of" label="made of" value={values.label_made_of} error={errors.label_made_of} maxlength={120} />
+  <Field form={form} name="label_text" label="label text" kind="textarea" value={values.label_text} error={errors.label_text} maxlength={400} />
+  <Field form={form} name="label_kind" label="kind" kind="select" value={values.label_kind} error={errors.label_kind}
+    options={[["", "none"], ["decision", "decision"], ["lesson", "lesson"]]} />
+  <Field form={form} name="label_note" label="the decision or lesson" kind="textarea" value={values.label_note} error={errors.label_note} maxlength={400} />
+  <Field form={form} name="snapshot_url" label="page to snapshot" kind="url" value={values.snapshot_url} error={errors.snapshot_url} plain maxlength={300}
+    hint="an https:// address, captured nightly." />
+</fieldset>

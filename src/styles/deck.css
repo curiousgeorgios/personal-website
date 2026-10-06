@@ -1,0 +1,70 @@
+/* The listening corner (spec 5). The deck box keeps its size whether it shows the poster, the scene or nothing yet. */
+.corner { position: relative; }
+.deck { position: relative; aspect-ratio: 16 / 10.8; margin: -10px 0 8px calc(-1 * var(--gap) + 1px); }
+/* The poster stands in for the scene until its first frame, and for good without WebGL */
+.deck .poster, .deck .poster img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.deck.live .poster { visibility: hidden; }
+/* The scene's canvas covers the deck box and takes over on its first frame, with no fade */
+.deck canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; visibility: hidden; }
+.deck.live canvas { visibility: visible; }
+
+/* Crate control: fixed geometry. Three fixed columns, so nothing moves whatever it says or whatever is hovered. */
+.crate-hud {
+  position: absolute; left: 0; top: 0; z-index: 2; visibility: hidden;
+  display: grid; grid-template-columns: 32px min(12.5rem, calc(var(--deck-w, 100vw) - 70px)) 32px; align-items: center; padding: 3px;
+  border-radius: 999px; background: rgba(251, 251, 248, .94);
+  box-shadow: 0 0 0 1px rgba(31, 32, 28, .1), 0 1px 2px rgba(31, 32, 28, .06), 0 10px 22px -12px rgba(31, 32, 28, .35);
+  font: 12px var(--mono); color: var(--ink);
+}
+.deck.live .crate-hud { visibility: visible; }
+.crate-hud button { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; height: 32px; border-radius: 999px; margin: 0; padding: 0; }
+.crate-hud .flip { width: 32px; font-size: 17px; line-height: 1; display: grid; place-items: center; padding-bottom: 2px; }
+.crate-hud .now { width: 100%; padding: 0 12px; display: grid; grid-template-columns: 10px minmax(0, 1fr); column-gap: 9px; align-items: center; text-align: left; }
+.crate-hud .now .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crate-hud .ico {
+  width: 10px; height: 10px; background: var(--red);
+  clip-path: polygon(8% 0, 100% 50%, 100% 50%, 8% 100%); transition: clip-path 200ms var(--ease-out), opacity 200ms ease;
+}
+.crate-hud .now[data-state="stop"] .ico { clip-path: polygon(8% 8%, 92% 8%, 92% 92%, 8% 92%); }
+.crate-hud .now[data-state="cueing"] .ico { opacity: .35; }
+.crate-hud button[aria-disabled="true"] { opacity: .28; cursor: default; }
+.crate-hud button.hint, .crate-hud button:active:not([aria-disabled="true"]) { background: #ebe8df; }
+@media (hover: hover) and (pointer: fine) {
+  .crate-hud button { transition: background-color 200ms ease, opacity 200ms ease; }
+  .crate-hud button:not([aria-disabled="true"]):hover { background: #ebe8df; }
+}
+.crate-hud button:focus-visible { outline: 1.5px solid var(--ink); outline-offset: -2px; border-radius: 999px; }
+@media (prefers-reduced-motion: reduce) { .crate-hud .ico { transition: none; } }
+
+.tracks li { border-bottom: 1px solid var(--rule); }
+.tracks li:first-child { border-top: 1px solid var(--rule); }
+/* A link to its MP3 without JavaScript, a play button with it (src/deck/rows.ts): both look the same */
+.tracks .pick {
+  width: 100%; display: grid; grid-template-columns: 36px 1fr auto; gap: 12px; align-items: baseline; text-align: left;
+  background: none; border: 0; padding: 8px 0; cursor: pointer; color: inherit; text-decoration: none;
+}
+.tracks .side { font-size: 12px; color: var(--muted); }
+.tracks .browsed .side { color: var(--ink); }
+.tracks .browsed .side::before { content: "› "; content: "› " / ""; color: var(--red); } /* the empty alt text keeps screen readers off the marker */
+/* Room for the widest state ("playing · stop" and its dot), so the columns never move when a record lands */
+.tracks .st { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: calc(14ch + 14px); }
+.tracks .on .st, .tracks .failed .st { color: var(--ink); }
+.tracks .on .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+@media (hover: hover) and (pointer: fine) {
+  .tracks .st { transition: color 200ms ease; }
+  .tracks .pick:hover .st { color: var(--ink); }
+}
+
+/* The hint names ‹ › only while the scene, and so the crate control, is live; otherwise the short sentence shows. Both
+   share one grid cell, so the line keeps the longer one's height and nothing shifts, and the hidden one is out of the
+   accessibility tree. Scoped to the corner's own line: the crate control's buttons use a .hint class too */
+.corner > .hint { display: grid; margin-top: 12px; font-size: 12px; color: var(--muted); }
+.corner > .hint > span { grid-area: 1 / 1; }
+.deck:not(.live) ~ .hint .hint-scene, .deck.live ~ .hint .hint-list { visibility: hidden; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 680px) {
+  /* Full bleed: 25px is the book's 24px gutter plus the 1px rule, then the gap; 24px more on the right */
+  .deck { aspect-ratio: 375 / 320; margin: 0 0 8px calc(-25px - var(--gap)); width: calc(100% + 49px + var(--gap)); }
+}

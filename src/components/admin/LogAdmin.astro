@@ -1,0 +1,53 @@
+---
+import Field from "./Field.astro";
+import RemoveForm from "./RemoveForm.astro";
+import { formState, logFields } from "../../lib/admin/form-state";
+import { sydneyDate } from "../../lib/time";
+import type { ActionFailure } from "../../lib/admin/actions";
+import type { AdminLogEntry } from "../../lib/admin/store";
+
+interface Props {
+  entries: AdminLogEntry[];
+  failure: ActionFailure | null;
+}
+
+const { entries, failure } = Astro.props;
+const PRECISIONS = [["day", "day"], ["month", "month"]] as const;
+const fresh = formState(failure, "log-new", { date: sydneyDate(new Date()), precision: "day", text: "" });
+const when = (entry: AdminLogEntry) => (entry.precision === "month" ? entry.date.slice(0, 7) : entry.date);
+---
+<form method="post" action="/admin/#log-new" id="log-new" class="admin-form">
+  <h3>new entry</h3>
+  <input type="hidden" name="intent" value="log.create" />
+  <Field form="log-new" name="date" label="date" kind="date" value={fresh.values.date} error={fresh.errors.date} required />
+  <Field form="log-new" name="precision" label="shown as" kind="select" value={fresh.values.precision} error={fresh.errors.precision} options={PRECISIONS}
+    hint="month shows just the month and year, like oct 26; day shows the full date, like 04.10.26." />
+  <Field form="log-new" name="text" label="entry" kind="textarea" value={fresh.values.text} error={fresh.errors.text} required maxlength={280} />
+  <button type="submit" class="button">add</button>
+</form>
+{entries.length === 0 ? (
+  <p class="empty">no entries yet.</p>
+) : (
+  <ol class="entries">
+    {entries.map((entry) => {
+      const id = `log-${entry.id}`;
+      const state = formState(failure, id, logFields(entry));
+      return (
+        <li class="entry">
+          <details id={id} open={state.open}>
+            <summary><span class="when">{when(entry)}</span> <span class="what">{entry.text}</span></summary>
+            <form method="post" action={`/admin/#${id}`} class="admin-form">
+              <input type="hidden" name="intent" value="log.update" />
+              <input type="hidden" name="id" value={entry.id} />
+              <Field form={id} name="date" label="date" kind="date" value={state.values.date} error={state.errors.date} required />
+              <Field form={id} name="precision" label="shown as" kind="select" value={state.values.precision} error={state.errors.precision} options={PRECISIONS} />
+              <Field form={id} name="text" label="entry" kind="textarea" value={state.values.text} error={state.errors.text} required maxlength={280} />
+              <button type="submit" class="button">save</button>
+            </form>
+            <RemoveForm form={id} intent="log.remove" id={entry.id} confirm="yes, remove this entry" error={state.errors.confirm} />
+          </details>
+        </li>
+      );
+    })}
+  </ol>
+)}
