@@ -1,5 +1,5 @@
 import { runAction, type ActionDeps, type ActionFailure } from "./actions";
-import { purgeLogbook } from "./purge";
+import { purgeTags } from "./purge";
 
 /** What the page does next: redirect to the saved section (303), or show the page again with this failure and status */
 export type SubmitOutcome = { redirect: string } | { failure: ActionFailure; status: 422 | 500 };
@@ -24,7 +24,7 @@ export async function submitForm(
     try {
       const result = await runAction(form, deps);
       if (!result.ok) return { failure: result, status: 422 };
-      const purged = await purgeLogbook(cache);
+      const purged = await purgeTags(cache, ["logbook"]);
       return { redirect: `/admin/?saved=${result.section}${purged ? "" : "&later=1"}#${result.section}` };
     } catch (error) {
       console.error("admin: a save failed unexpectedly", error);
