@@ -202,16 +202,38 @@ describe("the orders section", () => {
     expect(text(stuck.querySelector(".order-line"))).toBe("08.10.26 14:02 · 01k6x00000000000000000000a");
     expect(text(stuck.querySelector(".order-prints"))).toBe("2 prints: fixture-b-01 medium oak, fixture-b-02 small unframed");
     expect(stuck.querySelector('.order-prints a[href="/photos/fixture-b-01"]')).not.toBeNull();
-    expect(text(stuck.querySelector(".order-sums"))).toBe("to au · $238 + $49 = $287 · needs attention · test");
+    expect(text(stuck.querySelector(".order-sums"))).toBe("to au · $238 + delivery $49 = $287 · needs attention · test");
     expect(text(stuck.querySelector(".reason"))).toBe("artelo didn't take the order within a day: artelo answered 503");
     expect(stuck.querySelector('form input[name="intent"][value="order.retry"]')).not.toBeNull();
-    expect(text(shipped.querySelector(".order-sums"))).toBe("to au · $238 + $49 = $287 · shipped · refunded $49 · artelo 48213 us$61.40");
+    expect(text(shipped.querySelector(".order-sums"))).toBe("to au · $238 + delivery $49 = $287 · shipped · refunded $49 · artelo 48213 us$61.40");
     expect(shipped.querySelector(".order-tracking a")!.getAttribute("href")).toBe("https://www.ups.com/track?tracknum=1Z999");
     expect(text(shipped.querySelector(".order-tracking a"))).toBe("ups 1Z999");
     expect(shipped.querySelector("form")).toBeNull();
     // Artelo has it: no retry, open it there instead
     expect(held.querySelector("form")).toBeNull();
     expect(text(held.querySelector(".open-in-artelo"))).toBe("open it in artelo (order 48214)");
+  });
+
+  test("the delivery reads as the buyer saw it: with destination taxes when the quote carried tax, plain otherwise (spec 16.1)", async () => {
+    const db = await printDb();
+    await insertOrder(db, { id: "01k6x00000000000000000000a", status: "placed", country: "US", delivery_amount: 5600, delivery_taxed: 1, paid_at: NOW - 10 });
+    await insertOrder(db, { id: "01k6x00000000000000000000b", status: "placed", delivery_taxed: 0, paid_at: NOW - 20 });
+    const data = await loadOrdersAdmin(db, testConfig(), NOW);
+    expect(data.orders.map((order) => order.deliveryTaxed)).toEqual([true, false]);
+    const doc = await render(OrdersAdmin, { data, failure: null });
+    expect(text(doc.querySelector("#order-01k6x00000000000000000000a .order-sums"))).toBe("to us · $238 + delivery and destination taxes $56 = $294 · with artelo · test");
+    expect(text(doc.querySelector("#order-01k6x00000000000000000000b .order-sums"))).toBe("to au · $238 + delivery $49 = $287 · with artelo · test");
+  });
+
+  test("tracking stays once an order is delivered, and shows only from shipped on", async () => {
+    const db = await printDb();
+    const shipments = JSON.stringify([{ carrier: "ups", number: "1Z999", url: "https://www.ups.com/track?tracknum=1Z999" }]);
+    await insertOrder(db, { id: "01k6x00000000000000000000a", status: "delivered", artelo_order_id: "48213", shipments, paid_at: NOW - 10 });
+    await insertOrder(db, { id: "01k6x00000000000000000000b", status: "in_production", artelo_order_id: "48214", shipments, paid_at: NOW - 20 });
+    const doc = await render(OrdersAdmin, { data: await loadOrdersAdmin(db, testConfig(), NOW), failure: null });
+    const delivered = doc.querySelector("#order-01k6x00000000000000000000a .order-tracking a")!;
+    expect([delivered.getAttribute("href"), text(delivered)]).toEqual(["https://www.ups.com/track?tracknum=1Z999", "ups 1Z999"]);
+    expect(doc.querySelector("#order-01k6x00000000000000000000b .order-tracking")).toBeNull();
   });
 
   test("a failed retry shows its message on that order's form", async () => {

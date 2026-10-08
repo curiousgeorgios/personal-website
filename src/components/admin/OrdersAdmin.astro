@@ -49,9 +49,9 @@ const frameWord = (frame: string) => (frame === "oak" ? "oak" : "unframed");
               <div>
                 <p class="order-line">{stuck && <span class="attention-dot" aria-hidden="true"></span>}{order.paidAt !== null && `${stamp(order.paidAt)} · `}<span class="mono">{order.id}</span></p>
                 <p class="order-prints">{count} {count === 1 ? "print" : "prints"}: {order.lines.map((line, index) => <>{index > 0 && ", "}<a href={`/photos/${encodeURIComponent(line.photoId)}`}>{line.photoId}</a> {line.tier} {frameWord(line.frame)}{line.quantity > 1 && ` × ${line.quantity}`}</>)}</p>
-                <p class="order-sums">to {order.country.toLowerCase()} · {aud(order.printTotal)} + {aud(order.deliveryAmount)} = {aud(order.printTotal + order.deliveryAmount)} · {STATUS_WORDS[order.status]}{!order.livemode && " · test"}{order.refundedAmount ? ` · refunded ${aud(order.refundedAmount)}` : ""}{order.arteloId && ` · artelo ${order.arteloId}${order.arteloCost !== null ? ` ${usd(order.arteloCost)}` : ""}`}</p>
+                <p class="order-sums">to {order.country.toLowerCase()} · {aud(order.printTotal)} + {order.deliveryTaxed ? "delivery and destination taxes" : "delivery"} {aud(order.deliveryAmount)} = {aud(order.printTotal + order.deliveryAmount)} · {STATUS_WORDS[order.status]}{!order.livemode && " · test"}{order.refundedAmount ? ` · refunded ${aud(order.refundedAmount)}` : ""}{order.arteloId && ` · artelo ${order.arteloId}${order.arteloCost !== null ? ` ${usd(order.arteloCost)}` : ""}`}</p>
                 {stuck && order.reason && <p class="reason">{order.reason}</p>}
-                {order.status === "shipped" && order.shipments.length > 0 && (
+                {(order.status === "shipped" || order.status === "delivered") && order.shipments.length > 0 && (
                   <p class="order-tracking">{order.shipments.map((shipment, index) => {
                     const href = trackingHref(shipment.url);
                     return <>{index > 0 && " · "}{href ? <a href={href} rel="noopener noreferrer">{shipment.carrier} {shipment.number}<span class="chev" aria-hidden="true"></span></a> : `${shipment.carrier} ${shipment.number}`}</>;

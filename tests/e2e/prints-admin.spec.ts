@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, setMode, unique, waitForStatus } from "./prints";
+import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, postPayForm, quoteDelivery, sessionsFor, setMode, TWO_PRINTS, unique, usAddress, waitForStatus } from "./prints";
 import { PRINTS } from "./prints-site";
 
 // The orders section on the prints server's admin (the test build's local bypass, R7)
@@ -39,7 +39,7 @@ test("an order artelo won't take shows first with its reason and george is email
   const entry = page.locator(`#order-${orderId}`);
   await expect(entry).toHaveClass(/attention/);
   await expect(entry.locator(".reason")).toHaveText("artelo didn't take the order within a day: artelo answered 503");
-  await expect(entry.locator(".order-sums")).toHaveText("to au · $238 + $49 = $287 · needs attention · test");
+  await expect(entry.locator(".order-sums")).toHaveText("to au · $238 + delivery $49 = $287 · needs attention · test");
   // Every needs-attention entry comes before every other
   const classes = await page.locator("#orders .orders-admin > li").evaluateAll((items) => items.map((item) => item.classList.contains("attention")));
   expect(classes.indexOf(false) === -1 || classes.slice(classes.indexOf(false)).every((attention) => !attention)).toBe(true);
@@ -57,4 +57,21 @@ test("the new intents need the site's own origin, like every admin write", async
     const response = await request.post("/admin/", { form, headers: { Origin: "https://example.com" }, maxRedirects: 0 });
     expect(response.status()).toBe(403);
   }
+});
+
+test("an order whose quote carried destination tax says so, as the buyer saw it (spec 16.1)", async ({ page }) => {
+  await asTestClient(page);
+  // A us address: the stand-in quotes us$4.20 sales tax, so the delivery line carries destination taxes
+  const name = `Grace ${unique()}`;
+  await page.goto(`/basket?items=${TWO_PRINTS}`);
+  await quoteDelivery(page, usAddress(name));
+  const response = await postPayForm(page, PRINTS);
+  expect(response.status()).toBe(303);
+  const sessionId = response.headers()["location"].split("/").at(-1)!;
+  const orderId = (await sessionsFor(name)).find((entry) => entry.session.id === sessionId)!.session.client_reference_id;
+  const { event } = await payAtStandIn(sessionId);
+  expect(await deliverStripe(PRINTS, event)).toBe(200);
+  await waitForStatus(orderId, "placed");
+  await page.goto("/admin/#orders");
+  await expect(page.locator(`#order-${orderId} .order-sums`)).toContainText("to us · $238 + delivery and destination taxes $56 = $294 · with artelo · test");
 });

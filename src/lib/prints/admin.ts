@@ -20,6 +20,8 @@ export interface AdminOrder {
   country: string;
   printTotal: number;
   deliveryAmount: number;
+  /** The quote carried destination tax, so the line reads as the buyer saw it (spec 16.1) */
+  deliveryTaxed: boolean;
   status: OrderStatus;
   reason: string | null;
   /** From the stored livemode: whether the payment was Stripe's live mode */
@@ -72,7 +74,7 @@ export async function loadOrdersAdmin(db: D1Database, config: PrintConfig, now: 
     webhookMissing: settings.webhookMissing,
     buffer: settings.buffer,
     orders: (orderRows.results as unknown as OrderRow[]).map((row) => ({
-      id: row.id, paidAt: row.paid_at, lines: lines.get(row.id) ?? [], country: row.country, printTotal: row.print_total, deliveryAmount: row.delivery_amount,
+      id: row.id, paidAt: row.paid_at, lines: lines.get(row.id) ?? [], country: row.country, printTotal: row.print_total, deliveryAmount: row.delivery_amount, deliveryTaxed: row.delivery_taxed === 1,
       status: row.status, reason: row.attention_reason, livemode: row.livemode === 1, refundedAmount: row.refunded_amount, arteloId: row.artelo_order_id,
       arteloCost: row.artelo_cost, shipments: shipmentsOf(row), paymentIntent: row.stripe_payment_intent,
     })),
