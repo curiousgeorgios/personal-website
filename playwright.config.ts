@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { FIXTURE_STRIPE_KEY, PRINTS, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
+import { FIXTURE_STRIPE_KEY, PRINTS, PRINTS_NO_RATE, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
 
 // Set PLAYWRIGHT_BASE_URL to run specs against a deployed site (CI runs the privacy spec after deploy)
 const remote = process.env.PLAYWRIGHT_BASE_URL;
@@ -78,6 +78,14 @@ export default defineConfig({
         {
           command: `${printStore(".wrangler/prints")} && WRANGLER_REGISTRY_PATH=.wrangler/prints/registry wrangler dev -c dist/server/wrangler.json --port 4337 --persist-to .wrangler/prints ${PHOTO_KEY_VAR} ${printVars(PRINTS)} --var STRIPE_SECRET_KEY:${FIXTURE_STRIPE_KEY} --var STRIPE_API_BASE:${STAND_IN}/stripe --var PRINT_RETRY_WINDOW:0`,
           url: PRINTS,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+        // A seventh: prints switched on with every secret but no exchange rate stored, so the basket shows and edits but
+        // quotes nothing (spec 16.5 as ruled). Its own store and dev registry, the same fixture vars and stand-in
+        {
+          command: `${printStore(".wrangler/prints-no-rate", { rate: false })} && WRANGLER_REGISTRY_PATH=.wrangler/prints-no-rate/registry wrangler dev -c dist/server/wrangler.json --port 4339 --persist-to .wrangler/prints-no-rate ${PHOTO_KEY_VAR} ${printVars(PRINTS_NO_RATE)} --var STRIPE_SECRET_KEY:${FIXTURE_STRIPE_KEY} --var STRIPE_API_BASE:${STAND_IN}/stripe`,
+          url: PRINTS_NO_RATE,
           reuseExistingServer: false,
           timeout: 120_000,
         },

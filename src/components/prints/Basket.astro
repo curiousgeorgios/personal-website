@@ -4,17 +4,18 @@ import AddressForm from "./AddressForm.astro";
 import BasketLines from "./BasketLines.astro";
 import QuoteTotal from "./QuoteTotal.astro";
 import { itemsQuery } from "../../lib/prints/basket";
-import type { BasketView } from "../../lib/prints/basket-page";
+import { RATE_DOWN, type BasketView } from "../../lib/prints/basket-page";
 import "../../styles/prints.css";
 
-// The basket page (spec 15.2): no script; every form posts to the basket's own URL, its items in the query string
+// The basket page (spec 15.2): no script; its one form posts to the basket's own URL, its items in the query string, and
+// lands on the total (a fragment never reaches the server)
 interface Props {
   view: BasketView;
 }
 
 const { view } = Astro.props;
 const { basket } = view;
-const action = `/basket${itemsQuery(basket.items)}`;
+const action = `/basket${itemsQuery(basket.items)}#total`;
 ---
 <main class="book basket">
   <Row label="basket" head>
@@ -29,14 +30,18 @@ const action = `/basket${itemsQuery(basket.items)}`;
     ) : (
       <>
         <BasketLines basket={basket} />
+        {/* Defensive: the page answers a closed basket with its 404 (spec 16.5 as ruled), so only a direct render shows this */}
         {!view.open && <p class="basket-closed">prints are closed for now.</p>}
       </>
     )}
   </Row>
   {basket.count > 0 && view.open && (
-    <Row label="deliver to" id="deliver-to"><AddressForm action={action} address={view.address} errors={view.errors} /></Row>
+    <Row label="deliver to" id="deliver-to">
+      {/* No rate the daily job stored in the last week: say so instead of a form that could only answer 503 */}
+      {view.quotable ? <AddressForm action={action} address={view.address} errors={view.errors} /> : <p class="basket-error basket-down" role="status">{RATE_DOWN}</p>}
+    </Row>
   )}
-  {basket.count > 0 && view.open && view.quote && (
-    <Row label="total" id="total"><QuoteTotal action={action} quote={view.quote} address={view.address} gst={view.gst} /></Row>
+  {basket.count > 0 && view.open && view.quotable && view.quote && (
+    <Row label="total" id="total"><QuoteTotal quote={view.quote} gst={view.gst} /></Row>
   )}
 </main>

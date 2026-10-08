@@ -12,12 +12,14 @@ import "../styles/prints.css";
 // The basket (spec 15.2): never cached, never indexed; a GET counts a page view (the beacon sends the path only), a POST,
 // which shows an address, carries no beacon
 const deps = printDeps(env, (promise) => Astro.locals.cfContext.waitUntil(promise));
-// While prints are closed every basket route is the notebook 404: switched off or a secret missing answers before anything
-// is read, as a closed gallery ignores ?items= (spec 16.5); no stored rate answers once the settings say so, below
+// While prints are switched off or a secret is missing every basket route is the notebook 404, answered before anything
+// is read, as a closed gallery ignores ?items= (spec 16.5). A missing or stale rate isn't closed: the basket shows, unquotable
 if (!canOpen(deps.config)) return new Response(null, { status: 404 });
+const method = Astro.request.method;
+if (method !== "GET" && method !== "HEAD" && method !== "POST") return new Response(null, { status: 405, headers: { Allow: "GET, HEAD, POST", "Cache-Control": "no-store" } });
 let outcome: BasketOutcome | null = null;
 try {
-  outcome = Astro.request.method === "POST"
+  outcome = method === "POST"
     ? await basketPost(deps, Astro.request, Astro.url, { quote: env.QUOTE_LIMIT, checkout: env.CHECKOUT_LIMIT, artelo: env.ARTELO_LIMIT })
     : await basketGet(deps, Astro.url);
 } catch (error) {
@@ -25,7 +27,6 @@ try {
   console.error("prints: the basket failed", error instanceof Error ? error.message : String(error));
 }
 if (outcome && "redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
-if (outcome && !outcome.view.open) return new Response(null, { status: 404 });
 Astro.response.status = outcome ? outcome.status : 503;
 Astro.response.headers.set("Cache-Control", "no-store");
 ---

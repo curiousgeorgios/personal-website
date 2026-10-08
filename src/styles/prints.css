@@ -25,7 +25,8 @@
 /* The basket (spec 15.2) */
 .basket-lines { display: grid; gap: 14px; }
 .basket-line { display: flex; gap: 14px; align-items: flex-start; }
-.line-thumb { flex: none; width: 88px; }
+/* The box holds its 88px square before any preview arrives, so a slow image never moves the lines below it (CLS, spec 23.1) */
+.line-thumb { flex: none; width: 88px; height: 88px; }
 .basket-line img { display: block; width: auto; height: auto; max-width: 88px; max-height: 88px; background: #ecebe5; }
 .line-name { font-size: 16px; }
 .line-what, .line-links { font: 12.5px/1.55 var(--mono); color: var(--muted); }
@@ -44,6 +45,8 @@
 .basket-form input:focus-visible, .basket-form select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 /* --red is under 4.5:1 on paper for small text; this darker red is 5.6:1 */
 .basket-error { font-size: 14px; color: #a83a24; }
+.basket-error:focus { outline: none; }
+.basket-down { max-width: 34rem; }
 .quote-line { font-size: 18px; margin-bottom: 8px; }
 .quote-line + .prints-hint { margin-bottom: 6px; }
 .pay-form { margin-top: 14px; }

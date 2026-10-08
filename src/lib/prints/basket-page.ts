@@ -5,7 +5,7 @@ import type { PrintDeps } from "./config";
 import { freshRate } from "./fx";
 import { arteloKey, clientKey, underLimit, type PrintLimits } from "./limits";
 import { gstSentence } from "./money";
-import { printsStatus } from "./open";
+import { canOpen } from "./open";
 import { breakdown, deliveryAmount, deliveryLabel } from "./quote";
 import { QUOTE_SECONDS, sealQuote, type QuotePayload } from "./seal";
 import { loadBasket, type PrintSettings, type ResolvedBasket } from "./store";
@@ -27,6 +27,8 @@ export interface BasketView {
   /** Lines about prints taken out or refused */
   notes: string[];
   open: boolean;
+  /** False while the stored rate is missing or over a week old: the basket shows RATE_DOWN in place of the address form */
+  quotable: boolean;
   /** What the address form shows: empty on a GET, as posted on a POST */
   address: Address;
   errors: AddressErrors & { form?: string };
@@ -40,9 +42,11 @@ export const FORM_UNREADABLE = "that form couldn't be read. try again.";
 /** No rate, or one over a week old: nothing can be quoted until the daily job stores a fresh one (ADR-0021 as amended) */
 export const RATE_DOWN = "delivery prices can't be checked right now. try again later.";
 
+// Open is the switch and the secrets alone (spec 16.5): a closed basket is the page's 404. A missing or stale rate leaves the
+// basket open, editable and unquotable, so a buyer's basket survives until the daily job stores a fresh rate
 function viewOf(deps: PrintDeps, basket: ResolvedBasket, settings: PrintSettings, over: Partial<BasketView> = {}): BasketView {
   return {
-    basket, notes: droppedNotes(basket.unavailable, basket.overCap), open: printsStatus(deps.config, settings.rate).open,
+    basket, notes: droppedNotes(basket.unavailable, basket.overCap), open: canOpen(deps.config), quotable: freshRate(settings, deps.now()) !== null,
     address: { ...EMPTY_ADDRESS }, errors: {}, quote: null, gst: gstSentence(deps.config.gst), ...over,
   };
 }
@@ -55,8 +59,7 @@ export async function basketGet(deps: PrintDeps, url: URL): Promise<BasketOutcom
   const op = readOp(url.searchParams);
   const raw = parseItems(url.searchParams.get("items"));
   const { basket, settings } = await loadBasket(deps.db, op?.kind === "add" ? [...raw, op.entry] : raw);
-  // The form says so before anyone types an address it can't quote
-  const view = viewOf(deps, basket, settings, freshRate(settings, deps.now()) === null ? { errors: { form: RATE_DOWN } } : {});
+  const view = viewOf(deps, basket, settings);
   if (!view.open) return { status: 200, view, beacon: true };
   if (op && view.notes.length === 0) {
     if (op.kind === "add") return { redirect: basketHref(basket.items) };
@@ -80,20 +83,19 @@ export async function basketPost(deps: PrintDeps, request: Request, url: URL, li
   const intent = form?.get("intent");
   if (intent !== "quote") return render(422, { errors: { form: FORM_UNREADABLE } });
 
-  // A closed basket takes no quote and counts against no limit; the page answers it with a 404
-  if (!printsStatus(deps.config, settings.rate).open) return render(200);
-  const { testClients } = deps.config;
-  // Both limits before anything that could reach Artelo, so a flood never does (spec 16.1, 21.3)
-  if (!(await underLimit(limits.quote, clientKey(request, testClients))) || !(await underLimit(limits.artelo, arteloKey(request, testClients)))) {
-    return render(429, { errors: { form: "too many quotes - wait a minute and try again." } });
-  }
-  if (basket.count === 0) return render(200);
-  // Only a rate the daily job stored in the last week quotes: settings.rate alone could be a month old (spec 16.4, tightened)
+  // What can be refused without any work counts against no limit: a closed basket (the page's 404), an empty one, and no
+  // rate the daily job stored in the last week (settings.rate alone could be a month old: spec 16.4, tightened)
+  if (!canOpen(deps.config) || basket.count === 0) return render(200);
   const rate = freshRate(settings, deps.now());
-  if (rate === null) return render(503, { errors: { form: RATE_DOWN } });
+  if (rate === null) return render(503);
+  const { testClients } = deps.config;
+  const tooMany = () => render(429, { errors: { form: "too many quotes - wait a minute and try again." } });
+  // The visitor's limit before any checking; the shared Artelo bucket only for a quote that will reach Artelo (spec 16.1, 21.3)
+  if (!(await underLimit(limits.quote, clientKey(request, testClients)))) return tooMany();
   if (basket.unavailable > 0 || basket.overCap > 0) return render(422);
   const checked = checkAddress(address);
   if (!checked.ok) return render(422, { errors: checked.errors });
+  if (!(await underLimit(limits.artelo, arteloKey(request, testClients)))) return tooMany();
   const result = await priceCheck(deps, basket.lines, checked.address, rate);
   if (!result.ok) {
     if (result.refused === null) return render(503, { errors: { form: "delivery prices aren't loading right now. try again in a minute." } });

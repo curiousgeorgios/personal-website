@@ -1,6 +1,6 @@
 ---
 import { MAX_PRINTS } from "../../lib/prints/basket";
-import { printLine } from "../../lib/prints/catalogue";
+import { frameLabel, printLine } from "../../lib/prints/catalogue";
 import { aud } from "../../lib/prints/money";
 import type { ResolvedBasket } from "../../lib/prints/store";
 
@@ -11,6 +11,8 @@ interface Props {
 
 const { basket } = Astro.props;
 const change = (kind: "more" | "remove", line: number) => `/basket?items=${basket.items}&${kind}=${line}`;
+// Each line's links say which print they change, so a list of links doesn't read as ten of the same (WCAG 2.4.4)
+const named = (line: ResolvedBasket["lines"][number]) => `${line.name}, ${line.tier}, ${frameLabel(line.frame)}`;
 ---
 <ol class="basket-lines">
   {basket.lines.map((line) => (
@@ -20,7 +22,7 @@ const change = (kind: "more" | "remove", line: number) => `/basket?items=${baske
       <div>
         <p class="line-name">{line.name}</p>
         <p class="line-what">{printLine(line.tier, line.size, line.frame)}{line.quantity > 1 && ` × ${line.quantity}`} · {aud(line.unitAmount * line.quantity)}</p>
-        <p class="line-links">{basket.count < MAX_PRINTS && <><a href={change("more", line.line)}>one more</a> · </>}<a href={change("remove", line.line)}>remove one</a></p>
+        <p class="line-links">{basket.count < MAX_PRINTS && <><a href={change("more", line.line)} aria-label={`one more: ${named(line)}`}>one more</a> · </>}<a href={change("remove", line.line)} aria-label={`remove one: ${named(line)}`}>remove one</a></p>
       </div>
     </li>
   ))}

@@ -5,6 +5,8 @@
 export const PRINTS = "http://localhost:4337";
 /** Stripe's real test mode, started only when STRIPE_TEST_SECRET_KEY is set (Task 15) */
 export const PRINTS_STRIPE = "http://localhost:4338";
+/** Prints switched on with every secret but no exchange rate stored: the basket shows, unquotable (spec 16.5 as ruled) */
+export const PRINTS_NO_RATE = "http://localhost:4339";
 /** The stand-in for Artelo, the exchange rate, Stripe's three endpoints and the mail binding */
 export const STAND_IN = "http://127.0.0.1:4401";
 
@@ -16,13 +18,13 @@ export const FIXTURE_SECRETS = {
   PRINT_VIEW_SECRET: "2".repeat(64),
 } as const;
 
-/** A prints server's store, made afresh: the migrations, the gallery fixture and a rate of 1.50 dated today, so prints open at once */
-export function printStore(store: string): string {
+/** A prints server's store, made afresh: the migrations, the gallery fixture and (unless left out) a rate of 1.50 dated today, so prints open at once */
+export function printStore(store: string, { rate = true } = {}): string {
   return [
     `rm -rf ${store}`,
     `wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to ${store}`,
     `node scripts/seed-photo-test.mjs --persist-to ${store}`,
-    `wrangler d1 execute curiousgeorge-logbook --local --persist-to ${store} --command "INSERT INTO print_settings (key, value, updated_at) VALUES ('usd_aud', '1.5', 0), ('usd_aud_date', date('now'), 0)"`,
+    ...(rate ? [`wrangler d1 execute curiousgeorge-logbook --local --persist-to ${store} --command "INSERT INTO print_settings (key, value, updated_at) VALUES ('usd_aud', '1.5', 0), ('usd_aud_date', date('now'), 0)"`] : []),
   ].join(" && ");
 }
 

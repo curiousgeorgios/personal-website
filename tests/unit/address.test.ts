@@ -63,6 +63,16 @@ test("readAddress trims every field and treats a missing one as empty", () => {
   expect(readAddress(form)).toEqual({ name: "Ada Lovelace", line1: "", line2: "", city: "", state: "", postcode: "", country: "AU", phone: "" });
 });
 
+test("readAddress cuts a field to one past its limit, so it is still refused but never echoed at any length", () => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(ADDRESS)) form.set(name, value);
+  form.set("name", "a".repeat(300_000));
+  form.set("country", "AUSTRALIA");
+  const address = readAddress(form);
+  expect([address.name.length, address.country]).toEqual([101, "AUS"]);
+  expect(checkAddress(address)).toEqual({ ok: false, errors: { name: "100 characters at most.", country: "choose a country." } });
+});
+
 test("posting to reads like an address on an envelope", () => {
   expect(postingTo(ADDRESS)).toBe("Ada Lovelace, 12 Example Street, Unit 3, Bondi Beach NSW 2026, australia");
   expect(postingTo({ ...ADDRESS, line2: "", state: "", postcode: "" })).toBe("Ada Lovelace, 12 Example Street, Bondi Beach, australia");

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { GALLERY } from "./gallery-site";
-import { PRINTS } from "./prints-site";
+import { PRINTS, PRINTS_NO_RATE } from "./prints-site";
 import { asTestClient, auAddress, priceChecksFor, quoteDelivery, TWO_PRINTS, unique, usAddress } from "./prints";
 
 // The prints server (4337): prints open, every provider stood in. The print specs run in Chromium (spec 23.2)
@@ -146,6 +146,8 @@ test.describe("the basket without javascript", () => {
     await expect(page.locator("#deliver-phone-error")).toHaveText("that phone number looks too short.");
     await expect(page.locator('#deliver [name="line1"]')).toHaveValue("12 Example Street");
     await expect(page.locator("#total")).toHaveCount(0);
+    // Without script, focus lands on the failed field, so it is seen and announced
+    await expect(page.locator('#deliver [name="phone"]')).toBeFocused();
   });
 
   test("an australian address is quoted once for the whole basket, exactly, and the address is in no url", async ({ page }) => {
@@ -154,7 +156,10 @@ test.describe("the basket without javascript", () => {
     page.on("request", (request) => urls.push(request.url()));
     const name = `Ada ${unique()}`;
     await page.goto(`/basket?items=${TWO_PRINTS}`);
-    await quoteDelivery(page, auAddress(name));
+    const [posted] = await Promise.all([page.waitForResponse((response) => response.request().method() === "POST"), quoteDelivery(page, auAddress(name))]);
+    // The page that shows the address is never stored, and lands on its total
+    expect(posted.headers()["cache-control"]).toBe("no-store");
+    expect(page.url()).toMatch(/\/basket\?items=[^#]+#total$/);
     await expect(page.locator(".quote-line")).toHaveText("prints $238 + delivery $49 = $287");
     await expect(page.locator("#total .prints-hint").first()).toHaveText("artelo's freight us$30.00 for this address, converted at a$1.50 per us$1, plus 8% in case the exchange rate moves, rounded up to the dollar.");
     await expect(page.locator("script")).toHaveCount(0);
@@ -163,6 +168,21 @@ test.describe("the basket without javascript", () => {
     expect(checks[0].customerAddress).toMatchObject({ street1: "12 Example Street", street2: "Unit 3", city: "Bondi Beach", state: "NSW", zipcode: "2026", country: "AU", phone: "+61 400 000 000" });
     expect(checks[0].items.map((item) => [item.quantity, item.productInfo.size, item.productInfo.frameColor, item.productInfo.orientation])).toEqual([[1, "x12x18", "NaturalOak", "Vertical"], [1, "x8x12", null, "Horizontal"]]);
     expect(urls.filter((url) => /Example|Bondi|Ada|400(%20|\+| )000/.test(decodeURIComponent(url)))).toEqual([]);
+  });
+
+  test("continue to payment posts the visible address form with the sealed quote, so an edit after quoting goes to checkout to be checked", async ({ page }) => {
+    await asTestClient(page);
+    await page.goto(`/basket?items=${TWO_PRINTS}`);
+    await quoteDelivery(page, auAddress(`Ada ${unique()}`));
+    await page.locator('#deliver [name="line1"]').fill("14 Example Street");
+    const [checkout] = await Promise.all([page.waitForRequest((request) => request.method() === "POST"), page.getByRole("button", { name: "continue to payment" }).click()]);
+    const body = new URLSearchParams(checkout.postData() ?? "");
+    expect(new URL(checkout.url()).search).toBe(`?items=${TWO_PRINTS}`);
+    expect(body.getAll("intent")).toEqual(["checkout"]);
+    // One copy of each field, the one the buyer sees, and the seal of what was quoted
+    expect(body.getAll("line1")).toEqual(["14 Example Street"]);
+    expect(body.getAll("quote")).toHaveLength(1);
+    expect(body.get("quote")).toMatch(/^[\w-]+\.[\w-]+$/);
   });
 
   test("a us address passes on the sales tax as destination taxes; antarctica is refused beside the form", async ({ page }) => {
@@ -205,3 +225,54 @@ test("with prints closed every basket route is the notebook 404, and none of the
   expect(posted.status()).toBe(404);
   expect(await priceChecksFor(name)).toHaveLength(0);
 });
+
+// The prints server with no stored rate (4339): open, so the basket shows and edits, but nothing is quoted (spec 16.5 as ruled)
+test.describe("the basket with no exchange rate", () => {
+  test.use({ baseURL: PRINTS_NO_RATE, javaScriptEnabled: false });
+
+  test("shows its lines and says delivery can't be checked, with no form, total or payment; edits still land on the canonical basket", async ({ page }) => {
+    const response = await page.goto(`/basket?items=${TWO_PRINTS}`);
+    expect(response?.status()).toBe(200);
+    expect(response?.headers()["cache-control"]).toBe("no-store");
+    await expect(page.locator(".basket-line")).toHaveCount(2);
+    await expect(page.locator("#deliver-to .basket-down")).toHaveText("delivery prices can't be checked right now. try again later.");
+    await expect(page.locator("form, #total, #pay")).toHaveCount(0);
+    await page.getByRole("link", { name: "remove one" }).first().click();
+    await expect(page).toHaveURL(/\/basket\?items=fixture-b-02:small:unframed$/);
+    await expect(page.locator(".basket-line")).toHaveCount(1);
+  });
+
+  test("a posted quote is 503 with the same line, and artelo is never asked", async ({ request }) => {
+    const name = `Ada ${unique()}`;
+    const response = await request.post(`/basket?items=${TWO_PRINTS}`, { form: { intent: "quote", ...auAddress(name) }, headers: { Origin: PRINTS_NO_RATE, "X-Test-Client": `spec-${unique()}` } });
+    expect(response.status()).toBe(503);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain("delivery prices can&#39;t be checked right now. try again later.");
+    expect(html).not.toContain('id="pay"');
+    expect(await priceChecksFor(name)).toHaveLength(0);
+  });
+});
+
+// Previews held back 1.5 s, as on a slow phone: the lines, the total and the form below them must not move when they arrive
+for (const [width, height] of [[1280, 900], [375, 812]]) {
+  test(`five lines whose previews arrive late shift nothing at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await page.route(/\/media\/photos\/previews\/.*\.webp$/, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.addInitScript(() => {
+      (window as unknown as { cls: number }).cls = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) if (!entry.hadRecentInput) (window as unknown as { cls: number }).cls += entry.value;
+      }).observe({ type: "layout-shift", buffered: true });
+    });
+    const five = ["small:oak", "small:unframed", "medium:oak", "medium:unframed", "large:oak"].map((print) => `fixture-b-01:${print}`).join(",");
+    await page.goto(`/basket?items=${five}`);
+    await expect(page.locator(".basket-line")).toHaveCount(5);
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>(".basket-line img")].every((img) => img.complete && img.naturalWidth > 0), undefined, { timeout: 10_000 });
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => (window as unknown as { cls: number }).cls)).toBeLessThan(0.01);
+  });
+}

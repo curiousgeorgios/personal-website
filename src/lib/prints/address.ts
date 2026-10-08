@@ -10,12 +10,15 @@ export type AddressErrors = Partial<Record<AddressField, string>>;
 
 export const EMPTY_ADDRESS: Address = { name: "", line1: "", line2: "", city: "", state: "", postcode: "", country: "", phone: "" };
 
-/** Every field from a posted form, trimmed; anything missing (or a file) is "" */
+/**
+ * Every field from a posted form, trimmed; anything missing (or a file) is "". Each is cut to one character past its
+ * field's limit: still refused as too long, but a form that echoes it back stays small whatever was posted
+ */
 export function readAddress(form: FormData): Address {
   const address = { ...EMPTY_ADDRESS };
   for (const name of ADDRESS_FIELDS) {
     const value = form.get(name);
-    address[name] = typeof value === "string" ? value.trim() : "";
+    address[name] = typeof value === "string" ? value.trim().slice(0, RULES[name].max + 1) : "";
   }
   return address;
 }

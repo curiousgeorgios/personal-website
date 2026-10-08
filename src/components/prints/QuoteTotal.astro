@@ -1,25 +1,21 @@
 ---
-import { ADDRESS_FIELDS, type Address } from "../../lib/prints/address";
 import type { QuoteView } from "../../lib/prints/basket-page";
 import { aud } from "../../lib/prints/money";
 
-// The total and the pay form (spec 16.3): the address repeated as hidden fields and the sealed quote, which checkout verifies
+// The total and the pay button (spec 16.3). The button and the sealed quote belong to the address form (form="deliver"), so
+// checkout posts the visible address fields with the seal, never a hidden copy of the address quoted
 interface Props {
-  action: string;
   quote: QuoteView;
-  address: Address;
   gst: string;
 }
 
-const { action, quote, address, gst } = Astro.props;
+const { quote, gst } = Astro.props;
 ---
 <p class="quote-line">prints {aud(quote.printTotal)} + {quote.label} {aud(quote.deliveryAmount)} = {aud(quote.printTotal + quote.deliveryAmount)}</p>
 <p class="prints-hint">{quote.breakdown}</p>
 <p class="prints-hint">in australian dollars. {gst}</p>
-<form method="post" action={action} id="pay" class="basket-form pay-form">
-  <input type="hidden" name="intent" value="checkout" />
-  {ADDRESS_FIELDS.map((name) => <input type="hidden" name={name} value={address[name]} />)}
-  <input type="hidden" name="quote" value={quote.token} />
-  <button type="submit" class="print-button">continue to payment</button>
+<div class="basket-form pay-form">
+  <input type="hidden" name="quote" value={quote.token} form="deliver" />
+  <button type="submit" name="intent" value="checkout" form="deliver" id="pay" class="print-button">continue to payment</button>
   <p class="prints-hint">payment happens on stripe's own checkout page, which sets its own cookies. this site sets none. your address is fixed there; to change it, change it here and quote again.</p>
-</form>
+</div>

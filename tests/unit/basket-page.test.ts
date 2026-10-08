@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { basketGet, basketPost, RATE_DOWN } from "../../src/lib/prints/basket-page";
+import { basketGet, basketPost } from "../../src/lib/prints/basket-page";
 import { openQuote } from "../../src/lib/prints/seal";
 import { ADDRESS, captureLogs, fakeFetch, json, NOW, printDb, testConfig, testDeps, US_ADDRESS, VIEW_SECRET, type Handler } from "./prints-fakes";
 
@@ -190,19 +190,26 @@ describe("refusals that must never reach a checkout button (ADR-0021 as amended)
     }
   });
 
-  test("an exchange rate over a week old quotes nothing and never asks artelo; the basket says so before anyone types", async () => {
-    const { fake, deps } = await setup();
-    await deps.db.prepare("UPDATE print_settings SET value = '2026-09-30' WHERE key = 'usd_aud_date'").run();
-    const outcome = await basketPost(deps, quote(), url(`?items=${TWO}`), {});
-    expect(outcome).toMatchObject({ status: 503 });
-    expect("view" in outcome && outcome.view.errors.form).toBe(RATE_DOWN);
-    expect("view" in outcome && outcome.view.quote).toBeNull();
-    expect("view" in outcome && outcome.view.address).toEqual(ADDRESS);
-    expect(fake.calls).toHaveLength(0);
-    const page = await basketGet(deps, url(`?items=${TWO}`));
-    expect(page).toMatchObject({ status: 200 });
-    expect("view" in page && page.view.errors.form).toBe(RATE_DOWN);
-  });
+  const counting = () => ({ limit: vi.fn(async () => ({ success: true })) }) as unknown as RateLimit & { limit: ReturnType<typeof vi.fn> };
+  const noFreshRate = {
+    "over a week old": "UPDATE print_settings SET value = '2026-09-30' WHERE key = 'usd_aud_date'",
+    "never stored": "DELETE FROM print_settings WHERE key IN ('usd_aud', 'usd_aud_date')",
+  };
+  for (const [state, sql] of Object.entries(noFreshRate)) {
+    test(`an exchange rate ${state}: the basket shows and edits, open but unquotable; a quote is 503 before either limit, and artelo is never asked`, async () => {
+      const { fake, deps } = await setup();
+      await deps.db.prepare(sql).run();
+      const page = await basketGet(deps, url(`?items=${TWO}`));
+      expect(page).toMatchObject({ status: 200, beacon: true, view: { open: true, quotable: false, quote: null } });
+      expect("view" in page && page.view.basket.count).toBe(2);
+      expect(await basketGet(deps, url(`?items=${TWO}&remove=1`))).toEqual({ redirect: "/basket?items=fixture-b-02:small:unframed" });
+      const limiter = counting();
+      const outcome = await basketPost(deps, quote(), url(`?items=${TWO}`), { quote: limiter, artelo: limiter });
+      expect(outcome).toMatchObject({ status: 503, view: { open: true, quotable: false, quote: null } });
+      expect(limiter.limit).not.toHaveBeenCalled();
+      expect(fake.calls).toHaveLength(0);
+    });
+  }
 
   test("the quote uses the fresh rate, never a stale one, and seals it", async () => {
     const { deps } = await setup();
@@ -220,6 +227,16 @@ describe("refusals that must never reach a checkout button (ADR-0021 as amended)
       const outcome = await basketGet(deps, url(query));
       expect("view" in outcome && outcome.view.open).toBe(false);
     }
+  });
+
+  test("the shared artelo bucket counts only quotes that reach artelo; the visitor's limit counts every quote", async () => {
+    const { deps } = await setup();
+    const visitor = counting();
+    const artelo = counting();
+    await basketPost(deps, quote(), url(`?items=${TWO}`), { quote: visitor, artelo });
+    await basketPost(deps, post({ intent: "quote", ...ADDRESS, phone: "12" }), url(`?items=${TWO}`), { quote: visitor, artelo });
+    await basketPost(deps, quote(), url("?items=fixture-b-01:medium:oak,fixture-03:small:oak"), { quote: visitor, artelo });
+    expect([visitor.limit.mock.calls.length, artelo.limit.mock.calls.length]).toEqual([3, 1]);
   });
 
   test("a closed basket takes no quote before either limit is counted", async () => {
