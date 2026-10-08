@@ -8,12 +8,12 @@ The backend supports public previews and private full-resolution JPEG downloads 
 | --- | --- |
 | `GET /api/photos?after=-1&limit=24&collection=<optional>` | Published catalogue with `photos` and numeric `next` cursor. Limit: 1–48. |
 | `GET /api/photos/<id>` | One published photograph. No private object key or bearer credential. |
-| `GET /media/photos/previews/<id>/<sha>/<480\|960\|1600>.<webp\|avif>` | Public versioned preview, served through the existing media route. |
+| `GET /media/photos/previews/<id>/<sha>/<240\|480\|960\|1600>.<webp\|avif>` | Public versioned preview, served through the existing media route. |
 | `GET /api/photos/downloads?token=<signed-token>&after=-1&limit=24` | Private catalogue for a catalogue-scoped grant, with protected `downloadUrl` values and `expiresAt`. |
 | `GET` or `HEAD /photos/downloads/<id>?token=<signed-token>` | Approved full-resolution JPEG attachment. Supports byte ranges and conditional requests. |
 | `POST /admin/photos/links` | Issue a photo or catalogue link, through the existing owner administration gate. |
 | `DELETE /admin/photos/links?grantId=<uuid>` | Revoke a link through the owner gate. |
-| `PATCH /admin/photos/<id>` | Publish or unpublish a prepared photograph after verifying its private JPEG and six previews. |
+| `PATCH /admin/photos/<id>` | Publish or unpublish a prepared photograph after verifying its private JPEG and eight previews. |
 
 Public photo fields: `id`, `collection`, `title`, `width`, `height`, `downloadBytes` and `previews`. Each preview has `url`, actual `width`/`height` and `format`. Titles initially contain an empty string for the UI to handle. Collections initially use Instagram post identifiers as provenance; no artistic titles were invented.
 

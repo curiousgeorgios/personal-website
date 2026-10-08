@@ -17,7 +17,7 @@ const POSTS = [
 ];
 const UNPUBLISHED = new Set(["fixture-03"]);
 const RAW = new Set(["fixture-c-01"]);
-const SIZES = [480, 960, 1600];
+const SIZES = [240, 480, 960, 1600];
 const COLOURS = ["#25475e", "#5e4a25", "#3d5e25", "#5e2541", "#2f2f5e", "#5e3b25"];
 
 const platform = await photoPlatform({ persistTo: process.argv[i + 1], remote: false });

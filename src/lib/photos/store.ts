@@ -66,6 +66,9 @@ export const MAX_ENTRY_LIMIT = 12;
 /** The previews the gallery uses (spec 3.3) */
 export const GALLERY_SIZES = [240, 480] as const;
 
+/** Every photograph has four sizes (240, 480, 960, 1600) in two formats (spec 2.2) */
+export const PREVIEW_COUNT = 8;
+
 const PUBLIC = "SELECT photos.*, photo_posts.published_at, photo_posts.published_on, photo_posts.place FROM photos JOIN photo_posts ON photo_posts.collection = photos.collection";
 /** A page of posts that have a published photograph, newest first; bound with (cursor, limit + 1) */
 const POSTS =

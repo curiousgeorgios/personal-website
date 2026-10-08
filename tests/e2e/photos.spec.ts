@@ -12,7 +12,7 @@ test("public API returns responsive previews without drafts or private object ke
   const page = await response.json();
   expect(page.photos.map((p: { id: string }) => p.id)).toEqual(["fixture-01"]);
   expect(page.next).toBe(0);
-  expect(page.photos[0].previews).toHaveLength(6);
+  expect(page.photos[0].previews).toHaveLength(8);
   expect(JSON.stringify(page)).not.toMatch(/prints\/|print_key|token=/);
   const preview = await request.get(`${ADMIN}${page.photos[0].previews[0].url}`);
   expect(preview.status()).toBe(200);
@@ -102,7 +102,7 @@ test("the entry mode pages posts newest first, with only the gallery's previews"
   expect(page.entries[0]).not.toHaveProperty("publishedAt");
   expect(page.entries[1].place).toBeNull();
   expect(page.entries[0].photos.map((photo: { id: string }) => photo.id)).toEqual(["fixture-01", "fixture-02"]);
-  expect(page.entries[0].photos[0].previews.map((preview: { url: string }) => preview.url.split("/").at(-1))).toEqual(["480.webp", "480.avif"]);
+  expect(page.entries[0].photos[0].previews.map((preview: { url: string }) => preview.url.split("/").at(-1))).toEqual(["240.webp", "240.avif", "480.webp", "480.avif"]);
   const rest = await (await request.get(`${GALLERY}/api/photos?by=entry&before=${page.next}`)).json();
   expect(rest.entries.map((entry: { collection: string }) => entry.collection)).toEqual(["fixture-e", "fixture-f"]);
   expect(rest.next).toBeNull();

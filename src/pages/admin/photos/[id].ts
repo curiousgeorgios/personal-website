@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { photoError, photoJson, readPhotoJson } from "../../../lib/photos/http";
 import { PHOTO_ID } from "../../../lib/photos/tokens";
-import type { Preview, PhotoRow } from "../../../lib/photos/store";
+import { PREVIEW_COUNT, type Preview, type PhotoRow } from "../../../lib/photos/store";
 
 export const PATCH: APIRoute = async ({ params, request, cache }) => {
   const id = params.id ?? "";
@@ -18,7 +18,7 @@ export const PATCH: APIRoute = async ({ params, request, cache }) => {
       const object = await env.PHOTO_PRINTS.head(row.print_key);
       if (!object || object.size !== row.print_bytes || object.httpMetadata?.contentType !== "image/jpeg" || object.customMetadata?.sha256 !== row.print_sha256) return photoError("Verified print master unavailable.", 409);
       const previews = JSON.parse(row.previews) as Preview[];
-      if (previews.length !== 6) return photoError("Responsive previews unavailable.", 409);
+      if (previews.length !== PREVIEW_COUNT) return photoError("Responsive previews unavailable.", 409);
       for (const preview of previews) {
         if (!preview.key.startsWith("photos/previews/") || !["avif", "webp"].includes(preview.format)) return photoError("Invalid preview.", 409);
         const stored = await env.MEDIA.head(preview.key);

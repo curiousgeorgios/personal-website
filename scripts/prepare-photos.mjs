@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile, stat, rename } from "node:fs/promises";
 import { dirname, resolve, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { PREVIEW_FORMATS, PREVIEW_SIZES } from "./photo-manifest.mjs";
 
 const args = process.argv.slice(2);
 const arg = (name) => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
@@ -44,6 +45,29 @@ if (tasks.some(({ source }) => [".arw", ".dng", ".heic"].includes(extname(source
 }
 sharp.concurrency(1);
 const hash = (data) => createHash("sha256").update(data).digest("hex");
+
+/** Encodes previews of a master at these sizes (each fitted inside its square) and writes them beside it */
+async function encodePreviews(data, id, sha256, sizes) {
+  const previews = [];
+  for (const size of sizes) {
+    for (const format of PREVIEW_FORMATS) {
+      const resized = sharp(data).resize({ width: size, height: size, fit: "inside", withoutEnlargement: true });
+      const encoded = format === "webp" ? resized.webp({ quality: 82, effort: 4 }) : resized.avif({ quality: 55, effort: 3 });
+      const result = await encoded.toBuffer({ resolveWithObject: true });
+      const key = `photos/previews/${id}/${sha256}/${size}.${format}`;
+      const path = join(output, key);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, result.data, { mode: 0o600 });
+      previews.push({ key, file: key, width: result.info.width, height: result.info.height, format, bytes: result.data.length, sha256: hash(result.data) });
+    }
+  }
+  return previews;
+}
+
+async function writeCheckpoint(checkpoint, record) {
+  await writeFile(`${checkpoint}.partial`, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
+  await rename(`${checkpoint}.partial`, checkpoint);
+}
 const results = new Array(tasks.length);
 let cursor = 0;
 async function prepare(task) {
@@ -55,6 +79,14 @@ async function prepare(task) {
     const cached = JSON.parse(await readFile(checkpoint, "utf8"));
     if (cached.fingerprint === fingerprint && (await stat(join(output, cached.print.file))).size === cached.print.bytes) {
       for (const preview of cached.previews) await stat(join(output, preview.file));
+      if (!cached.previews.some((preview) => preview.key.endsWith("/240.webp"))) {
+        // A checkpoint from before the gallery has no 240s: derive them from the master already on disk, so the master,
+        // its SHA-256 and its publication state stay as they are (spec 2.2)
+        const master = await readFile(join(output, cached.print.file));
+        if (hash(master) !== cached.print.sha256) throw new Error(`Prepared master changed on disk: ${selected.id}`);
+        cached.previews = [...(await encodePreviews(master, selected.id, cached.print.sha256, [240])), ...cached.previews];
+        await writeCheckpoint(checkpoint, cached);
+      }
       return { ...cached, position };
     }
   } catch (error) { if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error; }
@@ -70,19 +102,7 @@ async function prepare(task) {
   const printPath = join(output, printKey);
   await mkdir(dirname(printPath), { recursive: true });
   await writeFile(printPath, data, { mode: 0o600 });
-  const previews = [];
-  for (const size of [480, 960, 1600]) {
-    for (const format of ["webp", "avif"]) {
-      const resized = sharp(data).resize({ width: size, height: size, fit: "inside", withoutEnlargement: true });
-      const encoded = format === "webp" ? resized.webp({ quality: 82, effort: 4 }) : resized.avif({ quality: 55, effort: 3 });
-      const result = await encoded.toBuffer({ resolveWithObject: true });
-      const key = `photos/previews/${selected.id}/${sha256}/${size}.${format}`;
-      const path = join(output, key);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, result.data, { mode: 0o600 });
-      previews.push({ key, file: key, width: result.info.width, height: result.info.height, format, bytes: result.data.length, sha256: hash(result.data) });
-    }
-  }
+  const previews = await encodePreviews(data, selected.id, sha256, PREVIEW_SIZES);
   const original = task.row.files.find((f) => f.kind === "original" && f.resource_role === "primary");
   const record = {
     id: selected.id, collection: selected.post, position, title: "", published: false,
@@ -90,8 +110,7 @@ async function prepare(task) {
     needsRawReview: source.kind !== "edited" && [".arw", ".dng"].includes(extname(original.path).toLowerCase()),
     print: { key: printKey, file: printKey, width: info.width, height: info.height, bytes: data.length, sha256 }, previews,
   };
-  await writeFile(`${checkpoint}.partial`, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
-  await rename(`${checkpoint}.partial`, checkpoint);
+  await writeCheckpoint(checkpoint, record);
   return record;
 }
 async function worker() {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve, dirname, sep } from "node:path";
 import sharp from "sharp";
+import { checkPhotoRecord } from "./photo-manifest.mjs";
 import { photoPlatform } from "./photo-platform.mjs";
 
 const args = process.argv.slice(2);
@@ -23,15 +24,12 @@ const ids = new Set();
 const positions = new Set();
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 for (const photo of manifest.photos) {
-  if (!allowed.has(photo.id) || !/^[A-Za-z0-9_-]{1,64}-\d{2,3}$/.test(photo.id) || ids.has(photo.id) || positions.has(photo.position)) throw new Error("Excluded, invalid or duplicate photo");
+  checkPhotoRecord(photo);
+  if (!allowed.has(photo.id) || ids.has(photo.id) || positions.has(photo.position)) throw new Error("Excluded, invalid or duplicate photo");
   ids.add(photo.id); positions.add(photo.position);
-  if (!Number.isSafeInteger(photo.position) || photo.position < 0 || !/^[A-Za-z0-9_-]{1,64}$/.test(photo.collection)) throw new Error("Invalid catalogue record");
-  if (photo.print.key !== `prints/${photo.id}/${photo.print.sha256}.jpg` || !/^[a-f0-9]{64}$/.test(photo.print.sha256)) throw new Error("Invalid print key");
-  if (photo.previews.length !== 6 || new Set(photo.previews.map((p) => p.key)).size !== 6) throw new Error("Missing responsive variants");
   for (const asset of [photo.print, ...photo.previews]) {
     const path = resolve(root, asset.file);
     if (!path.startsWith(root + sep) || asset.file !== asset.key) throw new Error("Asset path escapes preparation directory");
-    if (asset !== photo.print && (!asset.key.startsWith(`photos/previews/${photo.id}/${photo.print.sha256}/`) || !/\/(480|960|1600)\.(avif|webp)$/.test(asset.key))) throw new Error("Invalid preview key");
     const data = await readFile(path);
     const metadata = await sharp(data).metadata();
     if (data.length !== asset.bytes || hash(data) !== asset.sha256 || metadata.width !== asset.width || metadata.height !== asset.height) throw new Error(`Asset validation failed: ${photo.id}`);
