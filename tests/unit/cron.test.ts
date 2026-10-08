@@ -60,5 +60,5 @@ test("the cron's exchange-rate step stores the rate; a bad answer counts as done
   const down = answering(() => new Response("down", { status: 503 }));
   await runScheduled(down);
   expect(await readSettings(down.db)).toMatchObject({ rate: null, daily: { fx: 0 } });
-  expect(cronSteps(down).map(([name]) => name)).toEqual(["exchange rate"]);
+  expect(cronSteps(down).map(([name]) => name)).toEqual(["unsent emails", "exchange rate"]);
 });

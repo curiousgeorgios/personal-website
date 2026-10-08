@@ -1,5 +1,6 @@
 import type { PrintDeps } from "./config";
 import { refreshRate } from "./fx";
+import { sendDueMail } from "./mail";
 import { readSettings, writeSetting, type DailyJob } from "./store";
 
 /** A daily job runs when its timestamp is this old: 20 hours, so a five-minute cron drifting never skips a day */
@@ -33,6 +34,7 @@ export async function runSteps(steps: readonly CronStep[]): Promise<string[]> {
 /** The five-minute run's steps, in spec 18.6's order. The webhooks are the accelerator; this is the guarantee */
 export function cronSteps(deps: PrintDeps): CronStep[] {
   return [
+    ["unsent emails", () => sendDueMail(deps)],
     ["exchange rate", () => daily(deps, "fx", async () => (await refreshRate(deps)) !== "failed")],
   ];
 }

@@ -274,3 +274,50 @@ export async function setSession(db: D1Database, id: string, sessionId: string, 
 export async function markExpired(db: D1Database, id: string, now: number): Promise<boolean> {
   return (await db.prepare("UPDATE print_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'checkout'").bind(now, id).run()).meta.changes > 0;
 }
+
+/** One line of a placed order, named for its page and emails */
+export interface OrderLine {
+  line: number;
+  photoId: string;
+  tier: Tier;
+  /** Artelo's size name, e.g. x12x18 */
+  size: string;
+  frame: Frame;
+  quantity: number;
+  /** AUD cents */
+  unitAmount: number;
+  name: string;
+  /** The 240 WebP while the photo is published; a hidden photo's previews aren't served (plan 6) */
+  thumb: PublicPreview | null;
+}
+
+interface ItemRow {
+  order_id: string;
+  line: number;
+  photo_id: string;
+  tier: Tier;
+  size: string;
+  frame: Frame;
+  quantity: number;
+  unit_amount: number;
+}
+
+/** Each order's lines, in one batch: the items, then their photographs whether or not they are still published */
+export async function orderLines(db: D1Database, orderIds: readonly string[]): Promise<Map<string, OrderLine[]>> {
+  const ids = JSON.stringify(orderIds);
+  const [items, facts] = await db.batch([
+    db.prepare("SELECT order_id, line, photo_id, tier, size, frame, quantity, unit_amount FROM print_order_items WHERE order_id IN (SELECT value FROM json_each(?)) ORDER BY order_id, line").bind(ids),
+    db.prepare(`${PHOTO_FACTS} WHERE photos.id IN (SELECT photo_id FROM print_order_items WHERE order_id IN (SELECT value FROM json_each(?)))`).bind(ids),
+  ]);
+  const photos = new Map((facts.results as unknown as FactRow[]).map((row) => [row.id, toBasketPhoto(row)]));
+  const lines = new Map<string, OrderLine[]>(orderIds.map((id) => [id, []]));
+  for (const row of items.results as unknown as ItemRow[]) {
+    const photo = photos.get(row.photo_id);
+    lines.get(row.order_id)?.push({
+      line: row.line, photoId: row.photo_id, tier: row.tier, size: row.size, frame: row.frame, quantity: row.quantity, unitAmount: row.unit_amount,
+      name: photo ? photoNameOf(photo) : `photo ${row.photo_id}`,
+      thumb: photo?.published ? (previewOf(photo, 240, "webp") ?? null) : null,
+    });
+  }
+  return lines;
+}

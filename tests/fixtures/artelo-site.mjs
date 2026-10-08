@@ -120,5 +120,12 @@ route("POST", "/__stripe/pay", ({ body }) => {
 });
 route("GET", "/__stripe/sessions", () => [200, [...stripe.sessions.values()]]);
 
+// The email sink: test builds post here instead of using the EMAIL binding (spec 23.3)
+route("POST", "/__mail", ({ body }) => {
+  received.mail.push(JSON.parse(body));
+  return [204, ""];
+});
+route("GET", "/__mail", () => [200, received.mail]);
+
 // Routes added by later tasks go above this line
 start();
