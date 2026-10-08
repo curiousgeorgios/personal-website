@@ -80,14 +80,23 @@ describe("publishing or hiding a post", () => {
     media.delete(`photos/previews/post-03/${SHA}/240.avif`);
     expect(await submit({ intent: "post.publish", collection: "post" })).toEqual({
       ok: false, section: "photographs", form: "post-post",
-      errors: { form: "2 photos couldn't be checked: post-02, post-03. publish the others one at a time." }, values: {},
+      errors: { form: "2 photos couldn't be checked: post-02 (print master), post-03 (preview 240.avif). publish the others one at a time." }, values: {},
     });
     for (const id of ["post-01", "post-02", "post-03"]) expect(await publishedOf(id)).toBe(0);
   });
 
+  test("names every preview that failed, and a damaged preview set", async () => {
+    media.delete(`photos/previews/post-01/${SHA}/480.webp`);
+    media.delete(`photos/previews/post-01/${SHA}/960.avif`);
+    await db.prepare("UPDATE photos SET previews = '[]' WHERE id = 'post-02'").run();
+    expect(await submit({ intent: "post.publish", collection: "post" })).toMatchObject({
+      errors: { form: "2 photos couldn't be checked: post-01 (preview 480.webp, 960.avif), post-02 (preview set). publish the others one at a time." },
+    });
+  });
+
   test("says one photo when one fails", async () => {
     prints.delete(`prints/post-01/${SHA}.jpg`);
-    expect(await submit({ intent: "post.publish", collection: "post" })).toMatchObject({ errors: { form: "1 photo couldn't be checked: post-01. publish the others one at a time." } });
+    expect(await submit({ intent: "post.publish", collection: "post" })).toMatchObject({ errors: { form: "1 photo couldn't be checked: post-01 (print master). publish the others one at a time." } });
   });
 
   test("hiding all, and hiding all again, both count as saved", async () => {
@@ -95,6 +104,17 @@ describe("publishing or hiding a post", () => {
     expect(await submit({ intent: "post.hide", collection: "post" })).toEqual(SAVED);
     expect(await submit({ intent: "post.hide", collection: "post" })).toEqual(SAVED);
     for (const id of ["post-01", "post-02", "post-03"]) expect(await publishedOf(id)).toBe(0);
+  });
+
+  test("hiding needs no PHOTO_PRINTS binding, publishing does", async () => {
+    const { prints: _prints, ...withoutPrints } = deps();
+    const bare = (entries: Record<string, string>) => {
+      const form = new FormData();
+      for (const [name, value] of Object.entries(entries)) form.append(name, value);
+      return runAction(form, withoutPrints);
+    };
+    expect(await bare({ intent: "post.hide", collection: "post" })).toEqual(SAVED);
+    await expect(bare({ intent: "post.publish", collection: "post" })).rejects.toThrow("no PHOTO_PRINTS binding");
   });
 
   test("for a post that isn't there is a message for the page", async () => {
@@ -127,7 +147,7 @@ describe("a photograph", () => {
     media.delete(`photos/previews/post-01/${SHA}/960.webp`);
     expect(await submit({ intent: "photo.publish", id: "post-01" })).toEqual({
       ok: false, section: "photographs", form: "photo-post-01",
-      errors: { form: "that photo couldn't be checked, so it stays hidden. run the import for it again." }, values: {},
+      errors: { form: "that photo couldn't be checked (preview 960.webp), so it stays hidden. run the import for it again." }, values: {},
     });
     expect(await publishedOf("post-01")).toBe(0);
   });
@@ -137,11 +157,11 @@ describe("a photograph", () => {
     await db.prepare("UPDATE photos SET collection = 'orphan' WHERE id = 'orphan-01'").run();
     expect(await submit({ intent: "photo.publish", id: "orphan-01" })).toEqual({
       ok: false, section: "photographs", form: "photo-orphan-01",
-      errors: { form: "Photo has no post, so it would stay hidden. Import its post first." }, values: {},
+      errors: { form: "that photo has no post, so it would stay hidden. import its post first." }, values: {},
     });
     media.delete(`photos/previews/orphan-01/${SHA}/240.avif`);
     expect(await submit({ intent: "photo.publish", id: "orphan-01" })).toMatchObject({
-      errors: { form: "Photo has no post, so it would stay hidden. Import its post first. that photo couldn't be checked, so it stays hidden. run the import for it again." },
+      errors: { form: "that photo has no post, so it would stay hidden. import its post first. that photo couldn't be checked (preview 240.avif), so it stays hidden. run the import for it again." },
     });
     expect(await publishedOf("orphan-01")).toBe(0);
   });

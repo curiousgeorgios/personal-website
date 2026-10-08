@@ -109,7 +109,12 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .photo-admin { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 0; border-top: 1px dashed var(--rule); scroll-margin-top: 1rem; }
 .photo-admin img, .photo-admin .no-thumb { display: block; width: 88px; height: auto; max-height: 132px; object-fit: contain; background: var(--rule); }
 .photo-admin .no-thumb { height: 88px; }
-.photo-admin-body { min-width: 0; }
+/* The title's field, then its save and the publish or hide on one row; each stays its own form (display: contents lets its field and button join the row) */
+.photo-admin-body { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 6px; }
+.photo-admin-body > .photo-id, .photo-admin-body > .error { flex: 1 0 100%; margin: 0; }
+.photo-admin-body > .admin-form { display: contents; }
+.photo-admin-body .field { flex: 1 0 100%; max-width: 34rem; }
+.photo-admin-body .move { padding-top: 0; }
+.photo-id .status { white-space: nowrap; }
 .photo-id { font-size: 14.5px; color: var(--muted); }
 .photo-id .mono { color: var(--ink); }
-.photo-admin-body .admin-form { padding-bottom: 8px; }

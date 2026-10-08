@@ -57,7 +57,7 @@ const heading = (post: AdminPost) => (post.place ? `${formatLogDate(post.date, "
                   <li class="photo-admin" id={formId}>
                     {photo.thumb ? <img src={photo.thumb.url} width={photo.thumb.width} height={photo.thumb.height} alt="" loading="lazy" decoding="async" /> : <span class="no-thumb"></span>}
                     <div class="photo-admin-body">
-                      <p class="photo-id"><span class="mono">{photo.id}</span> · {photo.published ? "published" : "hidden"}{photo.rawReview && <span class="tagged">raw</span>}</p>
+                      <p class="photo-id"><span class="mono">{photo.id}</span> <span class="status">· {photo.published ? "published" : "hidden"}{photo.rawReview && <span class="tagged">raw</span>}</span></p>
                       {state.errors.form && <p class="error" role="alert">{state.errors.form}</p>}
                       <form method="post" action={`/admin/#${formId}`} class="admin-form">
                         <input type="hidden" name="intent" value="photo.title" />

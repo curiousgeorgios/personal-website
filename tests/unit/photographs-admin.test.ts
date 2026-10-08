@@ -49,6 +49,15 @@ describe("PhotographsAdmin", () => {
     expect(text(doc.querySelector('#post-older > [role="alert"]'))).toBe("1 photo couldn't be checked: older-01. publish the others one at a time.");
   });
 
+  test("a photograph's own failure shows on its row, and one with no preview still has a place for it", async () => {
+    const lost = [{ collection: "lost", date: "2026-01-02", place: null, photos: [photo("lost-01", { thumb: null })] }];
+    const doc = await render(PhotographsAdmin, { posts: lost, failure: failure("photo-lost-01", { form: "that photo couldn't be checked (print master), so it stays hidden. run the import for it again." }) });
+    expect(doc.querySelector("#post-lost")!.hasAttribute("open")).toBe(true);
+    expect(text(doc.querySelector('#photo-lost-01 [role="alert"]'))).toBe("that photo couldn't be checked (print master), so it stays hidden. run the import for it again.");
+    expect(doc.querySelector("#photo-lost-01 img")).toBeNull();
+    expect(doc.querySelector("#photo-lost-01 .no-thumb")).not.toBeNull();
+  });
+
   test("with nothing imported, it says how to import", async () => {
     const doc = await render(PhotographsAdmin, { posts: [], failure: null });
     expect(text(doc.querySelector(".empty"))).toBe("no photos imported yet. run photos:import from the mac.");

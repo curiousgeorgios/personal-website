@@ -63,7 +63,7 @@ test("a photo that fails its checks publishes nothing, and says which", async ({
     const [response] = await Promise.all([page.waitForResponse(POSTED), post(page, "fixture-e").getByRole("button", { name: "publish all 1", exact: true }).click()]);
     expect(response.status()).toBe(422);
     await expect(post(page, "fixture-e")).toHaveAttribute("open", "");
-    await expect(post(page, "fixture-e").locator(':scope > [role="alert"]')).toHaveText("1 photo couldn't be checked: fixture-e-01. publish the others one at a time.");
+    await expect(post(page, "fixture-e").locator(':scope > [role="alert"]')).toHaveText("1 photo couldn't be checked: fixture-e-01 (print master). publish the others one at a time.");
     expect(adminD1<{ published: number }>("SELECT published FROM photos WHERE id = 'fixture-e-01'")[0].published).toBe(0);
   } finally {
     adminD1(`UPDATE photos SET print_sha256 = '${sha}' WHERE id = 'fixture-e-01'`);

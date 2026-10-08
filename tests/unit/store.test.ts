@@ -286,5 +286,8 @@ describe("photographs", () => {
       { id: "new-01", title: "", published: true, rawReview: false, thumb: { url: "/media/photos/previews/new-01/s/240.webp", width: 160, height: 240 } },
       { id: "new-02", title: "", published: false, rawReview: true, thumb: null },
     ]);
+    // A previews column that isn't a list leaves that photograph without a thumbnail rather than failing the page
+    await db.prepare(`UPDATE photos SET previews = '{"a":1}' WHERE id = 'new-01'`).run();
+    expect((await store.loadAdmin(db)).photographs[0].photos[0].thumb).toBeNull();
   });
 });

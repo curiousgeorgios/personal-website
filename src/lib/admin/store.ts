@@ -115,6 +115,12 @@ interface PhotographRow {
 const PHOTOGRAPHS =
   "SELECT photo_posts.collection, photo_posts.published_on, photo_posts.place, photos.id, photos.title, photos.published, photos.raw_review, photos.previews FROM photo_posts JOIN photos ON photos.collection = photo_posts.collection ORDER BY photo_posts.published_at DESC, photos.position";
 
+/** A photograph's previews, or none when the column isn't a list (the schema keeps it valid JSON): one odd row mustn't take the whole admin page down */
+function previewsOf(json: string): { key: string; width: number; height: number }[] {
+  const previews: unknown = JSON.parse(json);
+  return Array.isArray(previews) ? previews : [];
+}
+
 /** Rows in post order, newest post first, grouped into posts */
 function toPosts(rows: PhotographRow[]): AdminPost[] {
   const posts: AdminPost[] = [];
@@ -122,7 +128,7 @@ function toPosts(rows: PhotographRow[]): AdminPost[] {
     const last = posts.at(-1);
     const post = last && last.collection === row.collection ? last : { collection: row.collection, date: row.published_on, place: row.place, photos: [] as AdminPhoto[] };
     if (post !== last) posts.push(post);
-    const thumb = (JSON.parse(row.previews) as { key: string; width: number; height: number }[]).find((preview) => preview.key.endsWith("/240.webp"));
+    const thumb = previewsOf(row.previews).find((preview) => preview.key.endsWith("/240.webp"));
     post.photos.push({ id: row.id, title: row.title, published: row.published === 1, rawReview: row.raw_review === 1, thumb: thumb ? { url: `/media/${thumb.key}`, width: thumb.width, height: thumb.height } : null });
   }
   return posts;

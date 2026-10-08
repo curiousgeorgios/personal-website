@@ -1,6 +1,6 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
 import { checkPlace } from "../photos/place";
-import { publishRefusal, setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
+import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
 import { PHOTO_ID } from "../photos/tokens";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
@@ -365,17 +365,36 @@ async function reshoot(form: FormData, { db, snapshots }: ActionDeps): Promise<A
 const COLLECTION = /^[A-Za-z0-9_-]{1,64}$/;
 const postForm = (collection: string) => `post-${collection}`;
 const photoForm = (id: string) => `photo-${id}`;
-const unchecked = (ids: string[]) => `${ids.length} ${ids.length === 1 ? "photo" : "photos"} couldn't be checked: ${ids.join(", ")}. publish the others one at a time.`;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-function publishDeps({ db, media, prints }: ActionDeps): PublishDeps {
-  if (!prints) throw new Error("no PHOTO_PRINTS binding");
-  return { db, media, prints };
+/** What failed for one photograph, from setPublished: its print master, its preview set or the previews by name ("240.avif") */
+function whatFailed(failed: string[]): string {
+  const previews = failed.filter((what) => what !== "master" && what !== "previews");
+  return [failed.includes("master") && "print master", failed.includes("previews") && "preview set", previews.length > 0 && `preview ${previews.join(", ")}`].filter(Boolean).join(", ");
 }
 
-/** Why a publish was refused: a photo with no post says so (publishRefusal's words), then the ones whose files didn't check out */
-function refusal(outcome: Extract<PublishOutcome, { postless: string[] }>, unverified: string): string {
-  const postless = outcome.postless.length > 0 ? publishRefusal({ postless: outcome.postless, unverified: [], ok: false }) : "";
-  return [postless, outcome.unverified.length > 0 ? unverified : ""].filter(Boolean).join(" ");
+/** Why a publish was refused, in the admin's voice: photographs with no post, then the ones whose files didn't check out and what failed for each */
+function refusal(outcome: Extract<PublishOutcome, { postless: string[] }>, one: boolean): string {
+  const { postless, unverified } = outcome;
+  const reasons: string[] = [];
+  if (postless.length > 0) {
+    reasons.push(one ? "that photo has no post, so it would stay hidden. import its post first." : `${plural(postless.length, "photo has", "photos have")} no post: ${postless.join(", ")}. import ${postless.length === 1 ? "its" : "their"} post first.`);
+  }
+  if (unverified.length > 0) {
+    const [{ failed }] = unverified;
+    reasons.push(
+      one
+        ? `that photo couldn't be checked (${whatFailed(failed)}), so it stays hidden. run the import for it again.`
+        : `${plural(unverified.length, "photo", "photos")} couldn't be checked: ${unverified.map((entry) => `${entry.id} (${whatFailed(entry.failed)})`).join(", ")}. publish the others one at a time.`,
+    );
+  }
+  return reasons.join(" ");
+}
+
+/** Hiding never asks R2, so only a publish needs the PHOTO_PRINTS binding */
+function publishDeps({ db, media, prints }: ActionDeps, published: boolean): PublishDeps {
+  if (published && !prints) throw new Error("no PHOTO_PRINTS binding");
+  return { db, media, prints: prints as R2Bucket };
 }
 
 async function savePlace(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
@@ -391,10 +410,10 @@ async function publishPost(form: FormData, deps: ActionDeps, published: boolean)
   const collection = String(form.get("collection") ?? "");
   const ids = COLLECTION.test(collection) ? await store.postPhotoIds(deps.db, collection) : null;
   if (!ids || ids.length === 0) return gone("post");
-  const outcome = await setPublished(publishDeps(deps), ids, published);
+  const outcome = await setPublished(publishDeps(deps, published), ids, published);
   if (outcome.ok) return { ok: true, section: "photographs" };
   if ("missing" in outcome) return gone("post");
-  return fail("photographs", postForm(collection), { form: refusal(outcome, unchecked(outcome.unverified.map(({ id }) => id))) });
+  return fail("photographs", postForm(collection), { form: refusal(outcome, false) });
 }
 
 async function saveTitle(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
@@ -408,8 +427,8 @@ async function saveTitle(form: FormData, { db }: ActionDeps): Promise<ActionResu
 async function publishPhoto(form: FormData, deps: ActionDeps, published: boolean): Promise<ActionResult> {
   const id = String(form.get("id") ?? "");
   if (!PHOTO_ID.test(id)) return gone("photo");
-  const outcome = await setPublished(publishDeps(deps), [id], published);
+  const outcome = await setPublished(publishDeps(deps, published), [id], published);
   if (outcome.ok) return { ok: true, section: "photographs" };
   if ("missing" in outcome) return gone("photo");
-  return fail("photographs", photoForm(id), { form: refusal(outcome, "that photo couldn't be checked, so it stays hidden. run the import for it again.") });
+  return fail("photographs", photoForm(id), { form: refusal(outcome, true) });
 }
