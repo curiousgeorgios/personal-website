@@ -1,6 +1,7 @@
+import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, placedOrder, printsD1, refundAtStandIn, runCron, setMode, ship, unique, waitForStatus } from "./prints";
-import { PRINTS, STAND_IN } from "./prints-site";
+import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, orderPageFor, payAtStandIn, placedOrder, printsD1, refundAtStandIn, runCron, setMode, ship, unique, waitForStatus } from "./prints";
+import { FIXTURE_SECRETS, PRINTS, STAND_IN } from "./prints-site";
 
 // Whole orders through the stand-ins on 4337: checkout, a paid session, Stripe's event, Artelo's order (spec 23.2)
 test.use({ baseURL: PRINTS });
@@ -122,4 +123,80 @@ test("a status artelo's webhook never delivered is caught by the twelve-hourly p
   printsD1(`UPDATE print_orders SET placed_at = placed_at - 50000 WHERE id = '${orderId}'`);
   await runCron();
   await waitForStatus(orderId, "in_production");
+});
+
+test("the order page shows a buyer their order with private headers, and anyone else the notebook 404", async ({ page }) => {
+  await asTestClient(page);
+  const name = `Ada ${unique()}`;
+  const { orderId, sessionId } = await checkoutOrder(page, name);
+  const url = await orderPageFor(name);
+  expect(url).toMatch(new RegExp(`^${PRINTS}/prints/${orderId}\\?key=[A-Za-z0-9_-]{43}$`));
+  // Before the payment lands: the waiting line, and the page refreshes itself
+  let response = await page.goto(url);
+  expect(response?.status()).toBe(200);
+  expect(response?.headers()).toMatchObject({ "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" });
+  await expect(page.locator(".order-status")).toHaveText("your payment's on its way through. this page updates when it lands.");
+  await expect(page.locator('meta[http-equiv="refresh"]')).toHaveAttribute("content", "10");
+  await expect(page.locator('meta[name="referrer"]')).toHaveAttribute("content", "no-referrer");
+  await expect(page.locator("script")).toHaveCount(0);
+  const { event } = await payAtStandIn(sessionId);
+  await deliverStripe(PRINTS, event);
+  await waitForStatus(orderId, "placed");
+  await page.goto(url);
+  await expect(page.locator("h1")).toHaveText("your prints");
+  await expect(page.locator(".order-facts p")).toHaveText(["to australia", "prints $238 + delivery $49 = $287", "prices include no gst; the seller isn't registered for gst.", /^paid \d\d\.\d\d\.\d\d$/]);
+  await expect(page.locator(".order-status")).toHaveText("they're with the printer.");
+  await expect(page.locator('meta[http-equiv="refresh"]')).toHaveCount(0);
+  await ship(PRINTS, orderId);
+  await waitForStatus(orderId, "shipped");
+  await page.goto(url);
+  await expect(page.locator(".order-status")).toHaveText("they're on their way:");
+  await expect(page.getByRole("link", { name: "1Z999AA10123456784" })).toHaveAttribute("href", "https://www.ups.com/track?tracknum=1Z999AA10123456784");
+  for (const wrong of [url.replace(/key=.+$/, "key=wrong"), url.replace(/key=.+$/, ""), url.replace(orderId, "01k6x0000000000000000000zz")]) {
+    response = await page.goto(wrong);
+    expect(response?.status()).toBe(404);
+    expect(response?.headers()["cache-control"]).toBe("private, no-store");
+    await expect(page.locator("#not-found")).toBeVisible();
+  }
+});
+
+test("every way of being refused is the same notebook 404, so the page never says whether an order exists", async ({ page }) => {
+  await asTestClient(page);
+  const name = `Ada ${unique()}`;
+  const { orderId } = await checkoutOrder(page, name);
+  const url = await orderPageFor(name);
+  const key = new URL(url).searchParams.get("key")!;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const unknownId = "01k6x0000000000000000000zz";
+  const unknownKey = createHmac("sha256", FIXTURE_SECRETS.PRINT_VIEW_SECRET).update(`order-view:${unknownId}`).digest("base64url");
+  // The right key is accepted, so the fixture secret above is the server's, and the unknown id's own key reaches no order
+  expect((await page.request.get(url)).status()).toBe(200);
+  const refused: [string, string][] = [
+    ["a wrong key", `${PRINTS}/prints/${orderId}?key=${"w".repeat(43)}`],
+    ["a wrong key of the wrong length", `${PRINTS}/prints/${orderId}?key=wrong`],
+    ["no key", `${PRINTS}/prints/${orderId}`],
+    ["an empty key", `${PRINTS}/prints/${orderId}?key=`],
+    ["the key's other spelling", `${PRINTS}/prints/${orderId}?key=${key.slice(0, -1)}${alphabet[alphabet.indexOf(key.at(-1)!) ^ 1]}`],
+    ["the key with its padding", `${PRINTS}/prints/${orderId}?key=${key}=`],
+    ["an unknown order id with a wrong key", `${PRINTS}/prints/${unknownId}?key=${"w".repeat(43)}`],
+    ["an unknown order id with this order's key", `${PRINTS}/prints/${unknownId}?key=${key}`],
+    ["an unknown order id with its own valid key", `${PRINTS}/prints/${unknownId}?key=${unknownKey}`],
+    ["a malformed order id", `${PRINTS}/prints/not-an-order?key=${key}`],
+    ["an upper-case order id", `${PRINTS}/prints/${orderId.toUpperCase()}?key=${key}`],
+  ];
+  // Only what is inherently per request differs: the date, and the page's own path in its share address
+  const answer = async (target: string) => {
+    const response = await page.request.get(target, { maxRedirects: 0 });
+    const headers = { ...response.headers() };
+    delete headers["date"];
+    const path = new URL(target).pathname;
+    return { status: response.status(), headers, body: (await response.text()).split(path).join("/prints/ID") };
+  };
+  const [first, ...rest] = await Promise.all(refused.map(([, target]) => answer(target)));
+  expect(first.status).toBe(404);
+  expect(first.headers).toMatchObject({ "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" });
+  expect(first.body).toContain('id="not-found"');
+  for (const [index, other] of rest.entries()) expect(other, refused[index + 1][0]).toEqual(first);
+  // Nothing of the order, the key or the id in the answer
+  for (const secret of [key, orderId, name]) expect(JSON.stringify(first)).not.toContain(secret);
 });

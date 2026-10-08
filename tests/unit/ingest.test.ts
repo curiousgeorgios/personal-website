@@ -204,3 +204,12 @@ test("an event from the downloads page is refused and never forwarded", async ()
   const gallery = JSON.stringify({ ...pageview, properties: { ...pageview.properties, $pathname: "/photos" } });
   expect((await forwardEvent(post(gallery), config, upstream, serverNow)).status).toBe(204);
 });
+
+test("an event from an order page is refused and never forwarded", async () => {
+  const upstream = vi.fn(async () => new Response(null, { status: 200 }));
+  for (const properties of [{ $pathname: "/prints/01k6x00000000000000000000a" }, { $current_url: "https://curiousgeorge.dev/prints/01k6x00000000000000000000a?key=private" }, { $current_url: "https://curiousgeorge.dev/basket?key=private" }]) {
+    const response = await forwardEvent(new Request("https://curiousgeorge.dev/ingest/i/v0/e/", { method: "POST", body: JSON.stringify({ event: "$pageview", properties }) }), { key: "phc_test", host: "https://us.i.posthog.com", country: null }, upstream);
+    expect(response.status).toBe(400);
+  }
+  expect(upstream).not.toHaveBeenCalled();
+});

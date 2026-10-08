@@ -11,10 +11,10 @@ export const PRIVATE_HEADERS = {
 
 /**
  * Paths whose responses carry a bearer token or what it unlocks: the middleware gives them PRIVATE_HEADERS whatever the
- * route sent, so they are never cached, indexed or passed on as a referrer (spec 5.2). Plan B adds /prints/.
+ * route sent, so they are never cached, indexed or passed on as a referrer (spec 5.2): the downloads and a buyer's order page (spec 13.3).
  */
 export const isPrivatePath = (pathname: string) =>
-  pathname === "/api/photos/downloads" || pathname === "/api/photos/downloads/" || pathname === "/photos/downloads" || pathname.startsWith("/photos/downloads/");
+  pathname === "/api/photos/downloads" || pathname === "/api/photos/downloads/" || pathname === "/photos/downloads" || pathname.startsWith("/photos/downloads/") || pathname.startsWith("/prints/");
 
 export function photoJson(value: unknown, status = 200, privateResponse = false): Response {
   return new Response(JSON.stringify(value), { status, headers: {

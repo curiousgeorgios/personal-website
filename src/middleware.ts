@@ -47,7 +47,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
   } else {
     if (privatePhotos) {
       try { response = await next(); }
-      catch { console.error("photos: route unavailable"); response = plain("Downloads are temporarily unavailable.", 503); }
+      catch {
+        // An order page has its own words; the downloads keep theirs
+        console.error(url.pathname.startsWith("/prints/") ? "prints: an order page failed" : "photos: route unavailable");
+        response = plain(url.pathname.startsWith("/prints/") ? "this page isn't loading right now. try again in a bit." : "Downloads are temporarily unavailable.", 503);
+      }
     } else response = await next();
   }
   // Redirect responses have immutable headers, so always copy before setting

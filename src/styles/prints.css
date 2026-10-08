@@ -50,3 +50,13 @@
 .quote-line { font-size: 18px; margin-bottom: 8px; }
 .quote-line + .prints-hint { margin-bottom: 6px; }
 .pay-form { margin-top: 14px; }
+
+/* The order page (spec 18.5) */
+.order-lines { margin-top: 20px; }
+.order-facts { margin-top: 18px; display: grid; gap: 4px; }
+.order-to, .order-paid { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.order-status { font-size: 18px; }
+.order-down { margin-top: 18px; color: var(--muted); }
+.tracking { margin-top: 8px; display: grid; gap: 4px; font: 12.5px/1.55 var(--mono); overflow-wrap: anywhere; }
+/* A chevron drawn as a shape, as the log's: DM Mono has no arrow glyphs. Clipped, not rotated, so it needs no transform */
+.tracking .chev { display: inline-block; width: 6px; height: 9px; margin-left: 5px; background: currentColor; clip-path: polygon(0 0, 22% 0, 100% 50%, 22% 100%, 0 100%, 78% 50%); }

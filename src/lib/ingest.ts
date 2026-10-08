@@ -82,11 +82,11 @@ function parseEvent(text: string): IngestEvent | null {
   return { event: event as IngestEvent["event"], properties: (properties as Record<string, unknown> | undefined) ?? {} };
 }
 
-/** Whether a URL is the downloads page or one of its files, or carries a token in its query */
-function isDownloadsUrl(value: string): boolean {
+/** Whether a URL is a private page (the downloads, an order page) or carries a token or a view key in its query */
+function isPrivateUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.pathname.startsWith("/photos/downloads") || url.searchParams.has("token");
+    return url.pathname.startsWith("/photos/downloads") || url.pathname.startsWith("/prints/") || url.searchParams.has("token") || url.searchParams.has("key");
   } catch {
     return false;
   }
@@ -109,12 +109,12 @@ export async function forwardEvent(
   if (text === "unreadable") return ingestAnswer(400);
   const parsed = parseEvent(text);
   if (!parsed) return ingestAnswer(400);
-  // The downloads page carries no beacon; should one ever be added, its events are still never counted (spec 2.2)
-  // $current_url is checked too, as defence in depth: it is forwarded as sent, and a hand-made event could carry the page's URL there
+  // Neither the downloads page nor an order page carries a beacon; should one ever be added, its events are still never
+  // counted (spec 2.2, 13.3). $current_url is checked too: it is forwarded as sent, and a hand-made event could carry it
   const pathname = parsed.properties.$pathname;
-  if (typeof pathname === "string" && pathname.startsWith("/photos/downloads")) return ingestAnswer(400);
+  if (typeof pathname === "string" && (pathname.startsWith("/photos/downloads") || pathname.startsWith("/prints/"))) return ingestAnswer(400);
   const currentUrl = parsed.properties.$current_url;
-  if (typeof currentUrl === "string" && isDownloadsUrl(currentUrl)) return ingestAnswer(400);
+  if (typeof currentUrl === "string" && isPrivateUrl(currentUrl)) return ingestAnswer(400);
   if (!config.key) return ingestAnswer(204);
   const properties: Record<string, unknown> = {};
   for (const name of INGEST_PROPERTIES) if (parsed.properties[name] !== undefined) properties[name] = parsed.properties[name];

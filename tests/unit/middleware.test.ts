@@ -109,3 +109,22 @@ describe("middleware, without the local bypass", () => {
     expect((await response).status).toBe(403);
   });
 });
+
+test("an order page is private too: never cached, indexed or passed on as a referrer", async () => {
+  for (const path of ["/prints/01k6x00000000000000000000a?key=private", "/prints/anything"]) {
+    expect(isPrivatePath(path.split("?")[0])).toBe(true);
+    const response = await run(path, () => Promise.resolve(new Response("ok", { headers: { "Cache-Control": "public, max-age=999" } })));
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  }
+  for (const path of ["/prints", "/printsx", "/basket"]) expect(isPrivatePath(path)).toBe(false);
+});
+
+test("an order page that throws says so in its own words, still private", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await run("/prints/01k6x00000000000000000000a?key=private", () => Promise.reject(new Error("down")));
+  expect(response.status).toBe(503);
+  expect(await response.text()).toBe("this page isn't loading right now. try again in a bit.");
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+});

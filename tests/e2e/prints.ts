@@ -179,3 +179,9 @@ export async function placedOrder(page: Page, name: string, site = PRINTS, store
 export async function ship(site: string, orderId: string, status = "Shipped", wrap = false): Promise<number> {
   return (await standIn<{ answered: number }>("/__ship", { method: "POST", body: JSON.stringify({ site, order: orderId, status, wrap }) })).answered;
 }
+
+/** The order page Stripe sends the buyer back to: the session's success_url, with its view key */
+export async function orderPageFor(name: string): Promise<string> {
+  const [{ form }] = await sessionsFor(name);
+  return form.success_url;
+}
