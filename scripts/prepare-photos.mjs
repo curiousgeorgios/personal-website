@@ -1,11 +1,14 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, stat, rename } from "node:fs/promises";
 import { dirname, resolve, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import sharp from "sharp";
-import { PREVIEW_FORMATS, PREVIEW_SIZES } from "./photo-manifest.mjs";
+import { PREVIEW_FORMATS, PREVIEW_SIZES, PUBLISHED_AT } from "./photo-manifest.mjs";
+import { pickGeocoded, placeFromPlacemark, postPlace } from "./photo-places.mjs";
 
+const run = promisify(execFile);
 const args = process.argv.slice(2);
 const arg = (name) => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
 if (!arg("--selection") || !arg("--index") || !arg("--output")) {
@@ -35,6 +38,17 @@ const tasks = selection.included.slice(0, limit).map((selected) => {
   if (!source) throw new Error(`Missing source: ${selected.id}`);
   return { selected, row, source, position: positions.get(identity) };
 });
+// Each post's time, with its own offset, from the index: one published_at per post (spec 7.1)
+const posts = [];
+for (const { selected } of tasks) {
+  if (posts.some((post) => post.collection === selected.post)) continue;
+  const times = new Set(index.filter((r) => r.post === selected.post).map((r) => r.published_at));
+  const [publishedAt] = times;
+  if (times.size !== 1 || typeof publishedAt !== "string" || !PUBLISHED_AT.test(publishedAt) || !Number.isFinite(Date.parse(publishedAt))) {
+    throw new Error(`Missing or inconsistent published_at for post ${selected.post}`);
+  }
+  posts.push({ collection: selected.post, publishedAt, place: null });
+}
 await mkdir(join(output, "metadata"), { recursive: true });
 await mkdir(join(output, ".work"), { recursive: true });
 let renderer;
@@ -64,10 +78,12 @@ async function encodePreviews(data, id, sha256, sizes) {
   return previews;
 }
 
-async function writeCheckpoint(checkpoint, record) {
-  await writeFile(`${checkpoint}.partial`, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
-  await rename(`${checkpoint}.partial`, checkpoint);
+/** Writes JSON beside its final name, then renames, so an interrupted run never leaves half a file; private (0600) */
+async function writePrivateJson(path, value) {
+  await writeFile(`${path}.partial`, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  await rename(`${path}.partial`, path);
 }
+
 const results = new Array(tasks.length);
 let cursor = 0;
 async function prepare(task) {
@@ -85,7 +101,7 @@ async function prepare(task) {
         const master = await readFile(join(output, cached.print.file));
         if (hash(master) !== cached.print.sha256) throw new Error(`Prepared master changed on disk: ${selected.id}`);
         cached.previews = [...(await encodePreviews(master, selected.id, cached.print.sha256, [240])), ...cached.previews];
-        await writeCheckpoint(checkpoint, cached);
+        await writePrivateJson(checkpoint, cached);
       }
       return { ...cached, position };
     }
@@ -103,14 +119,14 @@ async function prepare(task) {
   await mkdir(dirname(printPath), { recursive: true });
   await writeFile(printPath, data, { mode: 0o600 });
   const previews = await encodePreviews(data, selected.id, sha256, PREVIEW_SIZES);
-  const original = task.row.files.find((f) => f.kind === "original" && f.resource_role === "primary");
+  const original = originalOf(task.row);
   const record = {
     id: selected.id, collection: selected.post, position, title: "", published: false,
     fingerprint, sourceKind: source.kind, sourceFormat: extname(source.path).toLowerCase(),
     needsRawReview: source.kind !== "edited" && [".arw", ".dng"].includes(extname(original.path).toLowerCase()),
     print: { key: printKey, file: printKey, width: info.width, height: info.height, bytes: data.length, sha256 }, previews,
   };
-  await writeCheckpoint(checkpoint, record);
+  await writePrivateJson(checkpoint, record);
   return record;
 }
 async function worker() {
@@ -121,7 +137,67 @@ async function worker() {
   }
 }
 await Promise.all([worker(), worker()]);
-const manifest = { schemaVersion: 1, preparedAt: new Date().toISOString(), photos: results, exclusions: selection.counts };
-await writeFile(join(output, "manifest.json.partial"), JSON.stringify(manifest, null, 2) + "\n", { mode: 0o600 });
-await rename(join(output, "manifest.json.partial"), join(output, "manifest.json"));
-console.log(`Prepared ${results.length} photos as unpublished candidates. ${results.filter((r) => r.needsRawReview).length} need RAW colour/crop review.`);
+
+// Places (spec 7.2, ADR-0022). Each post's place comes from the originals (which keep their GPS) of at most three of its
+// photos, asked 1.5 seconds apart to stay inside Apple's rate limit. Every answer is cached as names only, so a
+// photo's coordinates are sent to Apple once; they never reach the manifest, D1 or R2.
+function originalOf(row) {
+  return row.files.find((f) => f.kind === "original" && f.resource_role === "primary");
+}
+async function placeTool() {
+  // Tests stand a recorded geocoder in here; George's Mac never sets it
+  if (process.env.PHOTO_PLACE_TOOL) return resolve(process.env.PHOTO_PLACE_TOOL);
+  if (process.platform !== "darwin") throw new Error("Places need macOS's geocoder (scripts/photo-place.swift)");
+  const tool = join(output, ".work/photo-place");
+  execFileSync("xcrun", ["swiftc", fileURLToPath(new URL("./photo-place.swift", import.meta.url)), "-o", tool], { stdio: "inherit" });
+  return tool;
+}
+const tool = await placeTool();
+const delay = Number(process.env.PHOTO_PLACE_DELAY_MS ?? 1500);
+const cities = JSON.parse(await readFile(fileURLToPath(new URL("./photo-cities.json", import.meta.url)), "utf8"));
+const placesPath = join(output, "metadata", "places.json");
+let places = {};
+try { places = JSON.parse(await readFile(placesPath, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+const missing = new Map();
+const review = [];
+let asked = false;
+for (const post of posts) {
+  const slides = tasks.filter((task) => task.selected.post === post.collection).sort((a, b) => a.selected.slide - b.selected.slide);
+  const withGps = [];
+  for (const task of slides) {
+    const original = originalOf(task.row);
+    if (original && (await run(tool, ["--has-gps", original.path])).stdout.trim() === "true") withGps.push({ id: task.selected.id, path: original.path });
+  }
+  const found = [];
+  for (const photo of pickGeocoded(withGps)) {
+    if (!Object.hasOwn(places, photo.id)) {
+      if (asked) await new Promise((done) => setTimeout(done, delay));
+      asked = true;
+      try {
+        places[photo.id] = JSON.parse((await run(tool, [photo.path])).stdout);
+      } catch {
+        // Apple's rate limit or the network: every finished lookup is already saved, so a rerun carries on from here
+        console.error(`Geocoding failed for ${photo.id}; run photos:prepare again (finished lookups are kept)`);
+        process.exit(1);
+      }
+      // Saved after every lookup, so an interrupted run never asks again
+      await writePrivateJson(placesPath, places);
+    }
+    const result = placeFromPlacemark(places[photo.id], cities);
+    if (result.missingKey) missing.set(result.missingKey, post.collection);
+    if (result.review) review.push(`${post.collection}: ${result.review}`);
+    found.push(result.place);
+  }
+  post.place = postPlace(found);
+}
+if (missing.size > 0) {
+  console.error("Add a city for each of these to scripts/photo-cities.json, then run photos:prepare again (nothing is asked twice):");
+  for (const [key, collection] of missing) console.error(`  "${key}"  (post ${collection})`);
+  process.exit(1);
+}
+for (const line of review) console.log(`no place for ${line}: set it in /admin`);
+for (const post of posts) console.log(`${post.publishedAt.slice(0, 10)} ${post.collection} ${post.place ?? "(no place)"}`);
+
+const manifest = { schemaVersion: 1, preparedAt: new Date().toISOString(), posts, photos: results, exclusions: selection.counts };
+await writePrivateJson(join(output, "manifest.json"), manifest);
+console.log(`Prepared ${results.length} photos in ${posts.length} posts as unpublished candidates. ${results.filter((r) => r.needsRawReview).length} need RAW colour/crop review.`);

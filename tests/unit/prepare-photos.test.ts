@@ -70,3 +70,43 @@ describe("photos:prepare", () => {
     await expect(workspace.prepare()).rejects.toThrow("Prepared master changed on disk");
   });
 });
+
+const BONDI = { subLocality: null, locality: "Bondi Beach", subAdministrativeArea: "Waverley Council", administrativeArea: "NSW", isoCountryCode: "AU" };
+const BRONTE = { subLocality: null, locality: "Bronte", subAdministrativeArea: "Waverley Council", administrativeArea: "NSW", isoCountryCode: "AU" };
+const SURRY = { subLocality: null, locality: "Surry Hills", subAdministrativeArea: "Sydney", administrativeArea: "NSW", isoCountryCode: "AU" };
+const portraits = (count: number) => Array.from({ length: count }, (_, i) => ({ slide: i + 1, width: 300, height: 450 }));
+
+describe("photos:prepare's posts and places", () => {
+  test("writes each post's time and most common place, asking about each photo once", { timeout: 90_000 }, async () => {
+    const workspace = await photoWorkspace([
+      { post: "postA", publishedAt: "2025-02-02T20:27:48+11:00", slides: portraits(5) },
+      // Half past midnight in Sydney is still the 2nd in UTC: the offset has to survive into the manifest
+      { post: "postB", publishedAt: "2025-02-03T00:30:00+11:00", slides: [{ slide: 1, width: 450, height: 300 }] },
+    ]);
+    folders.push(workspace.dir);
+    // Every slide of postA has GPS, so the first, middle and last are asked (1, 3 and 5), and two say bondi. postB has none.
+    const places = { "postA-01-original.jpg": BRONTE, "postA-02-original.jpg": BRONTE, "postA-03-original.jpg": BONDI, "postA-04-original.jpg": BRONTE, "postA-05-original.jpg": BONDI };
+    const { stdout } = await workspace.prepare(places);
+    const manifest = JSON.parse(await readFile(join(workspace.output, "manifest.json"), "utf8"));
+    expect(manifest.posts).toEqual([
+      { collection: "postA", publishedAt: "2025-02-02T20:27:48+11:00", place: "bondi beach, sydney" },
+      { collection: "postB", publishedAt: "2025-02-03T00:30:00+11:00", place: null },
+    ]);
+    expect(await workspace.geocoded()).toEqual(["postA-01-original.jpg", "postA-03-original.jpg", "postA-05-original.jpg"]);
+    expect(stdout).toContain("2025-02-02 postA bondi beach, sydney");
+    expect(stdout).toContain("2025-02-03 postB (no place)");
+    const cache = join(workspace.output, "metadata", "places.json");
+    expect((await stat(cache)).mode & 0o777).toBe(0o600);
+    expect(Object.keys(JSON.parse(await readFile(cache, "utf8")))).toEqual(["postA-01", "postA-03", "postA-05"]);
+    // A second run asks nobody: every lookup is cached
+    await workspace.prepare(places);
+    expect(await workspace.geocoded()).toHaveLength(3);
+  });
+
+  test("an Australian place missing from the city map stops prepare before the manifest, naming the key and its post", { timeout: 60_000 }, async () => {
+    const workspace = await photoWorkspace([{ post: "postC", publishedAt: "2026-03-01T12:00:00+11:00", slides: portraits(1) }]);
+    folders.push(workspace.dir);
+    await expect(workspace.prepare({ "postC-01-original.jpg": SURRY })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('"AU/NSW/Sydney"  (post postC)') });
+    await expect(stat(join(workspace.output, "manifest.json"))).rejects.toThrow();
+  });
+});

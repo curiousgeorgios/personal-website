@@ -6,6 +6,9 @@ export const PREVIEW_FORMATS = ["webp", "avif"];
 export const PHOTO_ID = /^[A-Za-z0-9_-]{1,64}-\d{2,3}$/;
 export const COLLECTION = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** A post's time as the index gives it, with its own offset: 2025-02-02T20:27:48+11:00 */
+export const PUBLISHED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 /** Throws unless one photograph's record is well formed: its id, its post, its master's key and its eight previews */
 export function checkPhotoRecord(photo) {
   if (typeof photo.id !== "string" || !PHOTO_ID.test(photo.id) || !Number.isSafeInteger(photo.position) || photo.position < 0 || typeof photo.collection !== "string" || !COLLECTION.test(photo.collection)) {
