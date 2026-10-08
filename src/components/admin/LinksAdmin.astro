@@ -36,7 +36,7 @@ const made = (createdAt: string) => day(new Date(`${createdAt.replace(" ", "T")}
   <p class="notice" role="status">that link was already made. it's in the list below, but it can't be shown again.</p>
   <p class="hint">if you didn't copy it, revoke it from the list and issue another.</p>
 ))}
-<form method="post" action="/admin/#link-new" id="link-new" class="admin-form">
+<form method="post" action="/admin/#links" id="link-new" class="admin-form">
   <h3>issue a link</h3>
   {fresh.errors.form && <p class="error" role="alert">{fresh.errors.form}</p>}
   <input type="hidden" name="intent" value="link.issue" />

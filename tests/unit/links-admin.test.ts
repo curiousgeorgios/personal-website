@@ -21,6 +21,8 @@ describe("LinksAdmin", () => {
     expect(doc.querySelector("#link-new-days")!.getAttribute("value")).toBe("7");
     expect(text(doc.querySelector("#link-new-note-hint"))).toBe("who it's for, so you know which to revoke");
     expect(doc.querySelector("#link-new-days")!.getAttribute("inputmode")).toBe("numeric");
+    // The section's top, where a shown link renders first: aimed at the form, the link would land above the screen
+    expect(doc.querySelector("#link-new")!.getAttribute("action")).toBe("/admin/#links");
   });
 
   test("an issued link is shown once, read-only, with a copy button the script reveals", async () => {
