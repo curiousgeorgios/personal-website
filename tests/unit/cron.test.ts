@@ -1,6 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import type { PrintDeps } from "../../src/lib/prints/config";
-import { runScheduled, runSteps } from "../../src/lib/prints/cron";
+import { daily, runScheduled, runSteps } from "../../src/lib/prints/cron";
+import { readSettings } from "../../src/lib/prints/store";
+import { NOW, testDeps } from "./prints-fakes";
+import { sqliteD1 } from "./sqlite-d1";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -28,4 +31,19 @@ test("a run logs only when a step did something or failed", async () => {
   expect(log).toHaveBeenLastCalledWith("prints: cron ran; placing did work");
   await runScheduled(deps, [["placing", async () => 2], ["polling", async () => { throw new Error("artelo is down"); }]]);
   expect(log).toHaveBeenLastCalledWith("prints: cron ran; polling failed");
+});
+
+test("a daily job runs when its timestamp is over 20 hours old, and records the time only when it is done", async () => {
+  const deps = testDeps(sqliteD1());
+  const job = vi.fn(async () => true);
+  await daily(deps, "fx", job);
+  expect(job).toHaveBeenCalledTimes(1);
+  expect((await readSettings(deps.db)).daily.fx).toBe(NOW);
+  await daily(testDeps(deps.db, { now: () => NOW + 20 * 3600 - 1 }), "fx", job);
+  expect(job).toHaveBeenCalledTimes(1);
+  await daily(testDeps(deps.db, { now: () => NOW + 20 * 3600 }), "fx", job);
+  expect(job).toHaveBeenCalledTimes(2);
+  const failing = vi.fn(async () => false);
+  await daily(deps, "cleanup", failing);
+  expect((await readSettings(deps.db)).daily.cleanup).toBe(0);
 });

@@ -1,4 +1,16 @@
 import type { PrintDeps } from "./config";
+import { refreshRate } from "./fx";
+import { readSettings, writeSetting, type DailyJob } from "./store";
+
+/** A daily job runs when its timestamp is this old: 20 hours, so a five-minute cron drifting never skips a day */
+export const DAILY_EVERY = 20 * 3600;
+
+/** Runs a daily job (spec 18.6) when its print_settings timestamp is over 20 hours old, and records the time once it is done */
+export async function daily(deps: PrintDeps, job: DailyJob, run: () => Promise<boolean>): Promise<void> {
+  const settings = await readSettings(deps.db);
+  if (deps.now() - settings.daily[job] < DAILY_EVERY) return;
+  if (await run()) await writeSetting(deps.db, `daily_${job}_at`, String(deps.now()), deps.now());
+}
 
 /** One job of the five-minute run: a name for the log, and the work. The work resolves to something truthy (a count of what
  * it handled, say) when it did something, and to nothing, false or 0 when there was nothing to do */
@@ -20,8 +32,9 @@ export async function runSteps(steps: readonly CronStep[]): Promise<string[]> {
 
 /** The five-minute run's steps, in spec 18.6's order. The webhooks are the accelerator; this is the guarantee */
 export function cronSteps(deps: PrintDeps): CronStep[] {
-  void deps;
-  return [];
+  return [
+    ["exchange rate", () => daily(deps, "fx", async () => (await refreshRate(deps)) !== "failed")],
+  ];
 }
 
 /** Runs the steps and logs only a run where a step did something or failed, so a quiet run every five minutes leaves no line */
