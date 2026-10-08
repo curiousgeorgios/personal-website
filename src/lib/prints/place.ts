@@ -199,13 +199,27 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
   if (status === "needs_attention") await mailNow(deps);
 }
 
+/** What a failure may touch: the lease this attempt holds now (the claim's, then the fence's), and whether a create went */
+interface Attempt {
+  lease: number;
+  sent: boolean;
+}
+
 /**
- * The order left paid while this attempt held the lease (a refund landed): its status is left as it is and the lease goes.
- * A refunded order's links go too, as the refund webhook revokes them: this attempt may have issued them after it did
+ * A failure's guarded write found the order no longer this attempt's: another run holds the lease, or it left paid (a
+ * refund landed). Another run's order is left exactly as it is. An order that left paid under this attempt's lease keeps
+ * its status; its lease goes only when Artelo can't have it (no create was sent, or Artelo refused it), because a
+ * refunded order with a lease and no Artelo id is the marker Task 14's daily job looks up at Artelo. A refunded order's
+ * links go, as the refund webhook revokes them: this attempt may have issued them after it did
  */
-async function leftPaid(deps: PrintDeps, id: string): Promise<PlaceOutcome> {
-  await deps.db.prepare("UPDATE print_orders SET lease_until = NULL WHERE id = ?").bind(id).run();
-  await revokeIfRefunded(deps, id);
+async function leftPaid(deps: PrintDeps, id: string, attempt: Attempt, arteloMayHaveIt: boolean): Promise<PlaceOutcome> {
+  const row = await getOrder(deps.db, id);
+  if (!row || row.lease_until !== attempt.lease) {
+    console.error("prints: order", id, "is no longer this attempt's, so it was left as it is");
+    return "not-due";
+  }
+  if (!arteloMayHaveIt) await deps.db.prepare("UPDATE print_orders SET lease_until = NULL WHERE id = ? AND lease_until = ?").bind(id, attempt.lease).run();
+  if (row.status === "refunded") await revokeOrderGrants(deps.db, id, deps.now());
   console.error("prints: order", id, "left paid while it was being placed, so its status was left as it is");
   return "not-due";
 }
@@ -216,10 +230,13 @@ async function revokeIfRefunded(deps: PrintDeps, id: string): Promise<void> {
 
 /**
  * A failed attempt: retried after its backoff while that falls inside the window, otherwise needs_attention. Each move is
- * from paid only, so a refund that lands during the attempt is never overwritten (and never retried into a print)
+ * from paid only and under this attempt's own lease, so a refund that lands during the attempt is never overwritten (and
+ * never retried into a print), and an attempt that stalled past its lease can't move an order another run is placing
  */
-async function failed(deps: PrintDeps, order: OrderRow, error: unknown): Promise<PlaceOutcome> {
+async function failed(deps: PrintDeps, order: OrderRow, error: unknown, attempt: Attempt): Promise<PlaceOutcome> {
   const now = deps.now();
+  // After a create went out, only Artelo refusing it (the one permanent failure that follows a create) says it hasn't the order
+  const arteloMayHaveIt = attempt.sent && !(error instanceof Permanent);
   let reason: string;
   if (error instanceof Permanent) {
     reason = error.message;
@@ -228,14 +245,14 @@ async function failed(deps: PrintDeps, order: OrderRow, error: unknown): Promise
     const cause = error instanceof Retryable ? error.message : "something went wrong placing it";
     const next = now + nextDelay(order.attempts);
     if (next <= (order.retry_until ?? now)) {
-      const retried = await deps.db.prepare("UPDATE print_orders SET next_attempt_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'paid'").bind(next, now, order.id).run();
-      if (retried.meta.changes === 0) return leftPaid(deps, order.id);
+      const retried = await deps.db.prepare("UPDATE print_orders SET next_attempt_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'paid' AND lease_until = ?").bind(next, now, order.id, attempt.lease).run();
+      if (retried.meta.changes === 0) return leftPaid(deps, order.id, attempt, arteloMayHaveIt);
       console.error("prints: order", order.id, "will be retried:", cause);
       return "retry";
     }
     reason = `artelo didn't take the order within a day: ${cause}`;
   }
-  if (!(await toAttention(deps.db, order.id, reason, now, "paid"))) return leftPaid(deps, order.id);
+  if (!(await toAttention(deps.db, order.id, reason, now, "paid", attempt.lease))) return leftPaid(deps, order.id, attempt, arteloMayHaveIt);
   console.error("prints: order", order.id, error instanceof Permanent ? "needs attention after a permanent failure" : "needs attention: artelo didn't take it in time");
   await mailNow(deps);
   return "attention";
@@ -250,6 +267,7 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
     .run();
   if (claimed.meta.changes === 0) return "not-due";
   const order = (await getOrder(deps.db, orderId))!;
+  const attempt: Attempt = { lease: now + LEASE_SECONDS, sent: false };
   try {
     // Look before creating, every attempt: an earlier answer may have been lost after Artelo made the order (step 2)
     const existing = await lookUp(deps, orderId);
@@ -264,9 +282,10 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
     // The fence: the create goes only while this attempt's own lease still holds and the order is still paid, and the
     // lease is renewed to cover it. A run that took over a lapsed lease, or a refund, stops this one creating a second
     // order. The lease isn't released, because it is no longer this attempt's to release
+    const renewed = deps.now() + LEASE_SECONDS;
     const fenced = await deps.db
       .prepare("UPDATE print_orders SET lease_until = ? WHERE id = ? AND status = 'paid' AND lease_until = ?")
-      .bind(deps.now() + LEASE_SECONDS, orderId, now + LEASE_SECONDS)
+      .bind(renewed, orderId, attempt.lease)
       .run();
     if (fenced.meta.changes === 0) {
       // Only this attempt's own links, which nothing has: the run that took over may be using its own. A refunded
@@ -277,8 +296,11 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
       console.error("prints: order", orderId, "wasn't created: its lease was taken over or it left paid");
       return "not-due";
     }
+    attempt.lease = renewed;
     // Nothing but building the body sits between the fence and the request: any wait there would reopen the takeover
-    const result = await artelo(deps, "POST", "/orders/create", createBody(order, items, links, address, deps.config));
+    const body = createBody(order, items, links, address, deps.config);
+    attempt.sent = true;
+    const result = await artelo(deps, "POST", "/orders/create", body);
     // Then, whatever Artelo answered, the last attempts' links go: the lookup found nothing at Artelo and the fence
     // held, so nothing needs them. A failure here only leaves them for the next attempt to revoke
     try {
@@ -299,7 +321,7 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
       console.error("prints: order", orderId, "is at artelo but recording that failed, so nothing was cleared and its lease is left to lapse", error.message);
       throw error;
     }
-    return failed(deps, order, error);
+    return failed(deps, order, error, attempt);
   }
 }
 

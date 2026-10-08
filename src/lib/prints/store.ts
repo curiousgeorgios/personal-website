@@ -324,10 +324,11 @@ export async function orderLines(db: D1Database, orderIds: readonly string[]): P
 
 /**
  * Into needs_attention with a plain reason (never an address); its email becomes due, and any lease is let go. With
- * `from`, only an order still in that status moves, so a refund that lands meanwhile is never overwritten. True when it moved
+ * `from`, only an order still in that status moves, so a refund that lands meanwhile is never overwritten; with `lease`,
+ * only while that lease still holds, so a stalled attempt can't move an order another run now holds. True when it moved
  */
-export async function toAttention(db: D1Database, id: string, reason: string, now: number, from?: OrderStatus): Promise<boolean> {
-  const sql = "UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, lease_until = NULL, updated_at = ? WHERE id = ?";
-  const statement = from ? db.prepare(`${sql} AND status = ?`).bind(reason, now, id, from) : db.prepare(sql).bind(reason, now, id);
-  return (await statement.run()).meta.changes > 0;
+export async function toAttention(db: D1Database, id: string, reason: string, now: number, from?: OrderStatus, lease?: number): Promise<boolean> {
+  const conditions: [string, string | number][] = [...(from ? [["status = ?", from] as [string, string]] : []), ...(lease !== undefined ? [["lease_until = ?", lease] as [string, number]] : [])];
+  const sql = `UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, lease_until = NULL, updated_at = ? WHERE ${["id = ?", ...conditions.map(([condition]) => condition)].join(" AND ")}`;
+  return (await db.prepare(sql).bind(reason, now, id, ...conditions.map(([, value]) => value)).run()).meta.changes > 0;
 }

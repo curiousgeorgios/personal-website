@@ -322,16 +322,17 @@ describe("the money path's further guards", () => {
       return answer();
     };
     const holder: { db?: D1Database } = {};
-    const cases: [Handler, Record<string, number>][] = [
-      [refundDuring(() => json({ message: "unknown size" }, 422)), {}],
-      [refundDuring(() => json({}, 503)), {}],
-      [refundDuring(() => json({}, 503)), { retry_until: NOW - 60 }],
+    // A refusal means artelo hasn't the order, so the lease goes; after a 503 it may have, so the lease stays (fix round 3)
+    const cases: [Handler, Record<string, number>, number | null][] = [
+      [refundDuring(() => json({ message: "unknown size" }, 422)), {}, null],
+      [refundDuring(() => json({}, 503)), {}, NOW + LEASE_SECONDS],
+      [refundDuring(() => json({}, 503)), { retry_until: NOW - 60 }, NOW + LEASE_SECONDS],
     ];
-    for (const [create, columns] of cases) {
+    for (const [create, columns, lease] of cases) {
       const { db, deps } = await setup({ [CREATE]: create }, columns);
       holder.db = db;
       expect(await placeOrder(deps, ORDER)).toBe("not-due");
-      expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", attention_reason: null, attention_notified_at: null, lease_until: null, artelo_order_id: null });
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", attention_reason: null, attention_notified_at: null, lease_until: lease, artelo_order_id: null });
       // The links this attempt issued go, as the refund webhook's would (review minor 3)
       expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(0);
     }
@@ -514,6 +515,136 @@ describe("the money path's further guards", () => {
       expect(fellBack).toBe(true);
       expect(logs()).toContain(`prints: order ${ORDER} has two artelo orders, artelo-0 and artelo-1: cancel one in artelo`);
       expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-0" });
+    });
+
+    test("a stalled attempt failing during a live run's create leaves the order untouched, and the live run's success stands (fix round 3, item 1)", async () => {
+      captureLogs();
+      // The stalled attempt fails on the retry branch, then (its window gone) on the needs-attention branch
+      for (const columns of [{}, { retry_until: NOW - 60 }] as Record<string, number>[]) {
+        let lookups = 0;
+        let creating!: () => void;
+        const liveCreating = new Promise<void>((resolve) => { creating = resolve; });
+        let release!: () => void;
+        const stalledDone = new Promise<void>((resolve) => { release = resolve; });
+        let live: Promise<PlaceOutcome> | undefined;
+        const holder: { deps?: ReturnType<typeof testDeps> } = {};
+        const { db, fake, deps } = await setup({
+          [LOOKUP]: async () => {
+            if (++lookups > 1) return json([]);
+            // The first attempt's lookup stalls past its lease; a live run claims the order and gets as far as its create,
+            // and only then does the stalled lookup fail
+            live = placeOrder({ ...holder.deps!, now: () => NOW + LEASE_SECONDS + 1 }, ORDER);
+            await liveCreating;
+            return json({}, 503);
+          },
+          [CREATE]: async (request) => {
+            creating();
+            await stalledDone;
+            return accepted(request);
+          },
+        }, columns);
+        holder.deps = deps;
+        const stalled = await placeOrder(deps, ORDER);
+        // Mid-create, the live run's renewed lease and the order's schedule are exactly as it left them
+        expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", lease_until: NOW + 2 * LEASE_SECONDS + 1, next_attempt_at: NOW, attention_reason: null });
+        release();
+        expect([stalled, await live]).toEqual(["not-due", "placed"]);
+        expect(creates(fake)).toHaveLength(1);
+        expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-1", placed_at: NOW + LEASE_SECONDS + 1, attention_reason: null, next_attempt_at: NOW, lease_until: null });
+      }
+    });
+
+    test("a refund landing during a create whose outcome is unknown keeps the lease as the marker; a refusal or no create clears it (fix round 3, item 3)", async () => {
+      captureLogs();
+      const holder: { db?: D1Database } = {};
+      const refund = async () => { await holder.db!.prepare("UPDATE print_orders SET status = 'refunded' WHERE id = ?").bind(ORDER).run(); };
+      const unknown: Handler[] = [
+        async () => { await refund(); throw new DOMException("timed out", "TimeoutError"); },
+        async () => { await refund(); throw new TypeError("network"); },
+        async () => { await refund(); return json({}, 503); },
+        async () => { await refund(); return new Response("<html>ok</html>", { status: 200 }); },
+        async () => { await refund(); return json({ status: "Received" }); },
+      ];
+      for (const create of unknown) {
+        const { db, fake, deps } = await setup({ [CREATE]: create });
+        holder.db = db;
+        expect(await placeOrder(deps, ORDER)).toBe("not-due");
+        expect(creates(fake)).toHaveLength(1);
+        expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", artelo_order_id: null, lease_until: NOW + LEASE_SECONDS });
+      }
+      const cleared: [string, Record<string, Handler>][] = [
+        ["artelo refused it", { [CREATE]: async () => { await refund(); return json({ message: "unknown size" }, 400); } }],
+        ["the lookup failed, so no create went", { [LOOKUP]: async () => { await refund(); return json({}, 503); } }],
+        ["a permanent failure before the create", { [INTENT]: async () => { await refund(); return json({ error: {} }, 404); } }],
+      ];
+      for (const [name, handlers] of cleared) {
+        const { db, deps } = await setup(handlers);
+        holder.db = db;
+        expect(await placeOrder(deps, ORDER), name).toBe("not-due");
+        expect(await getOrder(db, ORDER), name).toMatchObject({ status: "refunded", artelo_order_id: null, lease_until: null });
+      }
+    });
+
+    test("a failure after the fence is bound to the fence's renewed lease, not the claim's", async () => {
+      captureLogs();
+      let clock = NOW;
+      const { db, deps } = await setup({
+        // Time passes between the claim and the fence, so the fence renews the lease to a later value
+        [INTENT]: () => { clock = NOW + 10; return json({ id: "pi_test_place", shipping }); },
+        [CREATE]: () => json({}, 503),
+      });
+      expect(await placeOrder({ ...deps, now: () => clock }, ORDER)).toBe("retry");
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", lease_until: null, next_attempt_at: NOW + 10 + 300 });
+    });
+
+    test("a fence that throws after a refund counts as no create sent, so the lease goes", async () => {
+      captureLogs();
+      const db = await printDb();
+      await insertOrder(db, { id: ORDER, stripe_payment_intent: "pi_test_place" });
+      const fenceFails = new Proxy(db, {
+        get(target, key) {
+          if (key === "prepare") return (sql: string) => {
+            if (sql === "UPDATE print_orders SET lease_until = ? WHERE id = ? AND status = 'paid' AND lease_until = ?") throw new Error("D1 is down");
+            return target.prepare(sql);
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const fake = world({
+        [INTENT]: async () => {
+          await db.prepare("UPDATE print_orders SET status = 'refunded' WHERE id = ?").bind(ORDER).run();
+          return json({ id: "pi_test_place", shipping });
+        },
+      });
+      expect(await placeOrder(testDeps(fenceFails, { fetch: fake.fetch }), ORDER)).toBe("not-due");
+      expect(creates(fake)).toHaveLength(0);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", artelo_order_id: null, lease_until: null });
+    });
+
+    test("a revoke of the last attempts' links that fails after a create never turns it into a retry (fix round 3, item 2)", async () => {
+      const logs = captureLogs();
+      const db = await printDb();
+      await insertOrder(db, { id: ORDER, stripe_payment_intent: "pi_test_place" });
+      const order: string[] = [];
+      const failing = new Proxy(db, {
+        get(target, key) {
+          if (key === "prepare") return (sql: string) => {
+            order.push(sql);
+            if (sql.includes("NOT IN (SELECT value FROM json_each")) throw new Error("D1 is down");
+            return target.prepare(sql);
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const fake = world({ [CREATE]: (request) => { order.push("the create"); return accepted(request); } });
+      expect(await placeOrder(testDeps(failing, { fetch: fake.fetch }), ORDER)).toBe("placed");
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-1", next_attempt_at: NOW, lease_until: null });
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(2);
+      expect(logs()).toContain(`prints: order ${ORDER} kept its earlier links for now: revoking them failed Error`);
+      // Nothing touches D1 between the fence and the create
+      expect(order[order.indexOf("the create") - 1]).toMatch(/^UPDATE print_orders SET lease_until = \? WHERE id = \? AND status = 'paid' AND lease_until = \?$/);
     });
 
     test("another run's lease on a still-paid order fences the create out, and is left in place", async () => {
