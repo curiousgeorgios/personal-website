@@ -11,6 +11,7 @@ const PREPARE = fileURLToPath(new URL("../../scripts/prepare-photos.mjs", import
 
 // A recorded geocoder: a file named in FAKE_PLACES has GPS and answers its placemark (or null); any other has none.
 // Each lookup (never a GPS check) is logged to FAKE_LOG, so a test can count what would have gone to Apple.
+// An answer of { "__exit": n } makes the lookup fail with that exit code (75 is the real tool's "try again later").
 const FAKE_TOOL = `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -21,6 +22,7 @@ const known = Object.hasOwn(places, name);
 if (args[0] === "--has-gps") console.log(known ? "true" : "false");
 else {
   appendFileSync(process.env.FAKE_LOG, name + "\\n");
+  if (known && places[name] && places[name].__exit) process.exit(places[name].__exit);
   console.log(JSON.stringify(known ? places[name] : null));
 }
 `;

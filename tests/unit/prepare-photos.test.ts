@@ -73,7 +73,7 @@ describe("photos:prepare", () => {
 
 const BONDI = { subLocality: null, locality: "Bondi Beach", subAdministrativeArea: "Waverley Council", administrativeArea: "NSW", isoCountryCode: "AU" };
 const BRONTE = { subLocality: null, locality: "Bronte", subAdministrativeArea: "Waverley Council", administrativeArea: "NSW", isoCountryCode: "AU" };
-const SURRY = { subLocality: null, locality: "Surry Hills", subAdministrativeArea: "Sydney", administrativeArea: "NSW", isoCountryCode: "AU" };
+const SURRY = { subLocality: null, locality: "Surry Hills", subAdministrativeArea: "Imaginary Council", administrativeArea: "NSW", isoCountryCode: "AU" };
 const portraits = (count: number) => Array.from({ length: count }, (_, i) => ({ slide: i + 1, width: 300, height: 450 }));
 
 describe("photos:prepare's posts and places", () => {
@@ -106,7 +106,40 @@ describe("photos:prepare's posts and places", () => {
   test("an Australian place missing from the city map stops prepare before the manifest, naming the key and its post", { timeout: 60_000 }, async () => {
     const workspace = await photoWorkspace([{ post: "postC", publishedAt: "2026-03-01T12:00:00+11:00", slides: portraits(1) }]);
     folders.push(workspace.dir);
-    await expect(workspace.prepare({ "postC-01-original.jpg": SURRY })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('"AU/NSW/Sydney"  (post postC)') });
+    await expect(workspace.prepare({ "postC-01-original.jpg": SURRY })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('"AU/NSW/Imaginary Council"  (post postC)') });
     await expect(stat(join(workspace.output, "manifest.json"))).rejects.toThrow();
+  });
+
+  test("a lookup that may work later (offline, rate limited) stops prepare, keeps what it had and resumes from there", { timeout: 90_000 }, async () => {
+    const workspace = await photoWorkspace([{ post: "postD", publishedAt: "2026-03-02T12:00:00+11:00", slides: portraits(3) }]);
+    folders.push(workspace.dir);
+    const cache = join(workspace.output, "metadata", "places.json");
+    await expect(workspace.prepare({ "postD-01-original.jpg": BONDI, "postD-02-original.jpg": { __exit: 75 }, "postD-03-original.jpg": BRONTE })).rejects.toMatchObject({
+      code: 1, stderr: expect.stringContaining("run photos:prepare again"),
+    });
+    await expect(stat(join(workspace.output, "manifest.json"))).rejects.toThrow();
+    expect(Object.keys(JSON.parse(await readFile(cache, "utf8")))).toEqual(["postD-01"]);
+    // Back online: only the two it hadn't answered are asked
+    await workspace.prepare({ "postD-01-original.jpg": BONDI, "postD-02-original.jpg": BRONTE, "postD-03-original.jpg": BRONTE });
+    expect(await workspace.geocoded()).toEqual(["postD-01-original.jpg", "postD-02-original.jpg", "postD-02-original.jpg", "postD-03-original.jpg"]);
+    const manifest = JSON.parse(await readFile(join(workspace.output, "manifest.json"), "utf8"));
+    expect(manifest.posts).toEqual([{ collection: "postD", publishedAt: "2026-03-02T12:00:00+11:00", place: "bronte, sydney" }]);
+  });
+
+  test("a lookup that will fail every time caches nothing, leaves the post without a place and lists it", { timeout: 90_000 }, async () => {
+    const workspace = await photoWorkspace([
+      { post: "postE", publishedAt: "2026-03-03T12:00:00+11:00", slides: portraits(1) },
+      { post: "postF", publishedAt: "2026-03-04T12:00:00+11:00", slides: portraits(1) },
+    ]);
+    folders.push(workspace.dir);
+    const { stdout } = await workspace.prepare({ "postE-01-original.jpg": { __exit: 1 }, "postF-01-original.jpg": BONDI });
+    const manifest = JSON.parse(await readFile(join(workspace.output, "manifest.json"), "utf8"));
+    expect(manifest.posts.map((post: { place: string | null }) => post.place)).toEqual([null, "bondi beach, sydney"]);
+    expect(stdout).toContain("no place for postE: lookup failed, rerun or set it in /admin");
+    expect(stdout).not.toContain("no place for postF");
+    // The failure is not cached, so a rerun asks about it again; the answered one is not asked twice
+    expect(Object.keys(JSON.parse(await readFile(join(workspace.output, "metadata", "places.json"), "utf8")))).toEqual(["postF-01"]);
+    await workspace.prepare({ "postE-01-original.jpg": BRONTE, "postF-01-original.jpg": BONDI });
+    expect(await workspace.geocoded()).toEqual(["postE-01-original.jpg", "postF-01-original.jpg", "postE-01-original.jpg"]);
   });
 });

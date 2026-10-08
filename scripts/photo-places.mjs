@@ -12,24 +12,31 @@ export function transliterate(name) {
 }
 
 /** The city map's key: country, administrative area and the sub-administrative area (or the locality) */
-export const cityKey = (placemark) => `${placemark.isoCountryCode}/${placemark.administrativeArea}/${placemark.subAdministrativeArea ?? placemark.locality}`;
+export const cityKey = (placemark) => `${placemark.isoCountryCode}/${placemark.administrativeArea ?? ""}/${placemark.subAdministrativeArea ?? placemark.locality}`;
 
 const named = (name) => typeof name === "string" && name.trim() !== "";
+// A sub-locality is a neighbourhood, not a landmark: the geocoder puts places like "Sydney Opera House and Botanical
+// Garden" there. In Australia the gazetted suburb is always the locality, so the sub-locality is never used there.
+const suburbLike = (placemark) => named(placemark.subLocality) && placemark.isoCountryCode !== "AU" && !/ and |&/i.test(placemark.subLocality);
 
 /**
- * One photo's place from the geocoder's names. The area is the sub-locality, else the locality; the city comes from the
- * map, else the locality when the sub-locality was used, else the administrative area. An Australian place with no map
- * entry gives its missing key, because there the geocoder never names a metropolitan city.
+ * One photo's place from the geocoder's names. The area is a neighbourhood-like sub-locality, else the locality; the city
+ * comes from the map (the council or locality key first, then the whole administrative area, which is how every
+ * Canberra suburb finds its city), else the locality when the sub-locality was used, else the administrative area. An
+ * Australian place with no map entry gives its missing key, because there the geocoder never names a metropolitan city.
+ * The council keys beyond Waverley and the City of Sydney in photo-cities.json use the councils' official names and are
+ * unverified until a real run names them; a spelling Apple uses instead stops prepare with its key.
  */
 export function placeFromPlacemark(placemark, cities) {
   if (!placemark) return { place: null };
-  const area = named(placemark.subLocality) ? placemark.subLocality : placemark.locality;
+  const area = suburbLike(placemark) ? placemark.subLocality : placemark.locality;
   if (!named(area)) return { place: null };
   const key = cityKey(placemark);
-  let city = Object.hasOwn(cities, key) ? cities[key] : undefined;
+  const territory = `${placemark.isoCountryCode}/${placemark.administrativeArea}`;
+  let city = Object.hasOwn(cities, key) ? cities[key] : Object.hasOwn(cities, territory) ? cities[territory] : undefined;
   if (city === undefined) {
     if (placemark.isoCountryCode === "AU") return { place: null, missingKey: key };
-    city = named(placemark.subLocality) ? placemark.locality : placemark.administrativeArea;
+    city = suburbLike(placemark) ? placemark.locality : placemark.administrativeArea;
   }
   const names = [area, city].filter(named).map((name) => transliterate(name).trim().toLocaleLowerCase("en-AU"));
   const checked = checkPlace(names.filter((name, i) => names.indexOf(name) === i).join(", "));

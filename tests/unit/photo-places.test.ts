@@ -5,7 +5,11 @@ import { checkPlace } from "../../src/lib/photos/place";
 
 // Shaped like the geocoder's answers (spec 7.2's sample of 2026-10-08: in Australia the suburb comes as the locality)
 const BONDI = { subLocality: null, locality: "Bondi Beach", subAdministrativeArea: "Waverley Council", administrativeArea: "NSW", isoCountryCode: "AU" };
-const SURRY = { subLocality: null, locality: "Surry Hills", subAdministrativeArea: "Sydney", administrativeArea: "NSW", isoCountryCode: "AU" };
+// An invented council, so the test names a key that is in no map; the geocoder gives "Council of the City of Sydney" for the centre
+const SURRY = { subLocality: null, locality: "Surry Hills", subAdministrativeArea: "Imaginary Council", administrativeArea: "NSW", isoCountryCode: "AU" };
+// The geocoder's real answer for the Sydney Opera House (2026-10-08): a landmark in the sub-locality
+const OPERA = { subLocality: "Sydney Opera House and Botanical Garden", locality: "Sydney", subAdministrativeArea: "Council of the City of Sydney", administrativeArea: "NSW", isoCountryCode: "AU" };
+const BRADDON = { subLocality: null, locality: "Braddon", subAdministrativeArea: null, administrativeArea: "ACT", isoCountryCode: "AU" };
 const PERTH = { subLocality: null, locality: "Perth", subAdministrativeArea: "Perth", administrativeArea: "WA", isoCountryCode: "AU" };
 const MANHATTAN = { subLocality: "Manhattan", locality: "New York", subAdministrativeArea: "New York County", administrativeArea: "NY", isoCountryCode: "US" };
 const SLIEMA = { subLocality: null, locality: "Sliema", subAdministrativeArea: null, administrativeArea: "Northern Harbour", isoCountryCode: "MT" };
@@ -13,7 +17,7 @@ const HAMRUN = { subLocality: null, locality: "Ħamrun", subAdministrativeArea: 
 const GZIRA = { subLocality: null, locality: "Gżira", subAdministrativeArea: null, administrativeArea: "Northern Harbour", isoCountryCode: "MT" };
 const SAO_PAULO = { subLocality: "Bela Vista", locality: "São Paulo", subAdministrativeArea: null, administrativeArea: "SP", isoCountryCode: "BR" };
 const TOKYO = { subLocality: "渋谷", locality: "東京", subAdministrativeArea: null, administrativeArea: "東京都", isoCountryCode: "JP" };
-const CITIES = { "AU/NSW/Waverley Council": "sydney", "AU/WA/Perth": "perth" };
+const CITIES = { "AU/NSW/Waverley Council": "sydney", "AU/NSW/Council of the City of Sydney": "sydney", "AU/WA/Perth": "perth", "AU/ACT": "canberra" };
 
 describe("checkPlace, the place rule", () => {
   test("lowercases with en-AU rules and trims; empty is no place", () => {
@@ -49,7 +53,22 @@ describe("placeFromPlacemark", () => {
   });
 
   test("an Australian place missing from the map names the key prepare stops for", () => {
-    expect(placeFromPlacemark(SURRY, CITIES)).toEqual({ place: null, missingKey: "AU/NSW/Sydney" });
+    expect(placeFromPlacemark(SURRY, CITIES)).toEqual({ place: null, missingKey: "AU/NSW/Imaginary Council" });
+  });
+
+  test("a territory with one city finds it for every suburb, with or without a council", () => {
+    expect(placeFromPlacemark(BRADDON, CITIES)).toEqual({ place: "braddon, canberra" });
+  });
+
+  test("the area is never a landmark: Australia uses the locality, elsewhere a landmark-like sub-locality is dropped", () => {
+    expect(placeFromPlacemark(OPERA, CITIES)).toEqual({ place: "sydney" });
+    const LOUVRE = { subLocality: "Louvre and Tuileries", locality: "Paris", subAdministrativeArea: null, administrativeArea: "Île-de-France", isoCountryCode: "FR" };
+    expect(placeFromPlacemark(LOUVRE, CITIES)).toEqual({ place: "paris, île-de-france" });
+    expect(placeFromPlacemark({ ...LOUVRE, subLocality: "Fish & Chips Quarter" }, CITIES)).toEqual({ place: "paris, île-de-france" });
+  });
+
+  test("a placemark with no administrative area keys with an empty segment, not the word null", () => {
+    expect(cityKey({ ...SURRY, administrativeArea: null })).toBe("AU//Imaginary Council");
   });
 
   test("no GPS, or no names, is no place", () => {
@@ -91,6 +110,6 @@ describe("a post's place", () => {
 
 test("the committed city map starts with the spec's two entries, and every city in it follows the place rule", () => {
   const cities = JSON.parse(readFileSync(new URL("../../scripts/photo-cities.json", import.meta.url), "utf8")) as Record<string, string>;
-  expect(cities).toMatchObject({ "AU/NSW/Waverley Council": "sydney", "AU/ACT/City": "canberra" });
+  expect(cities).toMatchObject({ "AU/NSW/Waverley Council": "sydney", "AU/NSW/Council of the City of Sydney": "sydney", "AU/ACT/City": "canberra", "AU/ACT": "canberra" });
   for (const city of Object.values(cities)) expect(checkPlace(city)).toEqual({ ok: true, place: city });
 });

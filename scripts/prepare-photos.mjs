@@ -57,6 +57,8 @@ if (tasks.some(({ source }) => [".arw", ".dng", ".heic"].includes(extname(source
   renderer = join(output, ".work/photo-render");
   execFileSync("xcrun", ["swiftc", fileURLToPath(new URL("./photo-render.swift", import.meta.url)), "-o", renderer], { stdio: "inherit" });
 }
+// Compiled up front, beside the renderer, so a missing toolchain is found before any rendering
+const tool = await placeTool();
 sharp.concurrency(1);
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 
@@ -149,10 +151,11 @@ async function placeTool() {
   if (process.env.PHOTO_PLACE_TOOL) return resolve(process.env.PHOTO_PLACE_TOOL);
   if (process.platform !== "darwin") throw new Error("Places need macOS's geocoder (scripts/photo-place.swift)");
   const tool = join(output, ".work/photo-place");
-  execFileSync("xcrun", ["swiftc", fileURLToPath(new URL("./photo-place.swift", import.meta.url)), "-o", tool], { stdio: "inherit" });
+  // -suppress-warnings: the tool's one warning is the known deprecation of MKMapItem.placemark, whose replacement
+  // (addressRepresentations) has no sub-administrative area, which the city map needs. Errors still print.
+  execFileSync("xcrun", ["swiftc", "-suppress-warnings", fileURLToPath(new URL("./photo-place.swift", import.meta.url)), "-o", tool], { stdio: "inherit" });
   return tool;
 }
-const tool = await placeTool();
 const delay = Number(process.env.PHOTO_PLACE_DELAY_MS ?? 1500);
 const cities = JSON.parse(await readFile(fileURLToPath(new URL("./photo-cities.json", import.meta.url)), "utf8"));
 const placesPath = join(output, "metadata", "places.json");
@@ -160,6 +163,7 @@ let places = {};
 try { places = JSON.parse(await readFile(placesPath, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; }
 const missing = new Map();
 const review = [];
+const failed = new Set();
 let asked = false;
 for (const post of posts) {
   const slides = tasks.filter((task) => task.selected.post === post.collection).sort((a, b) => a.selected.slide - b.selected.slide);
@@ -173,29 +177,38 @@ for (const post of posts) {
     if (!Object.hasOwn(places, photo.id)) {
       if (asked) await new Promise((done) => setTimeout(done, delay));
       asked = true;
+      let answer;
       try {
-        places[photo.id] = JSON.parse((await run(tool, [photo.path])).stdout);
-      } catch {
-        // Apple's rate limit or the network: every finished lookup is already saved, so a rerun carries on from here
-        console.error(`Geocoding failed for ${photo.id}; run photos:prepare again (finished lookups are kept)`);
-        process.exit(1);
+        answer = JSON.parse((await run(tool, [photo.path])).stdout);
+      } catch (error) {
+        if (typeof error.code !== "number" && !(error instanceof SyntaxError)) throw error;
+        if (error.code === 75) {
+          // Offline, rate limited or the service down: every finished lookup is already saved, so a rerun carries on
+          console.error(`Geocoding unavailable at ${photo.id} (offline or rate limited); run photos:prepare again (finished lookups are kept)`);
+          process.exit(1);
+        }
+        // What will happen every time (a corrupt position): cache nothing, leave this photo out and list the post
+        failed.add(post.collection);
+        continue;
       }
+      places[photo.id] = answer;
       // Saved after every lookup, so an interrupted run never asks again
       await writePrivateJson(placesPath, places);
     }
     const result = placeFromPlacemark(places[photo.id], cities);
-    if (result.missingKey) missing.set(result.missingKey, post.collection);
-    if (result.review) review.push(`${post.collection}: ${result.review}`);
+    if (result.missingKey && !missing.has(result.missingKey)) missing.set(result.missingKey, post.collection);
+    if (result.review) review.push(`${post.collection}: ${result.review}; set it in /admin`);
     found.push(result.place);
   }
+  if (failed.has(post.collection)) review.push(`${post.collection}: lookup failed, rerun or set it in /admin`);
   post.place = postPlace(found);
 }
 if (missing.size > 0) {
-  console.error("Add a city for each of these to scripts/photo-cities.json, then run photos:prepare again (nothing is asked twice):");
+  console.error("Add a city for each of these to scripts/photo-cities.json, then run photos:prepare again (nothing is asked twice; to ask about a photo again, delete its id from metadata/places.json):");
   for (const [key, collection] of missing) console.error(`  "${key}"  (post ${collection})`);
   process.exit(1);
 }
-for (const line of review) console.log(`no place for ${line}: set it in /admin`);
+for (const line of review) console.log(`no place for ${line}`);
 for (const post of posts) console.log(`${post.publishedAt.slice(0, 10)} ${post.collection} ${post.place ?? "(no place)"}`);
 
 const manifest = { schemaVersion: 1, preparedAt: new Date().toISOString(), posts, photos: results, exclusions: selection.counts };
