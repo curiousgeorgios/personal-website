@@ -4,6 +4,8 @@ import type { PrintDeps } from "./config";
 // With its extension: bun run prints:check (Task 14) runs this file under plain Node, which resolves no bare relative paths
 import { DELIVERY_CEILING_CENTS, deliveryAmount, MAX_BUFFER, readOrderCosts, type OrderCosts } from "./quote.ts";
 import type { Shipment } from "./store";
+// With its extension, like quote.ts
+import { trackingHref } from "./tracking.ts";
 
 // Artelo's open API (spec 16.1, 18.2, 18.3), through fetch with the key and a 15-second timeout. Nothing here throws:
 // every call answers ok with a body, or not ok with a status (null for a network error, a timeout or an unreadable 2xx).
@@ -168,15 +170,16 @@ const textOf = (value: unknown) => (typeof value === "string" ? value : typeof v
 
 /**
  * A parcel's tracking as it may be stored and shown: the carrier (lowercase) and number on one line each and capped, and
- * the link only when it is a whole https URL with nothing invisible in it, because it becomes a link (the rule mail.ts's shippedText applies again at
- * send time). Null when neither a number nor a link is left
+ * the link only when trackingHref takes it (a whole https URL) and it has nothing invisible in it, because it becomes a
+ * link (trackingHref is applied again wherever it is shown). Null when neither a number nor a link is left
  */
 export function cleanShipment(carrier: unknown, number: unknown, url: unknown): Shipment | null {
   const link = textOf(url).trim();
   const shipment = {
     carrier: oneLine(textOf(carrier), TRACKING_LIMITS.carrier).toLowerCase(),
     number: oneLine(textOf(number), TRACKING_LIMITS.number),
-    url: /^https:\/\/\S+$/i.test(link) && !/[\p{Cc}\p{Cf}]/u.test(link) && link.length <= TRACKING_LIMITS.url ? link : "",
+    // trackingHref's one https rule, plus what only a stored value needs: nothing invisible, and a bounded length
+    url: (!/[\p{Cc}\p{Cf}]/u.test(link) && link.length <= TRACKING_LIMITS.url ? trackingHref(link) : null) ?? "",
   };
   return shipment.number || shipment.url ? shipment : null;
 }

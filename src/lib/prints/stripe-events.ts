@@ -3,6 +3,7 @@ import { REFUND_REASON } from "./artelo-status";
 import { isFrame, isTier, offerFor, printsFor } from "./catalogue";
 import type { PrintDeps } from "./config";
 import { sendAdminNote } from "./mail";
+import { isOrderId } from "./order-id";
 import { mailNow, placeOrder } from "./place";
 import { getOrder, loadPrices, markExpired, type OrderRow } from "./store";
 import { expireSession, getSession, type StripeSession } from "./stripe";
@@ -32,13 +33,14 @@ export type PaidOutcome = "paid" | "attention" | "unchanged" | "recreated" | "un
 
 /**
  * The print order a session was made for, or null when it isn't one of this site's checkouts. Checkout sets both
- * fields; a Payment Link or another integration on the account can carry a client_reference_id (a buyer may even type
- * one into a link's URL), but metadata is set only by whoever creates the session. Never logged: on a session that
- * isn't ours, client_reference_id is anybody's text
+ * fields to the order's id; a Payment Link or another integration on the account can carry a client_reference_id (a
+ * buyer may even type one into a link's URL), but metadata is set only by whoever creates the session, and another
+ * integration that sets both to the same value still has to use a print order id's shape (ADR-0027). Never logged: on
+ * a session that isn't ours, client_reference_id is anybody's text
  */
 export function printOrderOf(session: Pick<StripeSession, "client_reference_id" | "metadata">): string | null {
   const id = session.client_reference_id;
-  return typeof id === "string" && id !== "" && session.metadata?.order_id === id ? id : null;
+  return isOrderId(id) && session.metadata?.order_id === id ? id : null;
 }
 
 /** An order a session may move: still waiting for payment, and holding no session or this one (its `?` is the session id) */
@@ -165,11 +167,14 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
       const intent = typeof object.payment_intent === "string" ? object.payment_intent : null;
       const order = intent ? await db.prepare("SELECT * FROM print_orders WHERE stripe_payment_intent = ?").bind(intent).first<OrderRow>() : null;
       if (!order) {
-        // Stripe copies the payment intent's metadata to its charge once, so a print order's charge names its order. One
-        // that does is waiting for the paid transition to store its intent, and Stripe's redelivery will find it; any
-        // other charge (a sale from another integration on the account) never will
+        // Stripe copies the payment intent's metadata to its charge once, so a print order's charge names its order. Only
+        // a charge naming an order that is still waiting for the paid transition to store its intent is retried: Stripe's
+        // redelivery will find it. Any other charge never will: order_id is a common key (WooCommerce's gateway sets it),
+        // so an id of another shape, or one no waiting order has, is another integration's sale
         const metadata = object.metadata as { order_id?: unknown } | null | undefined;
-        if (typeof metadata?.order_id === "string" && metadata.order_id !== "") throw new Error("no order holds this payment yet");
+        const named = isOrderId(metadata?.order_id) ? metadata.order_id : null;
+        const waiting = named ? await db.prepare("SELECT 1 AS waiting FROM print_orders WHERE id = ? AND status IN ('checkout', 'expired')").bind(named).first() : null;
+        if (waiting) throw new Error("no order holds this payment yet");
         return await ignore();
       }
       const now = deps.now();
@@ -208,9 +213,9 @@ export const UNKNOWN_SESSION_AFTER = 25 * 3600;
 
 /**
  * The cron's second step (spec 18.6): no paid order goes unnoticed, and nothing expires before Stripe is asked. Each
- * order read goes to the back of the line (status_checked_at), so twenty that stay checkout can't hide a newer paid one
+ * order read goes to the back of the line (status_checked_at), so twenty that stay checkout can't hide a newer paid one. Resolves to how many were read, for the cron's log
  */
-export async function reconcileCheckouts(deps: PrintDeps): Promise<void> {
+export async function reconcileCheckouts(deps: PrintDeps): Promise<number> {
   const { results } = await deps.db
     .prepare("SELECT id, stripe_session_id, created_at, status_checked_at FROM print_orders WHERE status = 'checkout' AND created_at < ? ORDER BY COALESCE(status_checked_at, created_at), created_at LIMIT 20")
     .bind(deps.now() - RECONCILE_AFTER)
@@ -254,4 +259,5 @@ export async function reconcileCheckouts(deps: PrintDeps): Promise<void> {
       await expireSession(deps, session.id);
     }
   }
+  return results.length;
 }

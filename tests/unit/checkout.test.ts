@@ -6,7 +6,7 @@ import { sealQuote, type QuotePayload } from "../../src/lib/prints/seal";
 import { printConfig } from "../../src/lib/prints/config";
 import { getOrder, resolveBasket, writeSetting } from "../../src/lib/prints/store";
 import { livemodeOf } from "../../src/lib/prints/stripe";
-import { viewKey } from "../../src/lib/prints/view-key";
+import { orderPageUrl, viewKey } from "../../src/lib/prints/view-key";
 import { ADDRESS, captureLogs, dumpDb, fakeFetch, json, NOW, printDb, testConfig, testDeps, US_ADDRESS, VIEW_SECRET, type Handler } from "./prints-fakes";
 
 const TWO = "fixture-b-01:medium:oak,fixture-b-02:small:unframed";
@@ -26,7 +26,8 @@ const setup = async (handler: Handler = created, over = {}) => {
   return { fake, db, deps: testDeps(db, { fetch: fake.fetch, ...over }) };
 };
 const pay = async (quote: string, address = ADDRESS) => {
-  const form = new FormData();
+  // Urlencoded, as the address form posts it
+  const form = new URLSearchParams();
   form.set("intent", "checkout");
   form.set("quote", quote);
   for (const [name, value] of Object.entries(address)) form.set(name, value);
@@ -40,7 +41,7 @@ describe("the session form", () => {
   test("adaptive pricing off, cards only, an hour to pay, each line in aud cents, then delivery", async () => {
     const db = await printDb();
     const basket = await resolveBasket(db, parseItems(TWO));
-    const form = Object.fromEntries(sessionForm({ orderId: "01k6x00000000000000000000a", lines: basket.lines, payload: payload(), config: testConfig(), viewKey: "KEY", now: NOW }));
+    const form = Object.fromEntries(sessionForm({ orderId: "01k6x00000000000000000000a", lines: basket.lines, payload: payload(), config: testConfig(), orderPage: "https://curiousgeorge.dev/prints/01k6x00000000000000000000a?key=KEY", now: NOW }));
     expect(form).toMatchObject({
       mode: "payment", "payment_method_types[0]": "card", submit_type: "pay", locale: "auto", expires_at: String(NOW + 3600), "adaptive_pricing[enabled]": "false",
       "line_items[0][price_data][currency]": "aud", "line_items[0][price_data][unit_amount]": "17900", "line_items[0][quantity]": "1",
@@ -56,7 +57,7 @@ describe("the session form", () => {
   test("the quoted address rides on the payment and in the custom text, never in metadata or a url", async () => {
     const db = await printDb();
     const basket = await resolveBasket(db, parseItems(TWO));
-    const form = Object.fromEntries(sessionForm({ orderId: "01k6x00000000000000000000a", lines: basket.lines, payload: payload(), config: testConfig(), viewKey: "KEY", now: NOW }));
+    const form = Object.fromEntries(sessionForm({ orderId: "01k6x00000000000000000000a", lines: basket.lines, payload: payload(), config: testConfig(), orderPage: "https://curiousgeorge.dev/prints/01k6x00000000000000000000a?key=KEY", now: NOW }));
     expect(form).toMatchObject({
       "payment_intent_data[shipping][name]": "Ada Lovelace", "payment_intent_data[shipping][phone]": "+61 400 000 000",
       "payment_intent_data[shipping][address][line1]": "12 Example Street", "payment_intent_data[shipping][address][line2]": "Unit 3",
@@ -81,7 +82,7 @@ describe("the session form", () => {
   test("destination taxes name the delivery line; a missing unit or state is left out; images only on https", async () => {
     const db = await printDb();
     const basket = await resolveBasket(db, parseItems("fixture-b-01:medium:oak"));
-    const form = Object.fromEntries(sessionForm({ orderId: "o", lines: basket.lines, payload: payload({ items: "fixture-b-01:medium:oak", address: US_ADDRESS, taxes: [{ field: "usSalesTax", label: "us sales tax", cents: 420 }] }), config: testConfig({ siteOrigin: "http://localhost:4337" }), viewKey: "K", now: NOW }));
+    const form = Object.fromEntries(sessionForm({ orderId: "o", lines: basket.lines, payload: payload({ items: "fixture-b-01:medium:oak", address: US_ADDRESS, taxes: [{ field: "usSalesTax", label: "us sales tax", cents: 420 }] }), config: testConfig({ siteOrigin: "http://localhost:4337" }), orderPage: "https://curiousgeorge.dev/prints/o?key=K", now: NOW }));
     expect(form["line_items[1][price_data][product_data][name]"]).toBe("delivery and destination taxes to united states, 1 print");
     expect(form["metadata[delivery_taxed]"]).toBe("1");
     expect(form).not.toHaveProperty(["payment_intent_data[shipping][address][line2]"]);
@@ -97,10 +98,10 @@ describe("the session form", () => {
     const db = await printDb();
     const basket = await resolveBasket(db, parseItems(TWO));
     const config = testConfig({ gst: "inclusive", gstTaxRate: "txr_123" });
-    const au = sessionForm({ orderId: "o", lines: basket.lines, payload: payload(), config, viewKey: "K", now: NOW });
+    const au = sessionForm({ orderId: "o", lines: basket.lines, payload: payload(), config, orderPage: "https://curiousgeorge.dev/prints/o?key=K", now: NOW });
     expect(au.getAll("line_items[0][tax_rates][0]").concat(au.getAll("line_items[2][tax_rates][0]"))).toEqual(["txr_123", "txr_123"]);
     expect(au.get("custom_text[submit][message]")).toMatch(/prices include gst for orders posted within australia\.$/);
-    const us = sessionForm({ orderId: "o", lines: basket.lines, payload: payload({ address: US_ADDRESS }), config, viewKey: "K", now: NOW });
+    const us = sessionForm({ orderId: "o", lines: basket.lines, payload: payload({ address: US_ADDRESS }), config, orderPage: "https://curiousgeorge.dev/prints/o?key=K", now: NOW });
     expect(us.has("line_items[0][tax_rates][0]")).toBe(false);
   });
 });
@@ -137,6 +138,8 @@ describe("startCheckout", () => {
     expect(fake.calls[0].headers.get("idempotency-key")).toBe(`checkout-${id}`);
     expect(fake.calls[0].headers.get("authorization")).toBe("Bearer sk_test_fixture");
     expect(new URLSearchParams(fake.calls[0].body).get("success_url")).toBe(`https://curiousgeorge.dev/prints/${id}?key=${await viewKey(VIEW_SECRET, id)}`);
+    // The very link the shipped email carries
+    expect(new URLSearchParams(fake.calls[0].body).get("success_url")).toBe(await orderPageUrl(deps.config, id));
   });
 
   test("stripe refusing or unreachable expires the order, so the buyer never saw a payment page for it", async () => {

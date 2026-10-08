@@ -167,10 +167,13 @@ function createBody(order: OrderRow, items: readonly Item[], links: Map<string, 
   };
 }
 
-/** A network error, a timeout, 408, 429 and 5xx are worth retrying; any other 4xx is Artelo refusing (spec 19) */
+/**
+ * A network error, a timeout, a 3xx (never followed, so Artelo is unavailable, as priceCheck treats it), 408, 429 and 5xx
+ * are worth retrying; any other 4xx is Artelo refusing (spec 19)
+ */
 function refusal(result: Extract<ArteloResult, { ok: false }>, address: Address): Error {
   const { status, message } = result;
-  if (status === null || status === 408 || status === 429 || status >= 500) return new Retryable(status === null ? "couldn't reach artelo" : `artelo answered ${status}`);
+  if (status === null || status < 400 || status === 408 || status === 429 || status >= 500) return new Retryable(status === null ? "couldn't reach artelo" : `artelo answered ${status}`);
   // Scrubbed whole, then cut: cutting first could leave half a name or street that no longer matches the address
   return new Permanent(message ? `artelo refused the order: ${scrub(message, address).slice(0, SHOWN_MESSAGE)}` : `artelo refused the order (${status}).`);
 }
@@ -366,8 +369,8 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
   }
 }
 
-/** The cron's first step: due paid orders, oldest first, at most ten, one at a time (spec 18.6). One that throws doesn't stop the rest */
-export async function placeDue(deps: PrintDeps): Promise<void> {
+/** The cron's first step: due paid orders, oldest first, at most ten, one at a time (spec 18.6). One that throws doesn't stop the rest. Resolves to how many were due, for the cron's log */
+export async function placeDue(deps: PrintDeps): Promise<number> {
   const { results } = await deps.db.prepare("SELECT id FROM print_orders WHERE status = 'paid' AND next_attempt_at <= ? ORDER BY paid_at, id LIMIT 10").bind(deps.now()).all();
   let threw = 0;
   for (const { id } of results as unknown as { id: string }[]) {
@@ -380,4 +383,5 @@ export async function placeDue(deps: PrintDeps): Promise<void> {
   }
   // Still the cron's failure to log, once the others have had their turn
   if (threw > 0) throw new Error(`${threw} of the due orders threw while being placed`);
+  return results.length;
 }

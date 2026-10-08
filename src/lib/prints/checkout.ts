@@ -9,7 +9,7 @@ import { deliveryLabel, hasTax } from "./quote";
 import type { QuotePayload } from "./seal";
 import { createOrder, markExpired, setSession, type PricedLine, type ResolvedBasket } from "./store";
 import { livemodeOf, stripe } from "./stripe";
-import { viewKey } from "./view-key";
+import { orderPageUrl } from "./view-key";
 
 // Starting checkout (spec 17): the order first, then Stripe's hosted page. Shipping collection is off, so Checkout asks
 // only for the email and card; the quoted address rides on the payment, where the buyer can't change it, and is shown
@@ -26,11 +26,12 @@ export interface SessionInput {
   lines: readonly PricedLine[];
   payload: QuotePayload;
   config: PrintConfig;
-  viewKey: string;
+  /** Where Stripe returns the buyer: orderPageUrl's, the same link the shipped email carries */
+  orderPage: string;
   now: number;
 }
 
-export function sessionForm({ orderId, lines, payload, config, viewKey: key, now }: SessionInput): URLSearchParams {
+export function sessionForm({ orderId, lines, payload, config, orderPage, now }: SessionInput): URLSearchParams {
   const form = new URLSearchParams();
   const set = (name: string, value: string | number) => form.append(name, String(value));
   const gst = gstSentence(config.gst);
@@ -82,7 +83,7 @@ export function sessionForm({ orderId, lines, payload, config, viewKey: key, now
   set("metadata[delivery_taxed]", hasTax(payload.taxes) ? "1" : "0");
   lines.forEach((line, i) => set(`metadata[line_${i + 1}]`, `${line.photoId}:${line.tier}:${line.frame}:${line.quantity}`));
   set("payment_intent_data[metadata][order_id]", orderId);
-  set("success_url", `${config.siteOrigin}/prints/${orderId}?key=${key}`);
+  set("success_url", orderPage);
   // Back to the basket, its address form empty
   set("cancel_url", `${config.siteOrigin}/basket${itemsQuery(payload.items)}`);
   return form;
@@ -98,9 +99,9 @@ export async function startCheckout(deps: PrintDeps, basket: ResolvedBasket, pay
   const id = ulid(now * 1000);
   // The order first, so a payment can never arrive for an order the site doesn't know (spec 19)
   await createOrder(db, { id, country: payload.address.country, printTotal: payload.printTotal, deliveryAmount: payload.deliveryAmount, deliveryTaxed: hasTax(payload.taxes) ? 1 : 0, livemode: livemodeOf(config.secrets.STRIPE_SECRET_KEY), now }, basket.lines);
-  const key = await viewKey(config.secrets.PRINT_VIEW_SECRET, id);
+  const orderPage = await orderPageUrl(config, id);
   // The Idempotency-Key guards only a retried identical request; a double submit makes two orders by design (spec 17.2)
-  const result = await stripe(deps, "POST", "/v1/checkout/sessions", sessionForm({ orderId: id, lines: basket.lines, payload, config, viewKey: key, now }), `checkout-${id}`);
+  const result = await stripe(deps, "POST", "/v1/checkout/sessions", sessionForm({ orderId: id, lines: basket.lines, payload, config, orderPage, now }), `checkout-${id}`);
   const session = result.ok && typeof result.body.id === "string" && typeof result.body.url === "string" ? { id: result.body.id, url: result.body.url } : null;
   if (!session) {
     console.error("prints: stripe didn't create a checkout for order", id, result.ok ? "an answer without a page" : (result.status ?? "no answer"));

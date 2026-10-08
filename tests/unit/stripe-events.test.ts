@@ -108,6 +108,74 @@ describe("the guard", () => {
     }
   });
 
+  test("a refund from another integration whose order_id isn't a print order's shape (woocommerce sets one) is recorded, answered 200 and changes nothing", async () => {
+    for (const orderId of ["1234", "wc_order_abc", ORDER.toUpperCase(), `${ORDER}x`, " " + ORDER]) {
+      const logs = captureLogs();
+      const { db, deps } = await setup();
+      await checkout(db);
+      expect(await handleStripeEvent(deps, event("charge.refunded", { payment_intent: "pi_woo", amount: 5000, amount_refunded: 5000, refunded: true, metadata: { order_id: orderId } }, "evt_woo"))).toBe(200);
+      expect(await events(db)).toEqual([{ id: "evt_woo" }]);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "checkout", refunded_amount: null, refunded_at: null });
+      expect(logs()).toContain("prints: stripe event evt_woo charge.refunded isn't for one of this site's print orders; recorded and ignored");
+      vi.restoreAllMocks();
+    }
+  });
+
+  test("the shape is required even when a row matches: a waiting row under an id of another shape never makes a refund retry", async () => {
+    captureLogs();
+    const { db, deps } = await setup();
+    await insertOrder(db, { id: "1234", status: "checkout", stripe_payment_intent: null, paid_at: null });
+    expect(await handleStripeEvent(deps, event("charge.refunded", { payment_intent: "pi_woo", amount: 5000, amount_refunded: 5000, refunded: true, metadata: { order_id: "1234" } }, "evt_woo"))).toBe(200);
+    expect(await events(db)).toEqual([{ id: "evt_woo" }]);
+  });
+
+  test("a refund naming an order id no order has, or an order that isn't waiting for its payment, is recorded and answered 200", async () => {
+    for (const row of [null, "paid", "placed", "refunded", "needs_attention"]) {
+      const logs = captureLogs();
+      const { db, deps } = await setup();
+      if (row) await insertOrder(db, { id: ORDER, status: row, stripe_payment_intent: "pi_other" });
+      expect(await handleStripeEvent(deps, event("charge.refunded", { payment_intent: "pi_unknown", amount: 5000, amount_refunded: 5000, refunded: true, metadata: { order_id: ORDER } }, "evt_none"))).toBe(200);
+      expect(await events(db)).toEqual([{ id: "evt_none" }]);
+      if (row) expect(await getOrder(db, ORDER)).toMatchObject({ status: row, refunded_amount: null, refunded_at: null });
+      expect(logs()).toContain("prints: stripe event evt_none charge.refunded isn't for one of this site's print orders; recorded and ignored");
+      vi.restoreAllMocks();
+    }
+  });
+
+  test("a refund naming an expired order still waiting for its payment answers 500 too, and applies on redelivery once it is paid", async () => {
+    captureLogs();
+    const { db, deps } = await setup();
+    await checkout(db, { status: "expired" });
+    const refund = event("charge.refunded", { payment_intent: "pi_test_1", amount: 28700, amount_refunded: 28700, refunded: true, metadata: { order_id: ORDER } }, "evt_r");
+    expect(await handleStripeEvent(deps, refund)).toBe(500);
+    expect(await events(db)).toEqual([]);
+    await handleStripeEvent(deps, event("checkout.session.completed", session()));
+    expect(await handleStripeEvent(deps, refund)).toBe(200);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", refunded_amount: 28700 });
+  });
+
+  test("another integration's checkout setting both fields to one value of another shape changes nothing: no order is recreated or expired", async () => {
+    for (const id of ["1234", "wc_order_abc", ORDER.toUpperCase(), "someone@example.com"]) {
+      const logs = captureLogs();
+      const mail = vi.fn(async () => ({ messageId: "m" }));
+      const db = await printDb();
+      const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
+      await checkout(db);
+      const foreign = { id: "cs_woo", client_reference_id: id, payment_intent: "pi_woo", metadata: { ...session().metadata, order_id: id } };
+      expect(await handleStripeEvent(deps, event("checkout.session.completed", session(foreign), "evt_paid"))).toBe(200);
+      expect(await handleStripeEvent(deps, event("checkout.session.expired", session({ ...foreign, status: "expired", payment_status: "unpaid" }), "evt_expired"))).toBe(200);
+      expect(await db.prepare("SELECT id, status FROM print_orders").all().then((result) => result.results)).toEqual([{ id: ORDER, status: "checkout" }]);
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM print_order_items WHERE order_id != ?").bind(ORDER).first("n")).toBe(0);
+      expect(await events(db)).toEqual(expect.arrayContaining([{ id: "evt_paid" }, { id: "evt_expired" }]));
+      expect(await events(db)).toHaveLength(2);
+      expect(deps.waited).toHaveLength(0);
+      expect(mail).not.toHaveBeenCalled();
+      expect(logs()).toContain("prints: stripe event evt_paid checkout.session.completed isn't for one of this site's print orders; recorded and ignored");
+      expect(logs()).not.toContain("someone@example.com");
+      vi.restoreAllMocks();
+    }
+  });
+
   test("an expiry for our own session whose order row is missing is recorded, logged as an error with the order id and answered 200", async () => {
     const logs = captureLogs();
     const { db, deps } = await setup();

@@ -1,3 +1,4 @@
+import { ORDER_ID } from "./order-id";
 import type { OrderStatus } from "./store";
 import { isCanonicalViewKey, viewKeyMatches } from "./view-key";
 
@@ -14,9 +15,6 @@ export const ORDER_STATUS_LINES: Record<OrderStatus, [string, string]> = {
   cancelled: ["this order was cancelled. george will be in touch about a refund.", "this order was cancelled. george will be in touch about a refund."],
   refunded: ["refunded.", "refunded."],
 };
-
-/** An order id's shape (a lowercase ULID) */
-const ORDER_ID = /^[0-9a-hjkmnp-tv-z]{26}$/;
 
 /** A canonical key (43 characters, 32 bytes, one spelling) that no order has: stands in for any key that isn't one */
 const DECOY_KEY = "A".repeat(43);

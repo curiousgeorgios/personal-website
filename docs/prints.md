@@ -142,6 +142,7 @@ All go to `ADMIN_EMAIL` (`hello@curiousgeorge.dev`). An email that fails is retr
 
 - **`print order <id> needs attention`**: its body is the reason and a link to `/admin/#orders`. Read the reason (below) and act on it.
 - **`print order <id> was cancelled by artelo`**: Artelo cancelled the order. Refund the buyer in Stripe from the order's `refund in stripe ›` link, and email them if it helps. Not sent when the buyer was already refunded in full.
+- **`print order <id> was cancelled and refunded`**: Artelo cancelled an order the buyer has been refunded for in full, while a note about it was still waiting to go. Nothing to do.
 - **`print order <id>: stripe's webhook never arrived`**: the cron found the order paid at Stripe with no webhook, applied the payment itself and is placing it, so the order needs nothing unless a needs-attention email for it comes too. Check the webhook in Stripe's dashboard: the endpoint is enabled, its recent deliveries succeed and its signing secret is the one in `STRIPE_WEBHOOK_SECRET`.
 - **`the artelo webhook is missing`**: the daily check found no webhook at Artelo for the site, so status changes arrive only through the twelve-hourly poll. Run `bun run prints:webhook --remote` (step 11). It comes once a day until fixed.
 

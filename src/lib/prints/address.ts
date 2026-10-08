@@ -14,7 +14,7 @@ export const EMPTY_ADDRESS: Address = { name: "", line1: "", line2: "", city: ""
  * Every field from a posted form, trimmed; anything missing (or a file) is "". Each is cut to one character past its
  * field's limit: still refused as too long, but a form that echoes it back stays small whatever was posted
  */
-export function readAddress(form: FormData): Address {
+export function readAddress(form: { get(name: string): FormDataEntryValue | null }): Address {
   const address = { ...EMPTY_ADDRESS };
   for (const name of ADDRESS_FIELDS) {
     const value = form.get(name);

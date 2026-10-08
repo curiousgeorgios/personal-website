@@ -1,4 +1,5 @@
 import type { Frame, Tier } from "./catalogue";
+import { REFUND_REASON } from "./artelo-status";
 import type { PrintConfig } from "./config";
 import { printsStatus, type PrintsStatus } from "./open";
 import { SETTINGS_SQL, shipmentsOf, toSettings, type OrderRow, type OrderStatus, type Shipment } from "./store";
@@ -93,3 +94,12 @@ export function stamp(seconds: number): string {
 /** Stripe's dashboard page for a payment, test or live by the order's stored livemode; the id stays one path segment */
 export const refundHref = (order: Pick<AdminOrder, "livemode" | "paymentIntent">): string | null =>
   order.paymentIntent ? `https://dashboard.stripe.com/${order.livemode ? "" : "test/"}payments/${encodeURIComponent(order.paymentIntent)}` : null;
+
+/**
+ * Whether the section offers retry now: the order needs attention, Artelo hasn't got it, the buyer isn't refunded in
+ * full and it isn't flagged with the refund reason (either would print for a refunded buyer). The view's half of one
+ * rule: retryOrder's UPDATE in src/lib/admin/actions.ts is the guard that counts, with these conditions in SQL plus a
+ * live lease, which the view doesn't show. Change the two together; orders-admin.test.ts fails when they disagree
+ */
+export const canRetry = (order: Pick<AdminOrder, "status" | "arteloId" | "refundedAmount" | "printTotal" | "deliveryAmount" | "reason">): boolean =>
+  order.status === "needs_attention" && order.arteloId === null && (order.refundedAmount ?? 0) < order.printTotal + order.deliveryAmount && order.reason !== REFUND_REASON;

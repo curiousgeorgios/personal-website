@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
+import { shapeOf } from "../../../lib/prints/artelo";
 import { applyArteloUpdate, readArteloUpdate, verifyArteloSignature } from "../../../lib/prints/artelo-updates";
 import { printDeps } from "../../../lib/prints/config";
 import { jsonAnswer, readCapped } from "../../../lib/prints/http";
@@ -7,7 +8,7 @@ import { writeSetting } from "../../../lib/prints/store";
 
 // Artelo's webhook (spec 18.3): the body read with a ceiling, then the signature, before anything is parsed or D1 is
 // touched. A signed body always answers 200, so Artelo never retries twenty times and deletes the webhook over an order
-// it can't match; such a body logs only its top-level keys
+// it can't match; such a body logs only its shape (shapeOf: plain field names, the rest counted)
 export const POST: APIRoute = async ({ request, locals }) => {
   const deps = printDeps(env, (promise) => locals.cfContext.waitUntil(promise));
   const raw = await readCapped(request, 64 * 1024);
@@ -20,13 +21,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   } catch {
     body = null;
   }
-  // The keys only, a bounded few: a key is Artelo's field name, never a value from the body
-  const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body).slice(0, 20).map((key) => key.slice(0, 40)).join(", ") || "none" : "none";
   const update = readArteloUpdate(body);
   if (!update) {
-    console.warn("prints: an artelo webhook couldn't be read; its keys:", keys);
+    console.warn("prints: an artelo webhook couldn't be read; its shape:", shapeOf(body));
     return jsonAnswer({ received: true }, 200);
   }
-  if ((await applyArteloUpdate(deps, update)) === "unknown") console.warn("prints: an artelo webhook named an unknown order; its keys:", keys);
+  if ((await applyArteloUpdate(deps, update)) === "unknown") console.warn("prints: an artelo webhook named an unknown order; its shape:", shapeOf(body));
   return jsonAnswer({ received: true }, 200);
 };

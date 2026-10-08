@@ -13,9 +13,8 @@ const quoted: Handler = async (request) => {
 };
 const url = (query: string) => new URL(`https://curiousgeorge.dev/basket${query}`);
 const post = (fields: Record<string, string>, headers: Record<string, string> = {}) => {
-  const form = new FormData();
-  for (const [name, value] of Object.entries(fields)) form.set(name, value);
-  return new Request("https://curiousgeorge.dev/basket", { method: "POST", body: form, headers });
+  // Urlencoded, as the address form posts it
+  return new Request("https://curiousgeorge.dev/basket", { method: "POST", body: new URLSearchParams(fields), headers });
 };
 const setup = async (handler: Handler = quoted, over = {}) => {
   const fake = fakeFetch({ [PRICE_CHECK]: handler });
@@ -158,6 +157,37 @@ describe("POST /basket, intent=quote", () => {
       expect(outcome).toMatchObject({ status: 422 });
       expect("view" in outcome && outcome.view.errors.form).toBe("that form couldn't be read. try again.");
     }
+  });
+
+  test("a body over 8KB is refused before it is parsed or counted against any limit, whether its length is declared or not (final review m7)", async () => {
+    const { fake, deps } = await setup();
+    const limit = vi.fn(async () => ({ success: true }));
+    const limits = { quote: { limit }, checkout: { limit }, artelo: { limit } } as unknown as Parameters<typeof basketPost>[3];
+    const fields = { intent: "quote", ...ADDRESS, line2: "x".repeat(9000) };
+    const body = new URLSearchParams(fields).toString();
+    const parse = vi.spyOn(URLSearchParams.prototype, "get");
+    // Declared: refused on the header alone, the body never read
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({ pull(controller) { pulled += 1; controller.enqueue(new TextEncoder().encode(body)); controller.close(); } }, { highWaterMark: 0 });
+    const declared = new Request("https://curiousgeorge.dev/basket", { method: "POST", body: stream, duplex: "half", headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(body.length) } } as RequestInit);
+    // Undeclared (chunked): refused once the stream passes the ceiling
+    const chunked = new Request("https://curiousgeorge.dev/basket", { method: "POST", body: new Blob([body]).stream(), duplex: "half", headers: { "content-type": "application/x-www-form-urlencoded" } } as RequestInit);
+    for (const request of [declared, chunked]) {
+      const outcome = await basketPost(deps, request, url(`?items=${TWO}`), limits);
+      expect(outcome).toMatchObject({ status: 413 });
+      expect("view" in outcome && outcome.view.errors.form).toBe("that form couldn't be read. try again.");
+      // Nothing posted is echoed back
+      expect("view" in outcome && outcome.view.address.name).toBe("");
+    }
+    expect(pulled).toBe(0);
+    // Only the basket's own ?items= was read: no field of the posted form
+    expect(parse.mock.calls.flat()).toEqual(["items", "items"]);
+    expect(limit).not.toHaveBeenCalled();
+    expect(fake.calls).toHaveLength(0);
+    // Just under the ceiling still quotes
+    parse.mockRestore();
+    const under = await basketPost(deps, post({ intent: "quote", ...ADDRESS, line2: "" }), url(`?items=${TWO}`), limits);
+    expect(under).toMatchObject({ status: 200 });
   });
 
   test("the address is never logged, whatever happens", async () => {

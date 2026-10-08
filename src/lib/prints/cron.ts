@@ -10,15 +10,23 @@ import { reconcileCheckouts } from "./stripe-events";
 /** A daily job runs when its timestamp is this old: 20 hours, so a five-minute cron drifting never skips a day */
 export const DAILY_EVERY = 20 * 3600;
 
-/** Runs a daily job (spec 18.6) when its print_settings timestamp is over 20 hours old, and records the time once it is done */
-export async function daily(deps: PrintDeps, job: DailyJob, run: () => Promise<boolean>): Promise<void> {
+/**
+ * Runs a daily job (spec 18.6) when its print_settings timestamp is over 20 hours old, and records the time once it is
+ * done. Resolves true only on a run that got the job done, so a job that isn't due, or one that fails and tries again in
+ * five minutes (logging its own failure), keeps the cron quiet
+ */
+export async function daily(deps: PrintDeps, job: DailyJob, run: () => Promise<boolean>): Promise<boolean> {
   const settings = await readSettings(deps.db);
-  if (deps.now() - settings.daily[job] < DAILY_EVERY) return;
-  if (await run()) await writeSetting(deps.db, `daily_${job}_at`, String(deps.now()), deps.now());
+  if (deps.now() - settings.daily[job] < DAILY_EVERY) return false;
+  if (!(await run())) return false;
+  await writeSetting(deps.db, `daily_${job}_at`, String(deps.now()), deps.now());
+  return true;
 }
 
-/** One job of the five-minute run: a name for the log, and the work. The work resolves to something truthy (a count of what
- * it handled, say) when it did something, and to nothing, false or 0 when there was nothing to do */
+/**
+ * One job of the five-minute run: a name for the log, and the work. The work resolves to something truthy (the number of
+ * orders it handled, or true for a daily job done) when it did something, and to false or 0 when there was nothing to do
+ */
 export type CronStep = readonly [name: string, run: () => Promise<unknown>];
 
 /** Runs every step in order, each in its own try, so one failure doesn't stop the rest (spec 18.6); returns the names that failed */

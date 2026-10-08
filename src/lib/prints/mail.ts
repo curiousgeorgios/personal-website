@@ -155,12 +155,15 @@ export async function sendAdminNote(deps: PrintDeps, id: string): Promise<void> 
   let sent = false;
   try {
     const order = await getOrder(deps.db, id);
-    // One guard holds either note: a cancellation makes it due only while the buyer isn't refunded in full, so an order
-    // refunded in full whose note is due is owed the missed-webhook note, never "refund it in stripe"
+    // One guard holds either note, and the text is chosen at send time. A cancelled order refunded in full may have been
+    // made due by either (a missed webhook or a cancellation whose first send failed before George refunded it), so it
+    // gets one line true of both: never "refund it in stripe", and never a missed webhook that may not have happened
     const refundedInFull = !!order && (order.refunded_amount ?? 0) >= order.print_total + order.delivery_amount;
-    sent = order?.status === "cancelled" && !refundedInFull
-      ? await mailAdmin(deps, `print order ${id} was cancelled by artelo`, `artelo cancelled order ${id}. refund it in stripe.`, `cancellation email for order ${id}`)
-      : await mailAdmin(deps, `print order ${id}: stripe's webhook never arrived`, `print order ${id} was paid but stripe's webhook never arrived. check the webhook in stripe.`, `missed-webhook email for order ${id}`);
+    if (order?.status === "cancelled") {
+      sent = refundedInFull
+        ? await mailAdmin(deps, `print order ${id} was cancelled and refunded`, `print order ${id} was cancelled by artelo and has been refunded; nothing to do.`, `cancelled-and-refunded email for order ${id}`)
+        : await mailAdmin(deps, `print order ${id} was cancelled by artelo`, `artelo cancelled order ${id}. refund it in stripe.`, `cancellation email for order ${id}`);
+    } else sent = await mailAdmin(deps, `print order ${id}: stripe's webhook never arrived`, `print order ${id} was paid but stripe's webhook never arrived. check the webhook in stripe.`, `missed-webhook email for order ${id}`);
   } finally {
     await settle(deps.db, id, "admin_notified_at", now, sent);
   }
@@ -175,8 +178,8 @@ async function attempt(deps: PrintDeps, id: string, send: () => Promise<void>): 
   }
 }
 
-/** Every email that is due: from the cron's third step and right after any change that makes one due */
-export async function sendDueMail(deps: PrintDeps): Promise<void> {
+/** Every email that is due: from the cron's third step and right after any change that makes one due. Resolves to how many orders had one due, for the cron's log */
+export async function sendDueMail(deps: PrintDeps): Promise<number> {
   const cutoff = deps.now() - IN_FLIGHT_SECONDS;
   const { results } = await deps.db
     .prepare(`SELECT id, status, admin_notified_at FROM print_orders WHERE (status = 'needs_attention' AND ${dueSql("attention_notified_at")}) OR (status IN ('shipped', 'delivered') AND ${dueSql("shipped_email_at")}) OR ${dueSql("admin_notified_at")} ORDER BY updated_at LIMIT 20`)
@@ -188,4 +191,5 @@ export async function sendDueMail(deps: PrintDeps): Promise<void> {
     if (row.status === "needs_attention") await attempt(deps, row.id, () => sendAttention(deps, row.id));
     if (row.admin_notified_at !== null && row.admin_notified_at <= 0) await attempt(deps, row.id, () => sendAdminNote(deps, row.id));
   }
+  return results.length;
 }

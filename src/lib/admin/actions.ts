@@ -5,6 +5,7 @@ import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/p
 import { insertGrant, revokeCatalogueLink } from "../photos/store";
 import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
 import { REFUND_REASON } from "../prints/artelo-status";
+import { ORDER_ID } from "../prints/order-id";
 import { writeSetting } from "../prints/store";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
@@ -498,9 +499,6 @@ async function revokeLink(form: FormData, { db }: ActionDeps): Promise<ActionRes
 
 // Print orders (spec 20)
 
-/** A lowercase ULID: an order's id */
-const ORDER_ID = /^[0-9a-hjkmnp-tv-z]{26}$/;
-
 async function saveBuffer(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
   const fields = readFields(form, BUFFER_FIELDS);
   const checked = checkBuffer(fields);
@@ -522,6 +520,8 @@ async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<A
   const id = String(form.get("id") ?? "");
   if (!ORDER_ID.test(id)) return gone("order");
   const now = Math.floor(Date.now() / 1000);
+  // The rule's guard: canRetry (src/lib/prints/admin.ts) is the view's copy of every condition but the lease, so the
+  // button shows exactly when this can apply. Change the two together; orders-admin.test.ts fails when they disagree
   const result = await db
     .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND attention_reason IS NOT ? AND (lease_until IS NULL OR lease_until < ?)")
     .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, REFUND_REASON, now)

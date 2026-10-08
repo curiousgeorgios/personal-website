@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import OrdersAdmin from "../../src/components/admin/OrdersAdmin.astro";
 import { runAction, type ActionDeps } from "../../src/lib/admin/actions";
-import { loadOrdersAdmin, stamp } from "../../src/lib/prints/admin";
+import { canRetry, loadOrdersAdmin, stamp } from "../../src/lib/prints/admin";
 import { REFUND_REASON } from "../../src/lib/prints/artelo-status";
 import { placeOrder } from "../../src/lib/prints/place";
 import { getOrder, readSettings } from "../../src/lib/prints/store";
@@ -65,6 +65,31 @@ describe("the orders section's actions", () => {
     expect(await runAction(formOf({ intent: "order.retry", id: "01k6x0000000000000000000zz" }), depsOf(db))).toEqual({ ok: false, section: null, form: "", errors: { form: "that order no longer exists" }, values: {} });
     expect(await runAction(formOf({ intent: "order.retry", id: "../x" }), depsOf(db))).toMatchObject({ ok: false, errors: { form: "that order no longer exists" } });
   });
+});
+
+test("the view offers retry now exactly when the action's guard applies it, so the two can't drift (final review m8)", async () => {
+  const cases: Record<string, string | number | null>[] = [];
+  for (const status of ["paid", "needs_attention", "placed", "refunded", "cancelled"]) {
+    for (const artelo_order_id of [null, "artelo-1"]) {
+      for (const refunded_amount of [null, 0, 28699, 28700, 30000]) {
+        for (const attention_reason of [null, "stuck", REFUND_REASON]) cases.push({ status, artelo_order_id, refunded_amount, attention_reason });
+      }
+    }
+  }
+  let offered = 0;
+  for (const columns of cases) {
+    const db = await printDb();
+    await insertOrder(db, { id: ORDER, lease_until: null, ...columns });
+    const [order] = (await loadOrdersAdmin(db, testConfig(), NOW)).orders;
+    const deps = depsOf(db);
+    await runAction(formOf({ intent: "order.retry", id: ORDER }), deps);
+    const applied = deps.orders.placeLater.mock.calls.length > 0;
+    expect(canRetry(order), JSON.stringify(columns)).toBe(applied);
+    if (applied) offered += 1;
+  }
+  // Both answers occur, so the comparison means something
+  expect(offered).toBeGreaterThan(0);
+  expect(offered).toBeLessThan(cases.length);
 });
 
 describe("retry now never places what it mustn't", () => {

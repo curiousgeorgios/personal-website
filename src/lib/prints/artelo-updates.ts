@@ -1,6 +1,6 @@
 import { revokeOrderGrantsStatement } from "../photos/store";
 import { artelo, readArteloOrder, readShipments, shipmentsColumn, unwrap } from "./artelo";
-import { mapStatus, PENDING_REASON } from "./artelo-status";
+import { mapStatus, PENDING_REASON, REFUND_REASON } from "./artelo-status";
 import type { PrintDeps } from "./config";
 import { sendDueMail } from "./mail";
 import { getOrder, type OrderRow, type OrderStatus, type Shipment } from "./store";
@@ -115,6 +115,11 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
     if (status !== order.artelo_status) console.log("prints: artelo sent order", order.id, "a status this site doesn't map:", status);
     return ignore();
   }
+  // A status for a refunded order with no Artelo id is direct evidence of the stranded order ADR-0026 looks for daily:
+  // Artelo has it after all. It is flagged as the daily lookup's flagStranded would, so George's email goes and he cancels
+  // it there, rather than recorded and sent to the back of that lookup's queue. A status reaches such an order only by our
+  // own id (findOrder), so Artelo's id isn't known here; the email names ours, which Artelo's order carries
+  if (order.status === "refunded" && order.artelo_order_id === null) return flagRefunded(deps, order, status, shipments);
   // Still being placed (an answer lost, say): only recorded, so placement's next lookup adopts the order properly rather
   // than leaving it placed with no Artelo id, where neither placement nor the poll would ever look at it again
   if (FINAL.has(order.status) || NOT_YET_ARTELOS.has(order.status)) {
@@ -156,6 +161,26 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
   const [moved] = await db.batch([move, ...revokes]);
   if (moved.meta.changes === 0) return "raced";
   if (MAILS.has(target)) mailSoon(deps);
+  return "applied";
+}
+
+/**
+ * Flags a refunded order Artelo has but this site has no Artelo id for (ADR-0026): needs_attention with the refund reason,
+ * its email due, any lease let go, as the daily lookup's flagStranded does. Bound to the order as read, so a placement
+ * that recorded Artelo's id meanwhile, or another delivery, is never overwritten. Artelo's status then counts as after the
+ * daily lookup's flag (a cancellation already made there ends it)
+ */
+async function flagRefunded(deps: PrintDeps, order: OrderRow, status: string, shipments: readonly Shipment[] | null): Promise<Applied> {
+  const now = deps.now();
+  const flagged = await deps.db
+    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, artelo_status = ?, lease_until = NULL, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL AND attention_reason IS ? AND artelo_status IS ?")
+    .bind(REFUND_REASON, status, now, now, order.id, order.attention_reason, order.artelo_status)
+    .run();
+  if (flagged.meta.changes === 0) return "raced";
+  console.error("prints: artelo sent a status for refunded order", order.id, "so it needs attention: cancel it there");
+  const flaggedRow = await getOrder(deps.db, order.id);
+  // A move it makes sends the due emails itself
+  if (!flaggedRow || (await applyTo(deps, flaggedRow, status, shipments)) !== "applied") mailSoon(deps);
   return "applied";
 }
 
@@ -206,9 +231,10 @@ async function stamp(deps: PrintDeps, id: string, at: number, cutoff: number): P
 /**
  * The cron's fourth step: Artelo deletes a webhook after 20 failed deliveries, so ask (at most 20, 300ms apart; Artelo
  * allows 50 in 10 seconds). An answer that changes nothing counts as a check (asked again in 12 hours); one that can't be
- * applied at all (no answer, another order's, an unreadable status, lost races, a throw) is asked again in an hour
+ * applied at all (no answer, another order's, an unreadable status, lost races, a throw) is asked again in an hour.
+ * Resolves to how many orders were asked about, for the cron's log
  */
-export async function pollStatuses(deps: PrintDeps, pause: (ms: number) => Promise<void> = sleep): Promise<void> {
+export async function pollStatuses(deps: PrintDeps, pause: (ms: number) => Promise<void> = sleep): Promise<number> {
   const cutoff = deps.now() - POLL_AFTER;
   const { results } = await deps.db
     .prepare("SELECT id, artelo_order_id FROM print_orders WHERE artelo_order_id IS NOT NULL AND status IN ('placed', 'in_production', 'shipped', 'needs_attention') AND COALESCE(status_checked_at, placed_at, 0) < ? ORDER BY COALESCE(status_checked_at, placed_at, 0), id LIMIT 20")
@@ -238,4 +264,5 @@ export async function pollStatuses(deps: PrintDeps, pause: (ms: number) => Promi
   }
   // Still the cron's failure to log, once the others have had their turn
   if (threw > 0) throw new Error(`${threw} of the polled orders' statuses couldn't be applied`);
+  return results.length;
 }

@@ -12,9 +12,9 @@ Print payments are confirmed by Stripe's webhook (spec 18.1), which is subscribe
 
 A Stripe event changes a print order only when it is provably from the checkout the site created:
 
-- A checkout event counts only when `metadata.order_id` equals `client_reference_id` (the site sets both; a Payment Link can set only the second) and, when the order row holds a `stripe_session_id`, the event's session is that one. The conditions are repeated in the writes themselves, not only in a read before them, and reconciliation applies the same match.
-- A refund counts as ours when a stored order holds its payment intent, or when the charge's `metadata.order_id` names an order. Stripe copies the payment intent's metadata, which checkout sets, onto the charge once.
-- An event that is ours but can't apply yet (a refund that arrives before the paid transition stored its intent) answers 500 so Stripe retries it. Everything else that isn't ours, or that no retry can help (an expired session whose order row is gone), is recorded in the event ledger, logged by id and answered 200 with nothing changed.
+- A checkout event counts only when `metadata.order_id` equals `client_reference_id` (the site sets both; a Payment Link can set only the second), that value has a print order id's shape (a lowercase ULID, one pattern in `src/lib/prints/order-id.ts`; amended 2026-10-09) and, when the order row holds a `stripe_session_id`, the event's session is that one. The conditions are repeated in the writes themselves, not only in a read before them, and reconciliation applies the same match.
+- A refund counts as ours when a stored order holds its payment intent. Stripe copies the payment intent's metadata, which checkout sets, onto the charge once, so a print order's charge names its order in `metadata.order_id`; but `order_id` is a common key (WooCommerce's Stripe gateway sets it), so naming an order alone isn't enough (amended 2026-10-09).
+- An event that is ours but can't apply yet answers 500 so Stripe retries it. That is only a refund whose `metadata.order_id` has a print order id's shape and names an order still `checkout` or `expired`, waiting for the paid transition to store its intent (amended 2026-10-09). Everything else that isn't ours, or that no retry can help (an expired session whose order row is gone, or a refund whose id has another shape or names no order still waiting for its payment), is recorded in the event ledger, logged by id and answered 200 with nothing changed.
 
 ## Consequences
 

@@ -36,13 +36,18 @@ test("a signed update is applied and remembered as heard", async () => {
   expect(Number(await env.DB.prepare("SELECT value FROM print_settings WHERE key = 'artelo_webhook_at'").first("value"))).toBeGreaterThan(0);
 });
 
-test("a signed body it can't read, or for an unknown order, still answers 200 and logs only the body's keys", async () => {
+test("a signed body it can't read, or for an unknown order, still answers 200 and logs only the body's shape", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   expect((await call(JSON.stringify({ event: "ping", secretThing: "Ada Lovelace" }))).status).toBe(200);
   expect((await call(JSON.stringify({ orderId: "artelo-404", status: "Shipped" }))).status).toBe(200);
+  // A key that is really a value (an email, a name) is only counted, never logged (shapeOf, final review m6)
+  expect((await call(JSON.stringify({ "ada@example.com": 1, "Ada Lovelace": { street: "12 Example Street" }, event: "ping" }))).status).toBe(200);
+  expect((await call(JSON.stringify([{ orderId: "x" }]))).status).toBe(200);
   expect(warn.mock.calls.map((args) => args.join(" "))).toEqual([
-    "prints: an artelo webhook couldn't be read; its keys: event, secretThing",
-    "prints: an artelo webhook named an unknown order; its keys: orderId, status",
+    "prints: an artelo webhook couldn't be read; its shape: an object with keys event, secretThing",
+    "prints: an artelo webhook named an unknown order; its shape: an object with keys orderId, status",
+    "prints: an artelo webhook couldn't be read; its shape: an object with keys event and 2 more",
+    "prints: an artelo webhook couldn't be read; its shape: 1 entry, the first with keys orderId",
   ]);
 });
 
@@ -96,9 +101,9 @@ test("nothing personal in artelo's payload is written or logged: only its order 
   });
   expect((await call(body)).status).toBe(200);
   expect(await env.DB.prepare("SELECT shipments FROM print_orders").first("shipments")).toBe(JSON.stringify([{ carrier: "ups", number: "1Z999AA10123456784", url: "https://www.ups.com/track?tracknum=1Z999AA10123456784" }]));
-  // An unreadable one logs its keys, never a value
+  // An unreadable one logs its shape, never a value
   expect((await call(JSON.stringify({ customer: "Ada Lovelace", orderId: { name: "Ada Lovelace" }, status: "Shipped" }))).status).toBe(200);
   expect(await dumpDb(env.DB)).not.toMatch(/Ada|Lovelace|Example Street|Bondi|400 000|ada@/);
   expect(logs()).not.toMatch(/Ada|Lovelace|Example Street|Bondi|400 000|ada@/);
-  expect(logs()).toContain("prints: an artelo webhook couldn't be read; its keys: customer, orderId, status");
+  expect(logs()).toContain("prints: an artelo webhook couldn't be read; its shape: an object with keys customer, orderId, status");
 });

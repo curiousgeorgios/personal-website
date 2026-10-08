@@ -2,8 +2,7 @@
 import Field from "./Field.astro";
 import { formState } from "../../lib/admin/form-state";
 import type { ActionFailure } from "../../lib/admin/actions";
-import { refundHref, STATUS_WORDS, stamp, type OrdersAdmin } from "../../lib/prints/admin";
-import { REFUND_REASON } from "../../lib/prints/artelo-status";
+import { canRetry, refundHref, STATUS_WORDS, stamp, type OrdersAdmin } from "../../lib/prints/admin";
 import { trackingHref } from "../../lib/prints/tracking";
 import { aud, rateText, usd } from "../../lib/prints/money";
 import { formatLogDate } from "../../lib/text";
@@ -46,9 +45,6 @@ const frameWord = (frame: string) => (frame === "oak" ? "oak" : "unframed");
           const count = order.lines.reduce((sum, line) => sum + line.quantity, 0);
           const stuck = order.status === "needs_attention";
           const refund = refundHref(order);
-          // A fully refunded order, or one flagged with the refund reason, is never retried: it would print for a refunded
-          // buyer (the action refuses both too)
-          const refundedInFull = (order.refundedAmount ?? 0) >= order.printTotal + order.deliveryAmount || order.reason === REFUND_REASON;
           return (
             <li class:list={["entry", { attention: stuck }]} id={id}>
               <div>
@@ -68,7 +64,7 @@ const frameWord = (frame: string) => (frame === "oak" ? "oak" : "unframed");
                     {stuck && order.arteloId && <span class="open-in-artelo">open it in artelo (order {order.arteloId})</span>}
                   </p>
                 )}
-                {stuck && !order.arteloId && !refundedInFull ? (
+                {canRetry(order) ? (
                   <form method="post" action={`/admin/#${id}`} class="admin-form retry-form">
                     {errors.form && <p class="error" role="alert">{errors.form}</p>}
                     <input type="hidden" name="intent" value="order.retry" />

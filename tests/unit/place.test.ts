@@ -136,6 +136,19 @@ describe("placeOrder", () => {
     expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attempts: 8, attention_reason: "artelo didn't take the order within a day: artelo answered 503" });
   });
 
+  test("a redirect from artelo's create is unavailable, as for a price check: retried, never a refusal (final review m9)", async () => {
+    captureLogs();
+    for (const status of [301, 302, 307, 308]) {
+      const { db, deps } = await setup({ [CREATE]: () => new Response(null, { status, headers: { Location: "https://elsewhere.example/orders/create" } }) });
+      expect(await placeOrder(deps, ORDER), String(status)).toBe("retry");
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", attention_reason: null, attempts: 1, next_attempt_at: NOW + 300 });
+    }
+    // A 4xx is still artelo refusing
+    const { db, deps } = await setup({ [CREATE]: () => json({}, 403) });
+    expect(await placeOrder(deps, ORDER)).toBe("attention");
+    expect((await getOrder(db, ORDER))?.attention_reason).toBe("artelo refused the order (403).");
+  });
+
   test("a window of nothing (the test build's PRINT_RETRY_WINDOW=0) sends the first failure to needs attention", async () => {
     captureLogs();
     const { db, deps } = await setup({ [CREATE]: () => json({}, 503) }, { retry_until: NOW - 60 });

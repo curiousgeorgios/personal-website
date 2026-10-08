@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { issueOrderGrant } from "../../src/lib/photos/store";
 import { mapStatus } from "../../src/lib/prints/artelo-status";
 import { applyArteloUpdate, pollStatuses, readArteloUpdate, verifyArteloSignature } from "../../src/lib/prints/artelo-updates";
+import { sendDueMail } from "../../src/lib/prints/mail";
 import { getOrder } from "../../src/lib/prints/store";
 import { sameBytes } from "../../src/lib/prints/stripe";
 import { captureLogs, dumpDb, fakeFetch, insertOrder, json, NOW, PHOTO_KEY, printDb, testDeps, type Handler } from "./prints-fakes";
@@ -391,15 +392,82 @@ describe("fix round 1", () => {
     expect(await activeGrants(db)).toBe(1);
   });
 
-  test("a fully refunded order cancelled while its missed-webhook note is due gets that note, not 'refund it in stripe' (minor 3)", async () => {
+  test("a status for a refunded order with no artelo id flags it for george, as the daily lookup would, instead of only recording it (final review m2)", async () => {
+    const REFUND = "refunded in stripe: cancel it in artelo if it hasn't printed.";
+    const mail = vi.fn(async () => ({ messageId: "m" }));
+    // Its attention email went once before (it needed attention, then was refunded): the flag makes it due again
+    const { db } = await setup({ status: "refunded", artelo_order_id: null, refunded_amount: 28700, lease_until: NOW - 60, status_checked_at: NOW - 999, attention_notified_at: NOW - 600 });
+    const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
+    expect(await applyArteloUpdate(deps, update("Received", null, ORDER))).toBe("applied");
+    await Promise.all(deps.waited);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: REFUND, attention_notified_at: NOW, artelo_order_id: null, artelo_status: "Received", lease_until: null });
+    expect(mail).toHaveBeenCalledTimes(1);
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER} needs attention`, text: expect.stringContaining(REFUND) }));
+    expect(vi.mocked(console.error)).toHaveBeenCalledWith("prints: artelo sent a status for refunded order", ORDER, "so it needs attention: cancel it there");
+    // Flagged, it is the admin's to clear: retry refuses its reason, and artelo's later statuses only record
+    expect(await applyArteloUpdate(deps, update("InProduction", null, ORDER))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: REFUND, artelo_status: "InProduction" });
+  });
+
+  test("a cancellation reaching a refunded order with no artelo id is flagged, then ends it: cancelled and refunded, no email owed", async () => {
+    const mail = vi.fn(async () => ({ messageId: "m" }));
+    const { db } = await setup({ status: "refunded", artelo_order_id: null, refunded_amount: 28700 });
+    const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
+    expect(await applyArteloUpdate(deps, update("Canceled", null, ORDER))).toBe("applied");
+    await Promise.all(deps.waited);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "cancelled", attention_reason: null, artelo_status: "Canceled", admin_notified_at: null });
+    expect(mail).not.toHaveBeenCalled();
+  });
+
+  test("the flag is bound to the order as read: a placement recording artelo's id meanwhile is never overwritten", async () => {
+    const { db, deps } = await setup({ status: "refunded", artelo_order_id: null, refunded_amount: 28700 });
+    let landed = false;
+    const racing = new Proxy(db, {
+      get(target, property) {
+        if (property !== "prepare") return Reflect.get(target, property);
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (landed || !sql.startsWith("UPDATE print_orders SET status = 'needs_attention'")) return statement;
+          return { bind: (...values: unknown[]) => ({ run: async () => {
+            landed = true;
+            await target.prepare("UPDATE print_orders SET artelo_order_id = 'artelo-9' WHERE id = ?").bind(ORDER).run();
+            return statement.bind(...values).run();
+          } }) };
+        };
+      },
+    });
+    expect(await applyArteloUpdate({ ...deps, db: racing }, update("Received", null, ORDER))).toBe("ignored");
+    expect(landed).toBe(true);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", attention_reason: null, artelo_order_id: "artelo-9" });
+  });
+
+  test("a fully refunded order cancelled while its missed-webhook note is due gets one neutral note, not 'refund it in stripe' (minor 3; final review m3)", async () => {
     const mail = vi.fn(async () => ({ messageId: "m" }));
     const { db } = await setup({ refunded_amount: 28700, admin_notified_at: 0 });
     const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
     expect(await applyArteloUpdate(deps, update("Canceled"))).toBe("applied");
     await Promise.all(deps.waited);
     expect(mail).toHaveBeenCalledTimes(1);
-    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER}: stripe's webhook never arrived` }));
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER} was cancelled and refunded`, text: `print order ${ORDER} was cancelled by artelo and has been refunded; nothing to do.` }));
     expect((await getOrder(db, ORDER))?.admin_notified_at).toBe(NOW);
+  });
+
+  test("a cancellation note whose first send failed, then a full refund before it goes, reads as cancelled and refunded, never a missed webhook (final review m3)", async () => {
+    const mail = vi.fn(async (): Promise<{ messageId: string }> => { throw new Error("email isn't ready"); });
+    const { db } = await setup();
+    const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
+    expect(await applyArteloUpdate(deps, update("Canceled"))).toBe("applied");
+    await Promise.all(deps.waited);
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER} was cancelled by artelo` }));
+    expect((await getOrder(db, ORDER))?.admin_notified_at).toBe(0);
+    // George refunds it in full from /admin; the cron's next send of the same note
+    await db.prepare("UPDATE print_orders SET refunded_amount = 28700, refunded_at = ? WHERE id = ?").bind(NOW, ORDER).run();
+    mail.mockReset();
+    mail.mockImplementation(async () => ({ messageId: "m" }));
+    await sendDueMail(deps);
+    expect(mail).toHaveBeenCalledTimes(1);
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER} was cancelled and refunded`, text: `print order ${ORDER} was cancelled by artelo and has been refunded; nothing to do.` }));
+    expect(JSON.stringify(mail.mock.calls)).not.toContain("webhook");
   });
 
   test("a late or replayed status writes nothing at all, by webhook or poll (minor 4)", async () => {

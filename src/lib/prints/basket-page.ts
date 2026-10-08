@@ -4,6 +4,7 @@ import { basketHref, CAP_NOTE, changeLines, droppedNotes, itemsValue, parseItems
 import { startCheckout } from "./checkout";
 import type { PrintDeps } from "./config";
 import { freshRate } from "./fx";
+import { readCapped } from "./http";
 import { arteloKey, clientKey, underLimit, type PrintLimits } from "./limits";
 import { gstSentence } from "./money";
 import { canOpen } from "./open";
@@ -76,12 +77,28 @@ export async function quoteView(secret: string, payload: QuotePayload): Promise<
   return { printTotal: payload.printTotal, deliveryAmount: payload.deliveryAmount, label: deliveryLabel(payload.taxes), breakdown: breakdown(payload), token: await sealQuote(secret, payload) };
 }
 
+/**
+ * The address form's ceiling: its fields are short (spec 16.1) and the sealed quote well under 2KB, so a real post is far
+ * below it. Anything longer is refused before it is read whole or parsed, as both webhooks cap theirs, and before any limit
+ */
+export const BASKET_BODY_LIMIT = 8 * 1024;
+
+/** The posted form (urlencoded, as the address form posts it), "big" past the ceiling, null if it can't be read */
+async function readForm(request: Request): Promise<URLSearchParams | "big" | null> {
+  // A declared length over the ceiling is refused unread; a missing or false one is still caught as the body streams
+  if (Number(request.headers.get("content-length")) > BASKET_BODY_LIMIT) return "big";
+  const raw = await readCapped(request, BASKET_BODY_LIMIT);
+  return raw === "big" || raw === null ? raw : new URLSearchParams(raw);
+}
+
 /** intent=quote (spec 16.1) or intent=checkout (spec 17.2), both posted by the one address form. A POST render carries no beacon */
 export async function basketPost(deps: PrintDeps, request: Request, url: URL, limits: PrintLimits): Promise<BasketOutcome> {
-  const form = await request.formData().catch(() => null);
+  const read = await readForm(request);
+  const form = read === "big" ? null : read;
   const { basket, settings } = await loadBasket(deps.db, parseItems(url.searchParams.get("items")));
   const address = form ? readAddress(form) : { ...EMPTY_ADDRESS };
   const render = (status: number, over: Partial<BasketView> = {}): BasketOutcome => ({ status, beacon: false, view: viewOf(deps, basket, settings, { address, ...over }) });
+  if (read === "big") return render(413, { errors: { form: FORM_UNREADABLE } });
   const intent = form?.get("intent");
   if (intent === "checkout") return checkout(deps, request, form?.get("quote"), basket, address, limits, render);
   if (intent !== "quote") return render(422, { errors: { form: FORM_UNREADABLE } });
@@ -118,7 +135,7 @@ type Render = (status: number, over?: Partial<BasketView>) => BasketOutcome;
  * intent=checkout (spec 17.2): the visible address fields, as posted, against the sealed quote, exactly, or nothing is
  * created and nothing is charged. Once sameQuote holds, the seal's address is the posted one, so Stripe gets payload.address
  */
-async function checkout(deps: PrintDeps, request: Request, token: FormDataEntryValue | null | undefined, basket: ResolvedBasket, address: Address, limits: PrintLimits, render: Render): Promise<BasketOutcome> {
+async function checkout(deps: PrintDeps, request: Request, token: string | null | undefined, basket: ResolvedBasket, address: Address, limits: PrintLimits, render: Render): Promise<BasketOutcome> {
   // A closed basket (the page's 404) or an empty one creates nothing and counts against no limit
   if (!canOpen(deps.config) || basket.count === 0) return render(200);
   if (!(await underLimit(limits.checkout, clientKey(request, deps.config.testClients)))) return render(429, { errors: { form: "too many tries - wait a minute and try again." } });
