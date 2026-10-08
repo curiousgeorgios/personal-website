@@ -35,13 +35,15 @@ export function srcsetOf(photo: Pick<PublicPhoto, "previews">, sizes: readonly n
     .join(", ");
 }
 
-/** Frames are 120px tall on screens 680px and wider and 88px below (spec 3.2), their width following the ratio */
+/** Frames are 120px tall and 88px on a phone (spec 3.2), their width following the ratio */
 export const FRAME_HEIGHT = 120;
 export const PHONE_FRAME_HEIGHT = 88;
+/** The notebook's phone breakpoint (notebook.css), so the frames change with the layout */
+export const PHONE_MEDIA = "(max-width: 680px)";
 
 /** The frame's rendered width at each height, so a portrait at 2× takes the 240 and a landscape the 480 (spec 3.3) */
 export function frameSizes(width: number, height: number): string {
-  return `(max-width: 679px) ${Math.round((PHONE_FRAME_HEIGHT * width) / height)}px, ${Math.round((FRAME_HEIGHT * width) / height)}px`;
+  return `${PHONE_MEDIA} ${Math.round((PHONE_FRAME_HEIGHT * width) / height)}px, ${Math.round((FRAME_HEIGHT * width) / height)}px`;
 }
 
 /** Everything one frame's markup needs; the server renders it and the photo-sheet script fills a cloned frame with it */
@@ -49,6 +51,9 @@ export interface FrameView {
   href: string;
   avif: string;
   webp: string;
+  /** The 240s alone, for phones: a 3× phone would otherwise take the 480 for an 88px frame, over the image budget */
+  phoneAvif: string;
+  phoneWebp: string;
   src: string;
   sizes: string;
   width: number;
@@ -65,6 +70,8 @@ export function frameView(photo: PublicPhoto, index: number, total: number): Fra
     href: `/photos/${photo.id}`,
     avif: srcsetOf(photo, [240, 480], "avif"),
     webp: srcsetOf(photo, [240, 480], "webp"),
+    phoneAvif: srcsetOf(photo, [240], "avif"),
+    phoneWebp: srcsetOf(photo, [240], "webp"),
     src: small.url,
     sizes: frameSizes(small.width, small.height),
     width: small.width,

@@ -14,8 +14,8 @@
   .frame-link:hover .frame-no { color: var(--ink); }
 }
 .photos a.more { text-decoration: none; }
-.more-end { margin-top: 12px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
 .down { margin-top: 18px; color: var(--muted); }
-@media (max-width: 679px) {
+/* The notebook's phone breakpoint, as PHONE_MEDIA in gallery.ts */
+@media (max-width: 680px) {
   .frame-link img { height: 88px; }
 }

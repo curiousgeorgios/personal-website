@@ -105,7 +105,8 @@ export async function loadLogbook(db: D1Database): Promise<Logbook> {
     db.prepare("SELECT key, title, subtitle FROM facts ORDER BY CASE key WHEN 'shelf' THEN 0 ELSE 1 END"),
     db.prepare("SELECT id, date, precision, text FROM log_entries ORDER BY date DESC, created_at DESC, id DESC LIMIT ?").bind(LOG_LIMIT),
     db.prepare("SELECT id, title, artist, audio_key, cover_key FROM records WHERE active = 1 ORDER BY position LIMIT ?").bind(RECORD_LIMIT),
-    // The same join the gallery uses, so the line never points at an empty gallery
+    // The same join the gallery uses, so the line never points at an empty gallery. It needs migration 0006: apply it
+    // before deploying this, or the whole batch fails and the home page renders only its static rows
     db.prepare("SELECT EXISTS (SELECT 1 FROM photos JOIN photo_posts ON photo_posts.collection = photos.collection WHERE photos.published = 1) AS any"),
   ]);
   const all = (items.results as unknown as ItemRow[]).map(toItem);

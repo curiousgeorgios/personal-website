@@ -18,7 +18,19 @@ const POSTS = [
 const UNPUBLISHED = new Set(["fixture-03"]);
 const RAW = new Set(["fixture-c-01"]);
 const SIZES = [240, 480, 960, 1600];
+// The gallery's previews (240 and 480) are noise at this strength, so each weighs what a real one does at its size: the
+// real newest posts' 240 AVIFs come to about 0.15 bytes a pixel and their 480 AVIFs 0.12 (spec 3.3), WebP about 1.8
+// times that, which keeps the image budget's measurement honest. The 960 and 1600 stay flat colour.
+const NOISE = { 240: 80, 480: 60 };
 const COLOURS = ["#25475e", "#5e4a25", "#3d5e25", "#5e2541", "#2f2f5e", "#5e3b25"];
+
+/** Gaussian noise the size of the fitted preview, lightly blurred and shifted towards the post's colour */
+async function noisy(fitted, sigma, colour) {
+  const { info } = await fitted.raw().toBuffer({ resolveWithObject: true });
+  const noise = await sharp({ create: { width: info.width, height: info.height, channels: 3, noise: { type: "gaussian", mean: 128, sigma } } }).png().toBuffer();
+  const offsets = [1, 3, 5].map((i) => parseInt(colour.slice(i, i + 2), 16) - 64);
+  return sharp(noise).blur(0.7).linear([0.5, 0.5, 0.5], offsets);
+}
 
 const platform = await photoPlatform({ persistTo: process.argv[i + 1], remote: false });
 try {
@@ -39,7 +51,8 @@ try {
       const previews = [];
       for (const size of SIZES) for (const format of ["webp", "avif"]) {
         // Fitted inside the square, as photos:prepare does, so each preview has its real width and height
-        const resized = sharp(jpeg).resize({ width: size, height: size, fit: "inside", withoutEnlargement: true });
+        const fitted = sharp(jpeg).resize({ width: size, height: size, fit: "inside", withoutEnlargement: true });
+        const resized = NOISE[size] ? await noisy(fitted, NOISE[size], COLOURS[index]) : fitted;
         const { data, info } = await (format === "webp" ? resized.webp() : resized.avif({ effort: 0 })).toBuffer({ resolveWithObject: true });
         const key = `photos/previews/${id}/${sha}/${size}.${format}`;
         await platform.env.MEDIA.put(key, data, { httpMetadata: { contentType: `image/${format}` } });

@@ -31,12 +31,19 @@ describe("Gallery", () => {
     expect([...doc.querySelectorAll("#post-DFkL1xrsnOH a.frame-link")].map((a) => a.getAttribute("href"))).toEqual(["/photos/DFkL1xrsnOH-01", "/photos/DFkL1xrsnOH-03"]);
     const img = doc.querySelectorAll("#post-DFkL1xrsnOH img")[1];
     expect(attrs(img, "alt", "width", "height", "sizes", "src", "decoding")).toEqual([
-      "photo 2 of 2 from 2 february 2025, bondi, sydney", "160", "240", "(max-width: 679px) 59px, 80px", "/media/photos/previews/DFkL1xrsnOH-03/s/240.webp", "async",
+      "photo 2 of 2 from 2 february 2025, bondi, sydney", "160", "240", "(max-width: 680px) 59px, 80px", "/media/photos/previews/DFkL1xrsnOH-03/s/240.webp", "async",
     ]);
     expect(img.getAttribute("srcset")).toBe("/media/photos/previews/DFkL1xrsnOH-03/s/240.webp 160w, /media/photos/previews/DFkL1xrsnOH-03/s/480.webp 320w");
-    expect(attrs(doc.querySelectorAll("#post-DFkL1xrsnOH source")[1], "type", "srcset")).toEqual([
-      "image/avif", "/media/photos/previews/DFkL1xrsnOH-03/s/240.avif 160w, /media/photos/previews/DFkL1xrsnOH-03/s/480.avif 320w",
+    // A phone takes only the 240, whatever its pixel density; wider screens choose between the 240 and the 480
+    const sources = [...doc.querySelectorAll("#post-DFkL1xrsnOH .sheet-frame")[1].querySelectorAll("picture > source")];
+    expect(sources.map((source) => attrs(source, "media", "type", "srcset"))).toEqual([
+      ["(max-width: 680px)", "image/avif", "/media/photos/previews/DFkL1xrsnOH-03/s/240.avif 160w"],
+      ["(max-width: 680px)", "image/webp", "/media/photos/previews/DFkL1xrsnOH-03/s/240.webp 160w"],
+      [null, "image/avif", "/media/photos/previews/DFkL1xrsnOH-03/s/240.avif 160w, /media/photos/previews/DFkL1xrsnOH-03/s/480.avif 320w"],
     ]);
+    expect(sources.every((source) => source.getAttribute("sizes") === "(max-width: 680px) 59px, 80px")).toBe(true);
+    // Each entry's heading sits under the entries row's h2
+    expect(doc.querySelector("#post-DFkL1xrsnOH h3.entry-head")).not.toBeNull();
   });
 
   test("only the first eight frames of the page's first entry load eagerly, the first with high priority; numbers keep three digits", async () => {

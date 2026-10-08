@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { GALLERY } from "./gallery-site";
 
-// The gallery on the gallery server's photo fixture (spec 11.3), which no spec changes: six posts, newest first, four to a page
+// The gallery on the gallery server's photo fixture (spec 11.3), which no spec changes: six posts, newest first, two to a page
 test.use({ baseURL: GALLERY });
 
 test.describe("without JavaScript", () => {
   test.use({ javaScriptEnabled: false });
 
-  test("the first page lists four entries, newest first, with dated headings and numbered frames", async ({ page }) => {
+  test("the first page lists two entries, newest first, with dated headings and numbered frames", async ({ page }) => {
     const response = await page.goto("/photos");
     expect(response?.status()).toBe(200);
     expect(response?.headers()["cache-control"]).toBe("no-cache");
@@ -16,7 +16,7 @@ test.describe("without JavaScript", () => {
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", "photos george vlachos has taken, one entry per instagram post.");
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", "https://curiousgeorge.dev/photos");
     await expect(page.locator(".row > .label")).toHaveText(["photos of", "entries"]);
-    expect(await page.locator("ol.entries > li.entry").evaluateAll((all) => all.map((li) => li.id))).toEqual(["post-fixture", "post-fixture-b", "post-fixture-c", "post-fixture-d"]);
+    expect(await page.locator("ol.entries > li.entry").evaluateAll((all) => all.map((li) => li.id))).toEqual(["post-fixture", "post-fixture-b"]);
     await expect(page.locator("#post-fixture .entry-head")).toHaveText("27.09.26 · bondi, sydney");
     await expect(page.locator("#post-fixture .entry-head time")).toHaveAttribute("datetime", "2026-09-27");
     await expect(page.locator("#post-fixture-b .entry-head")).toHaveText("14.06.26");
@@ -39,29 +39,42 @@ test.describe("without JavaScript", () => {
     expect(Math.round(box.height)).toBe(height);
     expect(Math.round(box.width)).toBe(Math.round((height * 2) / 3));
     expect(Math.round((await landscape.boundingBox())!.width)).toBe(Math.round((height * 3) / 2));
-    await expect(portrait).toHaveAttribute("sizes", "(max-width: 679px) 59px, 80px");
-    await expect(landscape).toHaveAttribute("sizes", "(max-width: 679px) 132px, 180px");
+    await expect(portrait).toHaveAttribute("sizes", "(max-width: 680px) 59px, 80px");
+    await expect(landscape).toHaveAttribute("sizes", "(max-width: 680px) 132px, 180px");
     await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
   test("only the first entry's first row loads eagerly, its first frame with high priority", async ({ page }) => {
     await page.goto("/photos");
     const loading = await page.locator("ol.entries img").evaluateAll((all) => all.map((img) => [img.getAttribute("loading"), img.getAttribute("fetchpriority")]));
-    expect(loading).toEqual([["eager", "high"], ["eager", null], ["lazy", null], ["lazy", null], ["lazy", null], ["lazy", null]]);
+    expect(loading).toEqual([["eager", "high"], ["eager", null], ["lazy", null], ["lazy", null]]);
   });
 
-  test("older entries is a plain link to a noindex page that ends the list", async ({ page }) => {
+  test("older entries is a plain link to noindex pages, two entries each, that end the list", async ({ page }) => {
     await page.goto("/photos");
     const more = page.locator("a.more");
     await expect(more).toHaveText("older entries");
+    await expect(more).toHaveAttribute("href", "/photos?before=1781392500");
+    await more.click();
+    await expect(page).toHaveURL(/\/photos\?before=1781392500$/);
+    expect(await page.locator("ol.entries > li.entry").evaluateAll((all) => all.map((li) => li.id))).toEqual(["post-fixture-c", "post-fixture-d"]);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
+    await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
     await expect(more).toHaveAttribute("href", "/photos?before=1766610000");
     await more.click();
     await expect(page).toHaveURL(/\/photos\?before=1766610000$/);
     expect(await page.locator("ol.entries > li.entry").evaluateAll((all) => all.map((li) => li.id))).toEqual(["post-fixture-e", "post-fixture-f"]);
     await expect(page.locator(".more-end")).toHaveText("that's every entry.");
-    await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
-    await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
+    await expect(page.locator("a.more")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "newest entries" })).toHaveAttribute("href", "/photos");
+  });
+
+  test("a phone takes only the 240 previews, whatever its pixel density", async ({ page }) => {
+    test.skip(page.viewportSize()!.width > 680, "the phone project (a 3× iPhone)");
+    await page.goto("/photos", { waitUntil: "networkidle" });
+    const chosen = await page.locator("ol.entries img").evaluateAll((all) => all.map((img) => (img as HTMLImageElement).currentSrc));
+    expect(chosen.length).toBe(4);
+    for (const src of chosen) expect(src).toMatch(/\/240\.(avif|webp)$/);
   });
 
   test("a cursor older than every post says that's every entry; a malformed one is the notebook 404", async ({ page }) => {

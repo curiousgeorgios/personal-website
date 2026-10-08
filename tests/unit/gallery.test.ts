@@ -31,9 +31,9 @@ describe("dates and names", () => {
 });
 
 describe("frames", () => {
-  test("sizes are the frame's rendered width: 120px tall from 680px wide, 88px below", () => {
-    expect(frameSizes(160, 240)).toBe("(max-width: 679px) 59px, 80px");
-    expect(frameSizes(240, 160)).toBe("(max-width: 679px) 132px, 180px");
+  test("sizes are the frame's rendered width: 120px tall, 88px at the notebook's phone breakpoint", () => {
+    expect(frameSizes(160, 240)).toBe("(max-width: 680px) 59px, 80px");
+    expect(frameSizes(240, 160)).toBe("(max-width: 680px) 132px, 180px");
   });
 
   test("srcsets describe each preview by its real width", () => {
@@ -47,8 +47,10 @@ describe("frames", () => {
       href: `/photos/${ID}`,
       avif: `/media/photos/previews/${ID}/s/240.avif 160w, /media/photos/previews/${ID}/s/480.avif 320w`,
       webp: `/media/photos/previews/${ID}/s/240.webp 160w, /media/photos/previews/${ID}/s/480.webp 320w`,
+      phoneAvif: `/media/photos/previews/${ID}/s/240.avif 160w`,
+      phoneWebp: `/media/photos/previews/${ID}/s/240.webp 160w`,
       src: `/media/photos/previews/${ID}/s/240.webp`,
-      sizes: "(max-width: 679px) 59px, 80px",
+      sizes: "(max-width: 680px) 59px, 80px",
       width: 160,
       height: 240,
       alt: "photo 2 of 14 from 2 february 2025, bondi, sydney",

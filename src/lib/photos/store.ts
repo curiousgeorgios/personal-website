@@ -62,6 +62,12 @@ export interface EntryPage {
 export const CATALOGUE_LIMIT = 24;
 export const MAX_CATALOGUE_LIMIT = 48;
 export const ENTRY_LIMIT = 4;
+/**
+ * Entries on a server-rendered gallery page (/photos and /photos?before=). Without JavaScript, or with a short page,
+ * the browser fetches every frame before any scroll, so two entries keep the real newest posts (about 36 frames of 240
+ * AVIF, some 200KB) under the 250KB image budget (spec 10); four came to about 380KB. Older entries then load in place.
+ */
+export const PAGE_ENTRY_LIMIT = 2;
 export const MAX_ENTRY_LIMIT = 12;
 /** The previews the gallery uses (spec 3.3) */
 export const GALLERY_SIZES = [240, 480] as const;

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import Notebook from "../../layouts/Notebook.astro";
 import Beacon from "../../components/Beacon.astro";
 import Gallery from "../../components/photos/Gallery.astro";
-import { ENTRY_LIMIT, entryPage, type EntryPage } from "../../lib/photos/store";
+import { entryPage, PAGE_ENTRY_LIMIT, type EntryPage } from "../../lib/photos/store";
 import "../../styles/photos.css";
 
 const before = Astro.url.searchParams.get("before");
@@ -12,7 +12,7 @@ if (before !== null && !/^\d{1,10}$/.test(before)) return new Response(null, { s
 
 let page: EntryPage | null = null;
 try {
-  page = await entryPage(env.DB, before === null ? null : Number(before), ENTRY_LIMIT);
+  page = await entryPage(env.DB, before === null ? null : Number(before), PAGE_ENTRY_LIMIT);
 } catch (error) {
   console.error("photos: the gallery couldn't read D1", error instanceof Error ? error.message : String(error));
 }
