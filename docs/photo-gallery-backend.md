@@ -36,7 +36,7 @@ The gallery's budget is 250KB of images before any scroll at 375 × 812 (spec 10
 - on phones, which the notebook's 680px breakpoint decides, a frame is offered the 240 preview alone at every screen density, so thumbnails are a little soft on 3× screens and the sharp image is one tap away;
 - the script that appends older entries starts watching only after a scroll, wheel or touch move, a scrolling key without a modifier or focus on the `older entries` link, because on a short page the link can already sit inside its 800px margin on load and a batch would be fetched unasked.
 
-Measured on a store shaped like the real catalogue (two entries, 36 frames): 198KB at 1× and at 3×.
+Measured on a store shaped like the real catalogue (two entries, 36 frames): 198KB at 1× and at 3×. The committed gate (`tests/e2e/budgets.spec.ts`) measures the fixture locally and the real catalogue when `PLAYWRIGHT_BASE_URL` points at the live site (the post-publish check below).
 
 ## The owner's screen
 
@@ -99,7 +99,14 @@ In this order, because the branch binds a bucket and needs a migration the momen
 5. In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates, which carry `raw` pills.
 6. Issue the first catalogue link from `/admin` and open it on a phone.
 
-After launch: read the post-deploy Lighthouse medians for `/photos` and the newest photograph's page, and confirm the deploy job's privacy test followed a frame on the live gallery. The full launch list is section 12 of the spec; what the build left open is in [the plan 6 follow-ups](superpowers/plans/2026-10-08-plan-6-followups.md).
+After the first photographs are published (step 5), run the post-publish check against the live site. The deploy job's privacy test and Lighthouse run happened before anything was public, and Lighthouse never weighs images, so this is the first time the real photographs are measured:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://curiousgeorge.dev bunx playwright test tests/e2e/budgets.spec.ts tests/e2e/privacy.spec.ts -g "images before any scroll|photo pages" --project=chromium
+bun run lighthouse https://curiousgeorge.dev/
+```
+
+The first command runs the 250KB image gate (at 1× and 3×) on the real `/photos` and the privacy check on the gallery and a photograph's page; both only read, and send Global Privacy Control so they aren't counted as visits. The second reads largest contentful paint and layout shift on `/`, `/photos` and the newest photograph's page. The full launch list is section 12 of the spec; what the build left open is in [the plan 6 follow-ups](superpowers/plans/2026-10-08-plan-6-followups.md).
 
 ## Tests
 

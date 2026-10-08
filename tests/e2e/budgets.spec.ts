@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib";
 import { expect, test, type Page } from "@playwright/test";
 import { SLOW } from "./deck";
 import { GALLERY } from "./gallery-site";
+import { withGpc } from "./gpc";
 
 /** What a page loads before any interaction: scripts, styles and HTML gzipped, fonts as they are, inline ones counted */
 async function weigh(page: Page, path: string) {
@@ -66,14 +67,17 @@ for (const path of ["/photos", "/photos/fixture-01"]) {
 // The server page holds two entries and a phone takes only the 240 previews (spec 3.3, ADR-0023), so the first screen
 // weighs the same at 1× and at a 3× phone's density. The fixture's four frames weigh about 28KB; the same method on a
 // throwaway store with the real catalogue's shape (two entries, 36 frames of noise tuned to real bytes per pixel)
-// measured 198KB, against 1235KB before the two changes. The Lighthouse run after the import is the check on the real thing.
+// measured 198KB, against 1235KB before the two changes. Lighthouse doesn't weigh images, so the check on the real
+// photographs is this test against the live site once they're published (PLAYWRIGHT_BASE_URL, the guide's after-launch
+// steps); it only reads, and sends Global Privacy Control so it never counts as a visit.
 for (const scale of [1, 3]) {
   test.describe(`at ${scale}× density`, () => {
     test.use({ deviceScaleFactor: scale });
 
-    test("/photos loads under 250KB of images before any scroll at 375 × 812", async ({ page, browserName }) => {
+    test("/photos loads under 250KB of images before any scroll at 375 × 812", async ({ page, browserName, baseURL }) => {
       test.skip(browserName !== "chromium", "measured once, in Chromium");
-      test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local photo fixture");
+      const remote = !!process.env.PLAYWRIGHT_BASE_URL;
+      if (remote) await withGpc(page);
       await page.setViewportSize({ width: 375, height: 812 });
       let bytes = 0;
       const urls: string[] = [];
@@ -83,14 +87,16 @@ for (const scale of [1, 3]) {
         urls.push(response.url());
         reads.push(response.body().then((body) => { bytes += body.length; }));
       });
-      await page.goto(`${GALLERY}/photos`, { waitUntil: "networkidle" });
+      // Locally the gallery server's fixture; with PLAYWRIGHT_BASE_URL, the deployed site's real catalogue
+      await page.goto(new URL("/photos", remote ? baseURL! : GALLERY).href, { waitUntil: "networkidle" });
       await Promise.all(reads);
+      test.skip(remote && urls.length === 0 && (await page.locator("a.frame-link").count()) === 0, "nothing is published on the deployed site yet");
       console.log(`images before any scroll on /photos at 375px, ${scale}× (bytes)`, bytes);
       test.info().annotations.push({ type: "images", description: `${bytes} bytes before any scroll on /photos at 375px, ${scale}×` });
       // Only the 240 previews, at any density: a 480 here is what made a 3× phone load 1235KB
       expect(urls.length).toBeGreaterThan(0);
       for (const url of urls) expect(url).toMatch(/\/240\.(avif|webp)$/);
-      expect(bytes).toBeGreaterThan(10 * 1024); // the fixture's previews are noise, so a near-empty page means nothing loaded
+      expect(bytes).toBeGreaterThan(10 * 1024); // previews are photographs (or the fixture's noise), so a near-empty page means nothing loaded
       expect(bytes).toBeLessThan(250 * 1024);
     });
   });

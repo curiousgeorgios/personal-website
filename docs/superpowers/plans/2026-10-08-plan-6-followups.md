@@ -12,8 +12,9 @@ In this order. The first matters most: `wrangler.jsonc` binds the photo bucket, 
 4. From the Mac, under Node 24, run `bun run photos:prepare` and then `bun run photos:import --remote`. The manifest is now version 2, so a folder prepared before this plan needs `photos:prepare` again (checkpoints and the places cache are reused). Fill `scripts/photo-cities.json` wherever prepare stops and lists a missing key.
 5. In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates, which carry `raw` pills.
 6. Issue the first catalogue link from `/admin` and open it on a phone.
+7. Post-publish check (agent or George), once step 5 has published something: `PLAYWRIGHT_BASE_URL=https://curiousgeorge.dev bunx playwright test tests/e2e/budgets.spec.ts tests/e2e/privacy.spec.ts -g "images before any scroll|photo pages" --project=chromium`, then `bun run lighthouse https://curiousgeorge.dev/`. The deploy job's privacy test and Lighthouse run happened before anything was public, and Lighthouse doesn't weigh images, so this is the first measurement of the real photographs against the 250KB gate and the first privacy check that follows a real frame.
 
-After launch: read the post-deploy Lighthouse medians for `/photos` and the newest photograph's page; confirm the deploy job's privacy test followed a frame on the live gallery; confirm the first catalogue link's download works and that production Workers Logs hold no `token=` (the config redacts query strings, and only a deploy can show it).
+After launch: confirm the first catalogue link's download works and that production Workers Logs hold no `token=` (the config redacts query strings, and only a deploy can show it).
 
 Locally, before launch, the Lighthouse run on the fixture servers gave largest contentful paint medians over the 1.5s warning line (home 1436ms, `/photos` 1671ms, a photograph's page 1507ms; layout shift 0 on all three). That is `wrangler dev` with no edge cache under simulated slow 4G, so it is a reading to compare with, not a finding; the run against the live site is the one that counts.
 
@@ -62,7 +63,7 @@ Privacy and security:
 
 Test infrastructure:
 
-- The gallery fixture is four frames in the first two entries, about 28KB before any scroll. The 198KB reading came from a throwaway store with the real catalogue's shape (two entries, 36 frames, noise tuned to real bytes per pixel). The committed gate therefore proves the 240-only phone rule and the 250KB ceiling, not the real total; the Lighthouse run after the import is the check on that.
+- The gallery fixture is four frames in the first two entries, about 28KB before any scroll. The 198KB reading came from a throwaway store with the real catalogue's shape (two entries, 36 frames, noise tuned to real bytes per pixel). Run locally, the committed gate therefore proves the 240-only phone rule and the 250KB ceiling, not the real total. The same test measures the real total when `PLAYWRIGHT_BASE_URL` points at the live site, which is launch step 7 (Lighthouse doesn't weigh images, so it can't stand in).
 - Local runs have no cache purge, so local checks of the gallery after an admin save use a fresh query string.
 - A load-dependent flake: the 4× CPU interaction specs in `perf.spec.ts` (`pressing play` twice in partial runs, `showing older log entries` once in the full `bun run check`) failed when run in parallel with other specs and passed on their own every time, including a single-worker run of the whole file. They measure logbook interactions the photo work did not touch, so this is the plan 5 class of flake (CPU contention against a 4× throttle). Rerun the file alone.
 - Any photograph already imported into George's main local store (`.wrangler/state`) before migration 0006 has no post row, so the public API hides it there until he imports again with the version 2 manifest.

@@ -258,7 +258,7 @@ R11's method applies to `/photos` (the first page of two entries) and `/photos/<
 
 - JavaScript before any interaction: under 10KB gzipped per page (the beacon plus `photo-sheet.ts`), all inline, no framework.
 - HTML under 30KB gzipped (the two-entry first page is about 8KB on the fixture), CSS under 15KB gzipped, the same two fonts.
-- Image bytes loaded before any scroll on `/photos` at 375 × 812: under 250KB, gated in the budget spec at 1× and at a 3× phone's density, which must load only 240 previews. The fixture's four frames weigh about 28KB; the same method on a store shaped like the real catalogue (two entries, 36 frames, previews weighing what real ones do) measured 198KB at both densities, and two 20-frame posts, the worst case, come to about 225KB. The Lighthouse run after the import is the check on the real photographs.
+- Image bytes loaded before any scroll on `/photos` at 375 × 812: under 250KB, gated in the budget spec at 1× and at a 3× phone's density, which must load only 240 previews. The fixture's four frames weigh about 28KB; the same method on a store shaped like the real catalogue (two entries, 36 frames, previews weighing what real ones do) measured 198KB at both densities, and two 20-frame posts, the worst case, come to about 225KB. Lighthouse doesn't weigh images, so the check on the real photographs is the same gate run against the live site once they're published (`PLAYWRIGHT_BASE_URL`, section 12's post-publish check).
 - Cumulative layout shift under 0.01 at 1280px and 375px, on `/photos` including after one batch loads, and on `/photos/<id>`.
 - Largest contentful paint under 1.5s, a Lighthouse warning after each deploy: `scripts/lighthouse.mjs` takes several URLs and runs `/`, `/photos` and one photograph page.
 
@@ -291,7 +291,9 @@ Only George can do these:
 - [ ] After the deploy has applied migration 0006 (the deploy job runs `migrations apply`), run the photo import from the Mac: `photos:prepare` (now with places, dates and 240 previews, and a version 2 manifest, so a folder prepared earlier is prepared again; filling `scripts/photo-cities.json` where it stops) then `photos:import --remote`, as in docs/photo-gallery-backend.md.
 - [ ] Review every post in `/admin` (places included, ADR-0022) and publish what should be public, looking hardest at the 96 RAW candidates (`raw` pills).
 
-After launch (agent or George): issue the first catalogue link from `/admin` and open it on a phone; check `/photos` against section 10 with the post-deploy Lighthouse run; check the privacy test passes on the live photo pages.
+After launch (agent or George): issue the first catalogue link from `/admin` and open it on a phone.
+
+Post-publish check (agent or George), once the first photographs are published: the deploy job's checks ran before anything was public, so run the image gate and the photo pages' privacy check against the live site, `PLAYWRIGHT_BASE_URL=https://curiousgeorge.dev bunx playwright test tests/e2e/budgets.spec.ts tests/e2e/privacy.spec.ts -g "images before any scroll|photo pages" --project=chromium`, then `bun run lighthouse https://curiousgeorge.dev/` for largest contentful paint and layout shift on `/`, `/photos` and the newest photograph's page. Lighthouse reads neither image bytes nor a 375 × 812 screen; the image gate does.
 
 # Part 2: prints
 
