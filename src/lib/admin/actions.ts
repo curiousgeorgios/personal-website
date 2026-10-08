@@ -52,8 +52,11 @@ export interface ActionDeps {
   photoLinkSecret?: string;
   /** The site's origin, for a new link's address */
   origin?: string;
-  /** Print orders (spec 20): retry now places in the background, with a fresh window of this many seconds */
-  orders?: { placeLater(orderId: string): void; retryWindow: number };
+  /**
+   * Print orders (spec 20): retry now places in the background, with a fresh window of this many seconds; testMail sends
+   * George the test email and resolves to whether it went
+   */
+  orders?: { placeLater(orderId: string): void; retryWindow: number; testMail?(): Promise<boolean> };
 }
 
 export interface ActionFailure {
@@ -70,7 +73,7 @@ export interface ActionFailure {
 export type IssuedLink = { url: string } | { repeat: true };
 
 /** `purge`: cache tags this save purges beyond its section's own (a hidden photograph's previews); `note`: which saved line to show */
-export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[]; note?: "retry" } | ActionFailure;
+export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[]; note?: "retry" | "resolved" | "testmail" } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
 const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link" | "order") => fail(null, "", { form: `that ${what} no longer exists` });
@@ -137,6 +140,10 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return saveBuffer(form, deps);
     case "order.retry":
       return retryOrder(form, deps);
+    case "order.resolve":
+      return resolveOrder(form, deps);
+    case "prints.testmail":
+      return sendTestMail(deps);
     default:
       return fail(null, "", { form: "that action isn't recognised" });
   }
@@ -523,7 +530,7 @@ async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<A
   // The rule's guard: canRetry (src/lib/prints/admin.ts) is the view's copy of every condition but the lease, so the
   // button shows exactly when this can apply. Change the two together; orders-admin.test.ts fails when they disagree
   const result = await db
-    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND attention_reason IS NOT ? AND (lease_until IS NULL OR lease_until < ?)")
+    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND resolved_at IS NULL AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND attention_reason IS NOT ? AND (lease_until IS NULL OR lease_until < ?)")
     .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, REFUND_REASON, now)
     .run();
   if (result.meta.changes > 0) {
@@ -535,4 +542,28 @@ async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<A
   // Already set going by an earlier tap counts as saved, and starts nothing: the first tap's attempt, or the cron, has it (ADR-0012)
   if (row.status === "paid") return { ok: true, section: "orders", note: "retry" };
   return fail("orders", `order-${id}`, { form: "that order can't be retried from here." });
+}
+
+/**
+ * mark resolved (spec 20): George has dealt with a needs_attention order outside the site. One conditional write; the
+ * order stays listed, out of the needs-attention-first ordering and without its red dot or retry now. Any write that moves
+ * it into needs_attention again clears resolved_at, so a new problem shows again
+ */
+async function resolveOrder(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!ORDER_ID.test(id)) return gone("order");
+  const now = Math.floor(Date.now() / 1000);
+  const result = await db.prepare("UPDATE print_orders SET resolved_at = ?, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND resolved_at IS NULL").bind(now, now, id).run();
+  if (result.meta.changes > 0) return { ok: true, section: "orders", note: "resolved" };
+  const row = await db.prepare("SELECT status, resolved_at FROM print_orders WHERE id = ?").bind(id).first<{ status: string; resolved_at: number | null }>();
+  if (!row) return gone("order");
+  // Already resolved by an earlier tap counts as saved and writes nothing (ADR-0012)
+  if (row.status === "needs_attention") return { ok: true, section: "orders", note: "resolved" };
+  return fail("orders", `order-${id}`, { form: "that order doesn't need attention any more." });
+}
+
+/** send me a test email (spec 20): proves the EMAIL binding before prints open, so it works while they are closed */
+async function sendTestMail({ orders }: ActionDeps): Promise<ActionResult> {
+  if (orders?.testMail && (await orders.testMail())) return { ok: true, section: "orders", note: "testmail" };
+  return fail("orders", "testmail", { form: `couldn't send the test email. check workers logs for "prints: couldn't send"` });
 }

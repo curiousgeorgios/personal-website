@@ -3,6 +3,7 @@ import OrdersAdmin from "../../src/components/admin/OrdersAdmin.astro";
 import { runAction, type ActionDeps } from "../../src/lib/admin/actions";
 import { canRetry, loadOrdersAdmin, stamp } from "../../src/lib/prints/admin";
 import { REFUND_REASON } from "../../src/lib/prints/artelo-status";
+import { sendTestMail, TEST_MAIL } from "../../src/lib/prints/mail";
 import { placeOrder } from "../../src/lib/prints/place";
 import { getOrder, readSettings } from "../../src/lib/prints/store";
 import { ADDRESS, captureLogs, fakeFetch, insertOrder, json, NOW, printDb, testConfig, testDeps } from "./prints-fakes";
@@ -72,7 +73,9 @@ test("the view offers retry now exactly when the action's guard applies it, so t
   for (const status of ["paid", "needs_attention", "placed", "refunded", "cancelled"]) {
     for (const artelo_order_id of [null, "artelo-1"]) {
       for (const refunded_amount of [null, 0, 28699, 28700, 30000]) {
-        for (const attention_reason of [null, "stuck", REFUND_REASON]) cases.push({ status, artelo_order_id, refunded_amount, attention_reason });
+        for (const attention_reason of [null, "stuck", REFUND_REASON]) {
+          for (const resolved_at of [null, NOW - 60]) cases.push({ status, artelo_order_id, refunded_amount, attention_reason, resolved_at });
+        }
       }
     }
   }
@@ -90,6 +93,47 @@ test("the view offers retry now exactly when the action's guard applies it, so t
   // Both answers occur, so the comparison means something
   expect(offered).toBeGreaterThan(0);
   expect(offered).toBeLessThan(cases.length);
+});
+
+describe("send me a test email", () => {
+  const testMail = (db: D1Database, send?: () => Promise<boolean>) => runAction(formOf({ intent: "prints.testmail" }), { ...depsOf(db), orders: { placeLater: vi.fn(), retryWindow: 86_400, testMail: send } });
+  const FAILED = { ok: false, section: "orders", form: "testmail", errors: { form: `couldn't send the test email. check workers logs for "prints: couldn't send"` }, values: {} };
+
+  test("the action says sent only when the email went, and couldn't send otherwise", async () => {
+    const db = await printDb();
+    expect(await testMail(db, async () => true)).toEqual({ ok: true, section: "orders", note: "testmail" });
+    expect(await testMail(db, async () => false)).toEqual(FAILED);
+    // No sender wired at all is a failure too, never a false "sent"
+    expect(await testMail(db)).toEqual(FAILED);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM print_orders").first("n")).toBe(0);
+  });
+
+  test("the email goes to george through the same path as every note while prints are closed; a failure is logged as couldn't send", async () => {
+    const logs = captureLogs();
+    const send = vi.fn(async () => ({ messageId: "m" }));
+    const closed = testConfig({ switchedOn: false, missing: ["ARTELO_API_KEY"] });
+    const deps = testDeps(await printDb(), { config: closed, email: { send } as unknown as SendEmail });
+    expect(await sendTestMail(deps)).toBe(true);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      to: "hello@curiousgeorge.dev", subject: "test email from curiousgeorge.dev prints", text: "this is a test from the prints section of /admin. if you can read it, the site can email you.",
+      from: { email: "prints@curiousgeorge.dev", name: "george vlachos" }, replyTo: "hello@curiousgeorge.dev",
+    }));
+    expect(TEST_MAIL.subject).toBe("test email from curiousgeorge.dev prints");
+    const failing = testDeps(await printDb(), { config: closed, email: { send: vi.fn(async () => { throw new Error("email sending isn't set up"); }) } as unknown as SendEmail });
+    expect(await sendTestMail(failing)).toBe(false);
+    expect(logs()).toContain("prints: couldn't send the test email email sending isn't set up");
+  });
+
+  test("the section has the button, and a failed send shows its message there", async () => {
+    const db = await printDb();
+    const data = await loadOrdersAdmin(db, testConfig(), NOW);
+    const doc = await render(OrdersAdmin, { data, failure: null });
+    const form = doc.querySelector("form#testmail")!;
+    expect([form.getAttribute("method"), form.getAttribute("action"), form.querySelector<HTMLInputElement>('input[name="intent"]')!.value, text(form.querySelector("button"))]).toEqual(["post", "/admin/#testmail", "prints.testmail", "send me a test email"]);
+    expect(form.querySelector(".error")).toBeNull();
+    const failed = await render(OrdersAdmin, { data, failure: { ok: false, section: "orders", form: "testmail", errors: { form: `couldn't send the test email. check workers logs for "prints: couldn't send"` }, values: {} } });
+    expect(text(failed.querySelector("form#testmail .error"))).toBe(`couldn't send the test email. check workers logs for "prints: couldn't send"`);
+  });
 });
 
 describe("retry now never places what it mustn't", () => {
@@ -252,8 +296,10 @@ describe("the orders section", () => {
     expect(shipped.querySelector(".order-tracking a")!.getAttribute("href")).toBe("https://www.ups.com/track?tracknum=1Z999");
     expect(text(shipped.querySelector(".order-tracking a"))).toBe("ups 1Z999");
     expect(shipped.querySelector("form")).toBeNull();
-    // Artelo has it: no retry, open it there instead
-    expect(held.querySelector("form")).toBeNull();
+    // Artelo has it: no retry, open it there instead; it can still be marked resolved
+    expect(held.querySelector('input[value="order.retry"]')).toBeNull();
+    expect(held.querySelector('form input[name="intent"][value="order.resolve"]')).not.toBeNull();
+    expect(stuck.querySelector('form input[name="intent"][value="order.resolve"]')).not.toBeNull();
     expect(text(held.querySelector(".open-in-artelo"))).toBe("open it in artelo (order 48214)");
   });
 
@@ -262,7 +308,7 @@ describe("the orders section", () => {
     await insertOrder(db, { id: "01k6x00000000000000000000r", status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", refunded_amount: 28700 });
     await insertOrder(db, { id: "01k6x00000000000000000000p", status: "needs_attention", attention_reason: "stuck", refunded_amount: 28699, paid_at: NOW - 3600 });
     const doc = await render(OrdersAdmin, { data: await loadOrdersAdmin(db, testConfig(), NOW), failure: null });
-    expect(doc.querySelector("#order-01k6x00000000000000000000r form")).toBeNull();
+    expect(doc.querySelector('#order-01k6x00000000000000000000r input[value="order.retry"]')).toBeNull();
     expect(doc.querySelector("#order-01k6x00000000000000000000r a.refund")).not.toBeNull();
     expect(doc.querySelector('#order-01k6x00000000000000000000p form input[name="intent"][value="order.retry"]')).not.toBeNull();
   });
@@ -272,7 +318,9 @@ describe("the orders section", () => {
     await insertOrder(db, { id: "01k6x00000000000000000000f", status: "needs_attention", attention_reason: REFUND_REASON, refunded_amount: null });
     const doc = await render(OrdersAdmin, { data: await loadOrdersAdmin(db, testConfig(), NOW), failure: null });
     expect(doc.querySelector("#order-01k6x00000000000000000000f")).not.toBeNull();
-    expect(doc.querySelector("#order-01k6x00000000000000000000f form")).toBeNull();
+    expect(doc.querySelector('#order-01k6x00000000000000000000f input[value="order.retry"]')).toBeNull();
+    // George can still clear it once he has dealt with it
+    expect(doc.querySelector('#order-01k6x00000000000000000000f input[value="order.resolve"]')).not.toBeNull();
   });
 
   test("the delivery reads as the buyer saw it: with destination taxes when the quote carried tax, plain otherwise (spec 16.1)", async () => {

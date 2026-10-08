@@ -114,7 +114,7 @@ export async function applyPaid(deps: PrintDeps, session: StripeSession, before:
   const results = await db.batch([
     ...before,
     // The session condition again in the statement, so a read that went stale can't let another session through
-    db.prepare(`UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, paid_at = ?, stripe_session_id = ?, stripe_payment_intent = ?, attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, status_checked_at = NULL, updated_at = ? WHERE id = ? AND ${PAYABLE}`)
+    db.prepare(`UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, paid_at = ?, stripe_session_id = ?, stripe_payment_intent = ?, attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, status_checked_at = NULL, updated_at = ? WHERE id = ? AND ${PAYABLE}`)
       .bind(reason ? "needs_attention" : "paid", reason, now, session.id, session.payment_intent, now + deps.config.retryWindow, now, now, order.id, session.id),
   ]);
   if (results.at(-1)!.meta.changes === 0) return "unchanged";
@@ -187,7 +187,7 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
           db.prepare("UPDATE print_orders SET status = 'refunded', updated_at = ? WHERE id = ? AND status IN ('paid', 'needs_attention') AND artelo_order_id IS NULL").bind(now, order.id),
           // Already with Artelo, placed or held there needing something: George cancels it there. Its email goes once,
           // so a redelivery under another event id (a second refund event, say) doesn't send it again
-          db.prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND (status IN ('placed', 'in_production') OR (status = 'needs_attention' AND artelo_order_id IS NOT NULL AND attention_reason IS NOT ?))").bind(REFUND_REASON, now, order.id, REFUND_REASON),
+          db.prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, updated_at = ? WHERE id = ? AND (status IN ('placed', 'in_production') OR (status = 'needs_attention' AND artelo_order_id IS NOT NULL AND attention_reason IS NOT ?))").bind(REFUND_REASON, now, order.id, REFUND_REASON),
           // Refunded before Artelo had it: nothing will be made, so its master links go, in the same write as the event,
           // judged by the order's state as the batch runs (Artelo's statuses revoke the rest)
           revokeOrderGrantsStatement(db, order.id, now, "print_orders.status = 'refunded' AND print_orders.artelo_order_id IS NULL"),

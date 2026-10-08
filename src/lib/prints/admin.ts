@@ -33,6 +33,8 @@ export interface AdminOrder {
   arteloCost: number | null;
   shipments: Shipment[];
   paymentIntent: string | null;
+  /** When George marked it resolved (needs_attention only; migration 0008) */
+  resolvedAt: number | null;
 }
 
 export interface OrdersAdmin {
@@ -52,7 +54,8 @@ export const STATUS_WORDS: Record<OrderStatus, string> = {
   in_production: "printing", shipped: "shipped", delivered: "delivered", cancelled: "cancelled", refunded: "refunded",
 };
 
-const LISTED = "SELECT * FROM print_orders WHERE status NOT IN ('checkout', 'expired') ORDER BY (status = 'needs_attention') DESC, paid_at DESC, id DESC LIMIT 100";
+/** Unresolved needs_attention first; a resolved one takes its place by date among the rest */
+const LISTED = "SELECT * FROM print_orders WHERE status NOT IN ('checkout', 'expired') ORDER BY (status = 'needs_attention' AND resolved_at IS NULL) DESC, paid_at DESC, id DESC LIMIT 100";
 
 /** Everything the section shows, in one batch */
 export async function loadOrdersAdmin(db: D1Database, config: PrintConfig, now: number): Promise<OrdersAdmin> {
@@ -78,6 +81,7 @@ export async function loadOrdersAdmin(db: D1Database, config: PrintConfig, now: 
       id: row.id, paidAt: row.paid_at, lines: lines.get(row.id) ?? [], country: row.country, printTotal: row.print_total, deliveryAmount: row.delivery_amount, deliveryTaxed: row.delivery_taxed === 1,
       status: row.status, reason: row.attention_reason, livemode: row.livemode === 1, refundedAmount: row.refunded_amount, arteloId: row.artelo_order_id,
       arteloCost: row.artelo_cost, shipments: shipmentsOf(row), paymentIntent: row.stripe_payment_intent,
+      resolvedAt: row.status === "needs_attention" ? row.resolved_at : null,
     })),
   };
 }
@@ -96,10 +100,10 @@ export const refundHref = (order: Pick<AdminOrder, "livemode" | "paymentIntent">
   order.paymentIntent ? `https://dashboard.stripe.com/${order.livemode ? "" : "test/"}payments/${encodeURIComponent(order.paymentIntent)}` : null;
 
 /**
- * Whether the section offers retry now: the order needs attention, Artelo hasn't got it, the buyer isn't refunded in
- * full and it isn't flagged with the refund reason (either would print for a refunded buyer). The view's half of one
+ * Whether the section offers retry now: the order needs attention and isn't marked resolved, Artelo hasn't got it, the
+ * buyer isn't refunded in full and it isn't flagged with the refund reason (either would print for a refunded buyer). The view's half of one
  * rule: retryOrder's UPDATE in src/lib/admin/actions.ts is the guard that counts, with these conditions in SQL plus a
  * live lease, which the view doesn't show. Change the two together; orders-admin.test.ts fails when they disagree
  */
-export const canRetry = (order: Pick<AdminOrder, "status" | "arteloId" | "refundedAmount" | "printTotal" | "deliveryAmount" | "reason">): boolean =>
-  order.status === "needs_attention" && order.arteloId === null && (order.refundedAmount ?? 0) < order.printTotal + order.deliveryAmount && order.reason !== REFUND_REASON;
+export const canRetry = (order: Pick<AdminOrder, "status" | "resolvedAt" | "arteloId" | "refundedAmount" | "printTotal" | "deliveryAmount" | "reason">): boolean =>
+  order.status === "needs_attention" && order.resolvedAt === null && order.arteloId === null && (order.refundedAmount ?? 0) < order.printTotal + order.deliveryAmount && order.reason !== REFUND_REASON;

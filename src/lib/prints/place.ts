@@ -213,7 +213,7 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
   // Whole US cents: artelo_cost holds only an integer, and a write it refused would leave a placed order looking unplaced
   const cost = found.costCents === null ? null : Math.round(found.costCents);
   const result = await deps.db
-    .prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, shipments = COALESCE(?, shipments), placed_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'paid'")
+    .prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, shipments = COALESCE(?, shipments), placed_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'paid'")
     .bind(status, status === "needs_attention" ? PENDING_REASON : null, found.id, statusWord(found.status), cost, shipmentsColumn(found.shipments), now, now, order.id)
     .run();
   if (result.meta.changes === 0) {
@@ -224,7 +224,7 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
     let recorded: string | null = null;
     try {
       const kept = await deps.db
-        .prepare("UPDATE print_orders SET artelo_order_id = COALESCE(artelo_order_id, ?), artelo_status = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_status END, artelo_cost = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_cost END, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ? RETURNING artelo_order_id")
+        .prepare("UPDATE print_orders SET artelo_order_id = COALESCE(artelo_order_id, ?), artelo_status = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_status END, artelo_cost = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_cost END, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, resolved_at = CASE WHEN status = 'refunded' THEN NULL ELSE resolved_at END, lease_until = NULL, updated_at = ? WHERE id = ? RETURNING artelo_order_id")
         .bind(found.id, found.id, statusWord(found.status), found.id, cost, REFUND_REASON, now, order.id)
         .first<{ artelo_order_id: string | null }>();
       recorded = kept?.artelo_order_id ?? null;

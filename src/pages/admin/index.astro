@@ -17,6 +17,7 @@ import { loadAdmin } from "../../lib/admin/store";
 import { submitForm } from "../../lib/admin/submit";
 import { loadOrdersAdmin, type OrdersAdmin as OrdersData } from "../../lib/prints/admin";
 import { printConfig, printDeps } from "../../lib/prints/config";
+import { sendTestMail } from "../../lib/prints/mail";
 import { placeOrder } from "../../lib/prints/place";
 import "../../styles/admin.css";
 
@@ -39,6 +40,8 @@ if (Astro.request.method === "POST") {
       placeLater: (orderId: string) =>
         waitUntil(placeOrder(prints, orderId).catch((error: unknown) => console.error("admin: retrying order", orderId, "failed outright; the cron will pick it up", error instanceof Error ? error.name : typeof error))),
       retryWindow: prints.config.retryWindow,
+      // Whether prints are open or not: the point is to prove email before opening
+      testMail: () => sendTestMail(prints),
     },
   };
   const outcome = await submitForm(form, deps, Astro.cache, waitUntil);
@@ -62,7 +65,13 @@ const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url
 // Photographs show on the gallery, everything else on the logbook (spec 6.2)
 const later = Astro.url.searchParams.has("later");
 const savedLine = (section: AdminSection) => {
-  if (section === "orders") return Astro.url.searchParams.get("note") === "retry" ? "retrying - refresh in a minute to see how it went." : "saved - it applies to the next quote.";
+  if (section === "orders") {
+    const note = Astro.url.searchParams.get("note");
+    if (note === "retry") return "retrying - refresh in a minute to see how it went.";
+    if (note === "resolved") return "saved - it's marked resolved.";
+    if (note === "testmail") return "test email sent";
+    return "saved - it applies to the next quote.";
+  }
   if (section === "links") return "saved - that link no longer works.";
   const where = section === "photographs" ? "gallery" : "logbook";
   return later ? `saved - the ${where} may show the old version for a little while.` : `saved - it's on the ${where} now.`;

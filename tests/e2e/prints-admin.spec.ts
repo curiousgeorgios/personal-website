@@ -51,8 +51,44 @@ test("an order artelo won't take shows first with its reason and george is email
   expect(await arteloOrdersFor(orderId)).toHaveLength(1);
 });
 
+test("send me a test email reaches george through the mail binding's path and says so", async ({ page }) => {
+  const SUBJECT = "test email from curiousgeorge.dev prints";
+  const before = (await mailFor(SUBJECT)).length;
+  await page.goto("/admin/#orders");
+  await page.locator("#testmail").getByRole("button", { name: "send me a test email" }).click();
+  await expect(page).toHaveURL(/\/admin\/\?saved=orders&note=testmail#orders$/);
+  await expect(page.locator("#orders .notice")).toHaveText("test email sent");
+  // The page says sent only once the send succeeded, so the sink already has it
+  const mails = await mailFor(SUBJECT);
+  expect(mails).toHaveLength(before + 1);
+  expect(mails.at(-1)).toMatchObject({ to: "hello@curiousgeorge.dev", subject: SUBJECT, text: "this is a test from the prints section of /admin. if you can read it, the site can email you.", replyTo: "hello@curiousgeorge.dev", from: { email: "prints@curiousgeorge.dev", name: "george vlachos" } });
+});
+
+test("mark resolved clears a needs-attention order's dot and retry, keeping it listed with its reason", async ({ page }) => {
+  await asTestClient(page);
+  const { orderId, sessionId } = await checkoutOrder(page, `Ada ${unique()}`);
+  await setMode(orderId, "down");
+  const { event } = await payAtStandIn(sessionId);
+  expect(await deliverStripe(PRINTS, event)).toBe(200);
+  await waitForStatus(orderId, "needs_attention");
+  await page.goto("/admin/#orders");
+  const entry = page.locator(`#order-${orderId}`);
+  await expect(entry).toHaveClass(/attention/);
+  await entry.getByRole("button", { name: "mark resolved" }).click();
+  await expect(page).toHaveURL(/\/admin\/\?saved=orders&note=resolved#orders$/);
+  await expect(page.locator("#orders .notice")).toHaveText("saved - it's marked resolved.");
+  await expect(entry).not.toHaveClass(/attention/);
+  await expect(entry.locator(".attention-dot")).toHaveCount(0);
+  await expect(entry.locator(".reason")).toHaveText("artelo didn't take the order within a day: artelo answered 503");
+  await expect(entry.locator(".resolved-on")).toHaveText(/^resolved \d\d\.\d\d\.\d\d \d\d:\d\d$/);
+  await expect(entry.getByRole("button")).toHaveCount(0);
+  // Every unresolved needs-attention entry still comes first
+  const classes = await page.locator("#orders .orders-admin > li").evaluateAll((items) => items.map((item) => item.classList.contains("attention")));
+  expect(classes.indexOf(false) === -1 || classes.slice(classes.indexOf(false)).every((attention) => !attention)).toBe(true);
+});
+
 test("the new intents need the site's own origin, like every admin write", async ({ request }) => {
-  const forms: Record<string, string>[] = [{ intent: "prints.buffer", buffer: "8" }, { intent: "order.retry", id: "01k6x00000000000000000000a" }];
+  const forms: Record<string, string>[] = [{ intent: "prints.buffer", buffer: "8" }, { intent: "order.retry", id: "01k6x00000000000000000000a" }, { intent: "order.resolve", id: "01k6x00000000000000000000a" }, { intent: "prints.testmail" }];
   for (const form of forms) {
     const response = await request.post("/admin/", { form, headers: { Origin: "https://example.com" }, maxRedirects: 0 });
     expect(response.status()).toBe(403);

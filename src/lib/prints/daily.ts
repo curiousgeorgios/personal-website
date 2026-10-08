@@ -71,7 +71,7 @@ async function flagStranded(deps: PrintDeps, id: string, found: ArteloOrder): Pr
   // Whole US cents: artelo_cost holds only an integer
   const cost = found.costCents === null ? null : Math.round(found.costCents);
   const flagged = await deps.db
-    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, shipments = COALESCE(?, shipments), lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL")
+    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, shipments = COALESCE(?, shipments), lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL")
     .bind(REFUND_REASON, found.id, statusWord(found.status), cost, shipmentsColumn(found.shipments), now, id)
     .run();
   if (flagged.meta.changes === 0) return;
@@ -94,7 +94,7 @@ async function flagStranded(deps: PrintDeps, id: string, found: ArteloOrder): Pr
 async function flagUnmatched(deps: PrintDeps, id: string): Promise<void> {
   const now = deps.now();
   const flagged = await deps.db
-    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, lease_until = NULL, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL")
+    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, lease_until = NULL, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL")
     .bind(REFUND_REASON, now, now, id)
     .run();
   if (flagged.meta.changes === 0) return;

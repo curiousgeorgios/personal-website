@@ -61,6 +61,14 @@ export async function sendMail(deps: PrintDeps, mail: Mail, about: string): Prom
 
 export const mailAdmin = (deps: PrintDeps, subject: string, text: string, about: string) => sendMail(deps, { to: deps.config.adminEmail, subject, text }, about);
 
+export const TEST_MAIL = {
+  subject: "test email from curiousgeorge.dev prints",
+  text: "this is a test from the prints section of /admin. if you can read it, the site can email you.",
+} as const;
+
+/** /admin's send me a test email: the same path as every email to George, so a failure logs "prints: couldn't send the test email" */
+export const sendTestMail = (deps: PrintDeps) => mailAdmin(deps, TEST_MAIL.subject, TEST_MAIL.text, "test email");
+
 /** One print in all, so the shipped email reads in the singular */
 const isSingle = (lines: readonly OrderLine[]) => lines.reduce((sum, line) => sum + line.quantity, 0) === 1;
 

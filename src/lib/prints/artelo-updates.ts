@@ -144,7 +144,7 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
       .bind(status, now, now, ...read);
   } else if (target === "needs_attention") {
     move = db
-      .prepare(`UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, artelo_status = ?, status_checked_at = ?, updated_at = ? ${asRead}`)
+      .prepare(`UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, artelo_status = ?, status_checked_at = ?, updated_at = ? ${asRead}`)
       .bind(PENDING_REASON, status, now, now, ...read);
   } else {
     // Moving on clears any attention Artelo set; shipping (or a delivery whose shipping was never heard) stores the
@@ -173,7 +173,7 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
 async function flagRefunded(deps: PrintDeps, order: OrderRow, status: string, shipments: readonly Shipment[] | null): Promise<Applied> {
   const now = deps.now();
   const flagged = await deps.db
-    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, artelo_status = ?, lease_until = NULL, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL AND attention_reason IS ? AND artelo_status IS ?")
+    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, resolved_at = NULL, artelo_status = ?, lease_until = NULL, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL AND attention_reason IS ? AND artelo_status IS ?")
     .bind(REFUND_REASON, status, now, now, order.id, order.attention_reason, order.artelo_status)
     .run();
   if (flagged.meta.changes === 0) return "raced";

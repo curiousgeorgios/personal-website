@@ -139,5 +139,10 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .orders-admin .open-in-artelo { color: var(--muted); }
 /* Drawn chevrons, as the log's and the photo page's: DM Mono has no arrow glyphs. The rotation draws it; it never animates */
 .orders-admin .chev { display: inline-block; width: 5px; height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; transform: translateY(-1px) rotate(-135deg); margin-left: 5px; }
-.orders-admin .retry-form { padding: 6px 0 10px; }
+/* retry now and mark resolved side by side; a resolved order's reason is history, so it is no longer in red */
+.orders-admin .order-forms { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 6px 0 10px; }
+.orders-admin .order-forms .error { flex-basis: 100%; }
+.orders-admin .resolved .reason { color: var(--muted); }
+.orders-admin .entry .resolved-on { font: 12.5px/1.55 var(--mono); color: var(--muted); }
 .orders-hint { margin-top: 10px; max-width: 40rem; }
+.test-mail .hint { padding-bottom: 6px; }

@@ -6,7 +6,7 @@ What plan 7 (print ordering) leaves for later: the launch steps, what was never 
 
 The ordered checklist, split into before merge and after merge with the exact commands, is in the [prints guide](../../prints.md#launch-checklist). Plans 6 and 7 merge together from `feature/photos-and-prints`, and prints stay closed until its last step sets `PRINTS_OPEN` to `"true"`.
 
-Before merge, in short: Cloudflare Email Sending for the domain, the `curiousgeorge-photo-prints` R2 bucket, migrations 0005, 0006 and 0007 with `wrangler d1 migrations apply curiousgeorge-logbook --remote`, `PHOTO_LINK_SECRET`, `PRINT_VIEW_SECRET`, the Stripe account and `STRIPE_SECRET_KEY` (a standard `sk_live_` or restricted `rk_live_` key), the GitHub secret `STRIPE_TEST_SECRET_KEY` and one Stripe test-mode order and refund. After merge: the Stripe webhook and `STRIPE_WEBHOOK_SECRET`, `ARTELO_API_KEY` then `prints:webhook --remote` (which alone sets `ARTELO_WEBHOOK_SECRET`), `prints:check --remote`, the photo import and review, the live budget and privacy checks, `PRINTS_OPEN` (in the same change as deleting the `PRINTS_OPEN` check from `scripts/check-built-worker.mjs`, which otherwise fails CI and the deploy on purpose) with the cache purge and a real two-print order.
+Before merge, in short: Cloudflare Email Sending for the domain, the `curiousgeorge-photo-prints` R2 bucket, migrations 0005, 0006, 0007 and 0008 with `wrangler d1 migrations apply curiousgeorge-logbook --remote`, `PHOTO_LINK_SECRET`, `PRINT_VIEW_SECRET`, the Stripe account and `STRIPE_SECRET_KEY` (a standard `sk_live_` or restricted `rk_live_` key), the GitHub secret `STRIPE_TEST_SECRET_KEY` and one Stripe test-mode order and refund. After merge: the Stripe webhook and `STRIPE_WEBHOOK_SECRET`, `ARTELO_API_KEY` then `prints:webhook --remote` (which alone sets `ARTELO_WEBHOOK_SECRET`), `prints:check --remote`, the photo import and review, the live budget and privacy checks, `send me a test email` from `/admin` (don't open if it doesn't arrive), `PRINTS_OPEN` (in the same change as deleting the `PRINTS_OPEN` check from `scripts/check-built-worker.mjs`, which otherwise fails CI and the deploy on purpose) with the cache purge and a real two-print order.
 
 Three answers only the launch can give, to record here once known:
 
@@ -18,7 +18,7 @@ Three answers only the launch can give, to record here once known:
 
 - Artelo's real API: Price Check, Create Order, Get Orders' `name` filter, Get Order by Id, the webhook's payload and signature, Get Catalog Product Costs and the webhook endpoints are all exercised against the stand-in. `prints:check` and the launch order are the first real runs (spec 25).
 - Stripe's hosted page in test mode runs only where `STRIPE_TEST_SECRET_KEY` is set (`tests/e2e/prints-stripe.spec.ts` on 4338); it was written without a key and has never run, so its selectors on Stripe's page (plan 7, assumption 20) are unproven until CI or George runs it. They tolerate a line Stripe shows twice and a second submit button, but remain guesses until then. Stripe's live mode and its receipts run only at launch.
-- The `EMAIL` binding: every test build sends to the sink.
+- The `EMAIL` binding: every test build sends to the sink. `/admin`'s `send me a test email` (launch step 15) is its first real run, before prints open.
 - The cron under a real Cloudflare trigger: locally it runs through wrangler's local explorer (`/cdn-cgi/local/explorer/api/local/scheduled`).
 - `prints:webhook --remote` and `prints:check --remote` were written and tested with `--local` only.
 
@@ -26,6 +26,8 @@ Three answers only the launch can give, to record here once known:
 
 - Spec 17.5 still names `country` and an unframed `frameStyle: null` for Get Catalog Product Costs; Artelo's reference requires `shippingDestination`, the three booleans and `frameStyle: "Unframed"`, which `prints:check` sends (plan 7, assumption 12). Correct the spec's wording when it is next edited.
 - If Artelo's cancellation of a duplicate order names the site's order id rather than its own, the site cancels the real order (see the Task 11 line below). The guide's operating section tells George what to do.
+- `mark resolved` (added after the final review) doesn't stop an attention email that is still due: if Email Sending fails, the cron keeps retrying it after George has resolved the order. A resolved order Artelo has is still polled every 12 hours for good (a refund-to-cancel order that printed anyway, say); that was kept on purpose so a later status still records, and costs one Artelo call per such order twice a day.
+- `send me a test email` is proved while prints are closed in unit tests only; the e2e check runs on the prints server, which is open, because only the prints servers have the mail sink.
 
 ## Parked by reviews
 
