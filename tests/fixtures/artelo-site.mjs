@@ -3,6 +3,7 @@
 // route(), above the last line. Everything it receives is kept in memory for the specs: GET /__requests.
 import { createHmac, createHash } from "node:crypto";
 import { createServer } from "node:http";
+import sharp from "sharp";
 import { FIXTURE_SECRETS, FIXTURE_STRIPE_KEY, STAND_IN } from "../e2e/prints-site.ts";
 
 const PORT = 4401;
@@ -126,6 +127,51 @@ route("POST", "/__mail", ({ body }) => {
   return [204, ""];
 });
 route("GET", "/__mail", () => [200, received.mail]);
+
+// Orders (spec 23.3). Creation fetches every design URL and records each file's status, type, SHA-256 and size, as
+// Artelo would fetch the masters. Its mode is set per order, so parallel specs never share one: "ok", "down" (a 503
+// html page) or { refuse: photoId } (a 400 naming that photo's item). Lookups find orders by our orderId
+const artelo = { orders: [], modes: new Map(), count: 0 };
+async function fetchDesign(url) {
+  try {
+    const response = await fetch(url);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const { width, height, format } = response.ok ? await sharp(bytes).metadata() : {};
+    return { url, status: response.status, type: response.headers.get("content-type"), sha256: sha256(bytes), width, height, format };
+  } catch (error) {
+    return { url, status: 0, error: String(error) };
+  }
+}
+route("POST", "/orders/create", async ({ body, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  const order = JSON.parse(body);
+  const mode = artelo.modes.get(order.orderId) ?? "ok";
+  received.orders.push({ orderId: order.orderId, mode });
+  // Artelo refuses a design under 150 dpi unless dangerouslySkipDPICheck is set; the only png here is the margin check's share card
+  if (order.items.some((item) => item.productInfo.designs?.[0]?.sourceImage?.url.endsWith(".png")) && !order.dangerouslySkipDPICheck) return [400, { message: "the dpi of one or more designs falls below the 150 threshold" }];
+  if (mode === "down") return [503, "<html><body>service unavailable</body></html>"];
+  if (mode && typeof mode === "object" && mode.refuse) {
+    const item = order.items.find((entry) => entry.productInfo.designs?.[0]?.sourceImage?.url.includes(`/photos/downloads/${mode.refuse}?`));
+    if (item) return [400, { message: `item ${item.orderItemId}: the design for ${mode.refuse} can't be printed` }];
+  }
+  // The margin check's lookup order (Task 14) has a public image that isn't fetched
+  const designs = order.orderId.startsWith("check-") ? [] : await Promise.all(order.items.map((item) => fetchDesign(item.productInfo.designs[0].sourceImage.url)));
+  const placed = { id: `artelo-${++artelo.count}`, orderId: order.orderId, status: "Received", order, designs, shipments: [] };
+  artelo.orders.push(placed);
+  const prints = order.items.reduce((count, item) => count + item.quantity, 0);
+  return [200, { id: placed.id, orderId: placed.orderId, status: placed.status, details: { productionCost: 40 * prints, arteloShipping: 30, usSalesTax: 0 } }];
+});
+route("GET", "/orders/get", ({ url, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  const name = url.searchParams.get("name");
+  return [200, artelo.orders.filter((entry) => entry.orderId === name).slice(0, Number(url.searchParams.get("limit") ?? 5)).map(({ id, orderId, status }) => ({ id, orderId, status }))];
+});
+route("POST", "/__mode", ({ body }) => {
+  const { order, mode } = JSON.parse(body);
+  artelo.modes.set(order, mode);
+  return [204, ""];
+});
+route("GET", "/__orders", () => [200, artelo.orders]);
 
 // Routes added by later tasks go above this line
 start();

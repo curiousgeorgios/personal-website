@@ -321,3 +321,13 @@ export async function orderLines(db: D1Database, orderIds: readonly string[]): P
   }
   return lines;
 }
+
+/**
+ * Into needs_attention with a plain reason (never an address); its email becomes due, and any lease is let go. With
+ * `from`, only an order still in that status moves, so a refund that lands meanwhile is never overwritten. True when it moved
+ */
+export async function toAttention(db: D1Database, id: string, reason: string, now: number, from?: OrderStatus): Promise<boolean> {
+  const sql = "UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, lease_until = NULL, updated_at = ? WHERE id = ?";
+  const statement = from ? db.prepare(`${sql} AND status = ?`).bind(reason, now, id, from) : db.prepare(sql).bind(reason, now, id);
+  return (await statement.run()).meta.changes > 0;
+}

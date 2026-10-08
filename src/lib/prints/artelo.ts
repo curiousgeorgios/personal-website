@@ -3,6 +3,7 @@ import type { Frame, Orientation, PrintSize } from "./catalogue";
 import type { PrintDeps } from "./config";
 // With its extension: bun run prints:check (Task 14) runs this file under plain Node, which resolves no bare relative paths
 import { DELIVERY_CEILING_CENTS, deliveryAmount, MAX_BUFFER, readOrderCosts, type OrderCosts } from "./quote.ts";
+import type { Shipment } from "./store";
 
 // Artelo's open API (spec 16.1, 18.2, 18.3), through fetch with the key and a 15-second timeout. Nothing here throws:
 // every call answers ok with a body, or not ok with a status (null for a network error, a timeout or an unreadable 2xx).
@@ -128,4 +129,62 @@ export async function priceCheck(deps: PrintDeps, lines: readonly QuoteLine[], a
     return { ok: false, refused: null };
   }
   return { ok: true, costs };
+}
+
+/** An order as Artelo's Create Order, Get Orders and Get Order by Id answer it */
+export interface ArteloOrder {
+  /** Artelo's own id */
+  id: string;
+  /** Ours, the orderId we sent */
+  orderId: string | null;
+  status: string | null;
+  /** US cents: production, freight and any tax, from its details */
+  costCents: number | null;
+  shipments: Shipment[] | null;
+}
+
+/** An object, or the object inside its top-level data, which Artelo's webhook example uses */
+export function unwrap(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return record.data && typeof record.data === "object" && !Array.isArray(record.data) ? (record.data as Record<string, unknown>) : record;
+}
+
+/** A parcel's tracking; a tracking URL counts only as https, because it becomes a link */
+export function readShipments(value: unknown): Shipment[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.flatMap((entry): Shipment[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const { carrierCode, trackingNumber, trackingUrl } = entry as Record<string, unknown>;
+    const shipment = {
+      carrier: typeof carrierCode === "string" ? carrierCode.toLowerCase() : "",
+      number: typeof trackingNumber === "string" ? trackingNumber : "",
+      url: typeof trackingUrl === "string" && trackingUrl.startsWith("https://") ? trackingUrl : "",
+    };
+    return shipment.number || shipment.url ? [shipment] : [];
+  });
+}
+
+export function readArteloOrder(value: unknown): ArteloOrder | null {
+  const record = unwrap(value);
+  if (!record) return null;
+  const id = typeof record.id === "string" || typeof record.id === "number" ? String(record.id) : "";
+  if (!id) return null;
+  const costs = readOrderCosts(record.details);
+  return {
+    id,
+    orderId: typeof record.orderId === "string" ? record.orderId : null,
+    status: typeof record.status === "string" ? record.status : null,
+    costCents: costs && costs.productionCents !== null ? costs.productionCents + costs.freightCents + costs.taxes.reduce((sum, tax) => sum + tax.cents, 0) : null,
+    shipments: readShipments(record.shipments),
+  };
+}
+
+/** Get Orders' list: an array, or one under orders, data or items; null for anything else, which is a failed lookup */
+export function ordersList(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  for (const key of ["orders", "data", "items"]) if (Array.isArray(record[key])) return record[key] as unknown[];
+  return null;
 }
