@@ -5,7 +5,7 @@ import type { AdminPhoto, AdminPost } from "../../src/lib/admin/store";
 import { render, text } from "./render";
 
 const photo = (id: string, over: Partial<AdminPhoto> = {}): AdminPhoto => ({
-  id, title: "", published: true, rawReview: false, thumb: { url: `/media/photos/previews/${id}/x/240.webp`, width: 160, height: 240 }, ...over,
+  id, title: "", published: true, rawReview: false, thumb: { url: `/admin/media/photos/previews/${id}/x/240.webp`, width: 160, height: 240 }, ...over,
 });
 const posts: AdminPost[] = [
   { collection: "newer", date: "2026-09-27", place: "bondi, sydney", photos: [photo("newer-01"), photo("newer-02", { published: false, rawReview: true }), photo("newer-03", { rawReview: true })] },

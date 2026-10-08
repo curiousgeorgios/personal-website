@@ -139,7 +139,7 @@ function toPosts(rows: PhotographRow[]): AdminPost[] {
     const post = last && last.collection === row.collection ? last : { collection: row.collection, date: row.published_on, place: row.place, photos: [] as AdminPhoto[] };
     if (post !== last) posts.push(post);
     const thumb = previewsOf(row.previews).find((preview) => preview.key.endsWith("/240.webp"));
-    post.photos.push({ id: row.id, title: row.title, published: row.published === 1, rawReview: row.raw_review === 1, thumb: thumb ? { url: `/media/${thumb.key}`, width: thumb.width, height: thumb.height } : null });
+    post.photos.push({ id: row.id, title: row.title, published: row.published === 1, rawReview: row.raw_review === 1, thumb: thumb ? { url: `/admin/media/${thumb.key}`, width: thumb.width, height: thumb.height } : null });
   }
   return posts;
 }

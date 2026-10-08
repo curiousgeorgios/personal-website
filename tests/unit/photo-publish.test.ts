@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { publishRefusal, setPublished, VERIFY_CONCURRENCY } from "../../src/lib/photos/publish";
+import { publicationPurges, publishRefusal, setPublished, VERIFY_CONCURRENCY } from "../../src/lib/photos/publish";
 import { sqliteD1 } from "./sqlite-d1";
 
 const SHA = "b8".repeat(32);
@@ -140,5 +140,12 @@ describe("setPublished", () => {
     expect(await setPublished(deps(), ids, true)).toEqual({ ok: true });
     expect(printBucket.head.mock.calls.length + mediaBucket.head.mock.calls.length).toBe(180);
     expect(most).toBe(VERIFY_CONCURRENCY);
+  });
+});
+
+describe("publicationPurges", () => {
+  test("a publish purges the gallery and the home page; a hide also purges each photograph's previews", () => {
+    expect(publicationPurges(["post-01", "post-02"], true)).toEqual(["photos", "logbook"]);
+    expect(publicationPurges(["post-01", "post-02"], false)).toEqual(["photos", "logbook", "photo-post-01", "photo-post-02"]);
   });
 });

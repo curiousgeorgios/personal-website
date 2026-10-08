@@ -38,7 +38,7 @@ export async function submitForm(
       if (!result.ok) return { failure: result, status: 422 };
       // The link exists only in this response, so it isn't a redirect (spec 6.3); links purge nothing
       if (result.issued) return { issued: result.issued };
-      const tags = PURGES[result.section];
+      const tags = [...PURGES[result.section], ...(result.purge ?? [])];
       const purged = tags.length === 0 || (await purgeTags(cache, tags));
       return { redirect: `/admin/?saved=${result.section}${purged ? "" : "&later=1"}#${result.section}` };
     } catch (error) {

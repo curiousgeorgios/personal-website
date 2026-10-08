@@ -51,6 +51,39 @@ test("hiding and publishing a whole post, then one photo", async ({ page }) => {
   await expect(post(page, "fixture-b").locator("summary .what")).toHaveText("14.06.26 · 2 photos, 2 published");
 });
 
+test("a hidden photo's previews answer 404 until it is published again; the admin's thumbnails still show", async ({ page, request }) => {
+  const previewOf = (id: string) => {
+    const [{ previews }] = adminD1<{ previews: string }>(`SELECT previews FROM photos WHERE id = '${id}'`);
+    return `${ADMIN}/media/${(JSON.parse(previews) as { key: string }[]).find((preview) => preview.key.endsWith("/240.avif"))!.key}`;
+  };
+  const expectRefused = async (url: string) => {
+    const response = await request.get(url);
+    expect([response.status(), response.headers()["cache-control"], response.headers()["cache-tag"]]).toEqual([404, "no-store", undefined]);
+  };
+  // Never published: refused publicly, shown in the admin through its own route
+  await expectRefused(previewOf("fixture-03"));
+  await openPost(page, "fixture");
+  const thumb = page.locator("#photo-fixture-03 img");
+  await expect(thumb).toHaveAttribute("src", /^\/admin\/media\/photos\/previews\/fixture-03\//);
+  await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0);
+
+  const url = previewOf("fixture-b-02");
+  const served = await request.get(url);
+  expect(served.status()).toBe(200);
+  expect(served.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+  expect(served.headers()["cache-tag"]?.split(",")).toContain("photo-fixture-b-02");
+
+  await openPost(page, "fixture-b");
+  await page.getByRole("button", { name: "hide fixture-b-02", exact: true }).click();
+  await expectSaved(page, "photographs", "gallery");
+  await expectRefused(url);
+
+  await openPost(page, "fixture-b");
+  await page.getByRole("button", { name: "publish fixture-b-02", exact: true }).click();
+  await expectSaved(page, "photographs", "gallery");
+  expect((await request.get(url)).status()).toBe(200);
+});
+
 test("a photo that fails its checks publishes nothing, and says which", async ({ page }) => {
   await openPost(page, "fixture-e");
   await post(page, "fixture-e").getByRole("button", { name: "hide all", exact: true }).click();

@@ -119,6 +119,14 @@ describe("submitForm", () => {
     expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook"] });
   });
 
+  test("hiding a photograph also purges its previews; publishing purges only the pages", async () => {
+    await db.prepare("INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES ('post', 1738488468, '2025-02-02', NULL)").run();
+    await db.prepare("INSERT INTO photos (id, collection, position, title, published, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES ('post-01', 'post', 1, '', 1, '[]', 'k', 1, 1, 1, 's')").run();
+    const purge = cache();
+    expect(await submitForm(formOf({ intent: "photo.hide", id: "post-01" }), deps(), purge, waiter().waitUntil)).toEqual({ redirect: "/admin/?saved=photographs#photographs" });
+    expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook", "photo-post-01"] });
+  });
+
   test("issuing a link answers with it, without a redirect or a purge", async () => {
     const purge = cache();
     const form = formOf({ intent: "link.issue", days: "7", note: "", nonce: "AbCdEfGhIjKlMnOpQrStUv" });

@@ -33,6 +33,8 @@ const publishedOf = async (id: string) => db.prepare("SELECT published FROM phot
 const placeOf = async () => db.prepare("SELECT place, place_edited FROM photo_posts WHERE collection = 'post'").first();
 const titleOf = async (id: string) => db.prepare("SELECT title FROM photos WHERE id = ?").bind(id).first("title");
 const SAVED = { ok: true, section: "photographs" };
+/** A saved hide: it also purges each photograph's previews, which /media then refuses (spec 6.2) */
+const HIDDEN = (...ids: string[]) => ({ ...SAVED, purge: ids.map((id) => `photo-${id}`) });
 const PAGE = (message: string) => ({ ok: false, section: null, form: "", errors: { form: message }, values: {} });
 
 beforeEach(async () => {
@@ -101,8 +103,8 @@ describe("publishing or hiding a post", () => {
 
   test("hiding all, and hiding all again, both count as saved", async () => {
     await submit({ intent: "post.publish", collection: "post" });
-    expect(await submit({ intent: "post.hide", collection: "post" })).toEqual(SAVED);
-    expect(await submit({ intent: "post.hide", collection: "post" })).toEqual(SAVED);
+    expect(await submit({ intent: "post.hide", collection: "post" })).toEqual(HIDDEN("post-01", "post-02", "post-03"));
+    expect(await submit({ intent: "post.hide", collection: "post" })).toEqual(HIDDEN("post-01", "post-02", "post-03"));
     for (const id of ["post-01", "post-02", "post-03"]) expect(await publishedOf(id)).toBe(0);
   });
 
@@ -113,7 +115,7 @@ describe("publishing or hiding a post", () => {
       for (const [name, value] of Object.entries(entries)) form.append(name, value);
       return runAction(form, withoutPrints);
     };
-    expect(await bare({ intent: "post.hide", collection: "post" })).toEqual(SAVED);
+    expect(await bare({ intent: "post.hide", collection: "post" })).toEqual(HIDDEN("post-01", "post-02", "post-03"));
     await expect(bare({ intent: "post.publish", collection: "post" })).rejects.toThrow("no PHOTO_PRINTS binding");
   });
 
@@ -139,7 +141,7 @@ describe("a photograph", () => {
   test("is published alone once its files check out, and hidden alone", async () => {
     expect(await submit({ intent: "photo.publish", id: "post-02" })).toEqual(SAVED);
     expect([await publishedOf("post-01"), await publishedOf("post-02")]).toEqual([0, 1]);
-    expect(await submit({ intent: "photo.hide", id: "post-02" })).toEqual(SAVED);
+    expect(await submit({ intent: "photo.hide", id: "post-02" })).toEqual(HIDDEN("post-02"));
     expect(await publishedOf("post-02")).toBe(0);
   });
 

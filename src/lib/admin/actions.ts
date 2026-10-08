@@ -1,5 +1,6 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
 import { checkPlace } from "../photos/place";
+import { photoCacheTag } from "../media";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
 import { insertGrant, revokeCatalogueLink } from "../photos/store";
 import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
@@ -61,7 +62,8 @@ export interface ActionFailure {
 /** A new link exists only in the response that made it (spec 6.3): its address, or word that the same form already made one */
 export type IssuedLink = { url: string } | { repeat: true };
 
-export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink } | ActionFailure;
+/** `purge`: cache tags this save purges beyond its section's own (a hidden photograph's previews) */
+export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[] } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
 const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link") => fail(null, "", { form: `that ${what} no longer exists` });
@@ -419,13 +421,17 @@ async function savePlace(form: FormData, { db }: ActionDeps): Promise<ActionResu
   return (await store.savePostPlace(db, fields.collection, checked.place)) ? { ok: true, section: "photographs" } : gone("post");
 }
 
+/** A saved publication change; a hide also purges each photograph's previews, which /media now refuses (spec 6.2) */
+const hidden = (ids: string[], published: boolean): ActionResult =>
+  published ? { ok: true, section: "photographs" } : { ok: true, section: "photographs", purge: ids.map(photoCacheTag) };
+
 /** Publishes or hides every photograph in a post: all of them or none, after checking each (spec 6.2) */
 async function publishPost(form: FormData, deps: ActionDeps, published: boolean): Promise<ActionResult> {
   const collection = String(form.get("collection") ?? "");
   const ids = COLLECTION.test(collection) ? await store.postPhotoIds(deps.db, collection) : null;
   if (!ids || ids.length === 0) return gone("post");
   const outcome = await setPublished(publishDeps(deps, published), ids, published);
-  if (outcome.ok) return { ok: true, section: "photographs" };
+  if (outcome.ok) return hidden(ids, published);
   if ("missing" in outcome) return gone("post");
   return fail("photographs", postForm(collection), { form: refusal(outcome, false) });
 }
@@ -442,7 +448,7 @@ async function publishPhoto(form: FormData, deps: ActionDeps, published: boolean
   const id = String(form.get("id") ?? "");
   if (!PHOTO_ID.test(id)) return gone("photo");
   const outcome = await setPublished(publishDeps(deps, published), [id], published);
-  if (outcome.ok) return { ok: true, section: "photographs" };
+  if (outcome.ok) return hidden([id], published);
   if ("missing" in outcome) return gone("photo");
   return fail("photographs", photoForm(id), { form: refusal(outcome, true) });
 }

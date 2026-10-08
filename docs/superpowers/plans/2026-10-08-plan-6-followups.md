@@ -57,6 +57,7 @@ Places:
 
 Privacy and security:
 
+- Hiding a photograph makes its previews unavailable to anyone new (the media route checks publication in D1, and a hide purges the photograph's `photo-<id>` tag), but copies already in a visitor's browser cache, saved by someone or held by an image search index can't be recalled. A preview key with an older master's SHA (a re-imported, changed master) is still served while the photograph is published; nothing deletes old preview objects from R2 yet.
 - `robots.txt` disallows `/photos/downloads`, which stops crawlers from reading the page's `noindex`. The spec mandates both; the page is also unlinked, private and 403 to anyone without a token.
 - The 403 page answers a few milliseconds faster for tokens that fail before the grant lookup than for those that reach it. Only a holder of a token signed with the real key can see the difference, and it tells them nothing they do not know.
 - The 503 path of the downloads page is covered by a unit test through the Astro container, not by an end-to-end run.

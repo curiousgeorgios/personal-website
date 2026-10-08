@@ -14,6 +14,8 @@ Amended 2026-10-08 at George's direction: people get full-resolution access only
 
 A photograph can be published only once its post exists and its master and every preview (240, 480, 960 and 1600, in AVIF and WebP) are verified in storage; otherwise publishing refuses with the reason, because the public catalogue lists photographs through their posts and a postless one would be published yet invisible.
 
+Hiding a photograph (amended 2026-10-08) takes it out of every list and makes its previews unavailable to anyone new: the media route answers 404 for a preview of an unpublished photograph, preview responses carry a `photo-<id>` cache tag, and hiding purges that tag along with `photos` and `logbook`. Published previews keep their year-long immutable caching, so the gallery stays fast. The accepted limit: a copy already cached in a visitor's browser can't be recalled, so hide guarantees that no new visitor can load the photograph, not that every earlier copy disappears. Treating hide as revoking every copy would need short cache lifetimes on every preview, which the gallery's speed rules out.
+
 Owners can issue and revoke links with a CLI, without Access, or through new endpoints inside the website's existing owner-only administration. This does not introduce an Access application for photography recipients. The existing site administration's authentication is outside this change.
 
 ## Consequences

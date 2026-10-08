@@ -284,7 +284,7 @@ describe("photographs", () => {
       ["old", "1970-01-01", null, ["old-01"]],
     ]);
     expect(photographs[0].photos).toEqual([
-      { id: "new-01", title: "", published: true, rawReview: false, thumb: { url: "/media/photos/previews/new-01/s/240.webp", width: 160, height: 240 } },
+      { id: "new-01", title: "", published: true, rawReview: false, thumb: { url: "/admin/media/photos/previews/new-01/s/240.webp", width: 160, height: 240 } },
       { id: "new-02", title: "", published: false, rawReview: true, thumb: null },
     ]);
     // A previews column that isn't a list leaves that photograph without a thumbnail rather than failing the page

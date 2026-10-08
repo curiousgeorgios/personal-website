@@ -24,7 +24,9 @@ Decisions:
 | `GET /api/photos/downloads?token=<token>` | The private catalogue as JSON, for scripts. |
 | `POST /admin/photos/links` | Issue a catalogue link through the owner gate (JSON; a `photoId` is refused with `photo links are internal`). |
 | `DELETE /admin/photos/links?grantId=<uuid>` | Revoke a catalogue link through the owner gate. A photo-scoped grant (plan B's print orders) answers as an unknown link and keeps working. |
-| `PATCH /admin/photos/<id>` | Publish or hide one photograph through `setPublished` (JSON). |
+| `PATCH /admin/photos/<id>` | Publish or hide one photograph through `setPublished` (JSON); a hide also purges its previews' tag. |
+| `/media/photos/previews/<id>/<sha>/<size>.<format>` | A published photograph's preview, `public, max-age=31536000, immutable`, cache tag `photo-<id>`. A hidden or unknown photograph's previews answer 404, `no-store`. Audio, covers and snapshots under `/media` are unchanged. |
+| `/admin/media/photos/previews/…` | The same previews for the admin's thumbnails, hidden photographs' included, behind the admin gate and never cached. |
 
 Public photo fields: `id`, `collection`, `title`, `width`, `height`, `downloadBytes`, `date` (the post's day in its own offset), `place` (`"area, city"` or `null`) and `previews` (`url`, real `width` and `height`, `format`). Every photograph has eight previews: 240, 480, 960 and 1600, each in AVIF and WebP, fitted inside their square. Every public query joins a photograph to its post (`photo_posts`), so a photograph without a post row isn't shown.
 
@@ -43,6 +45,8 @@ Measured on a store shaped like the real catalogue (two entries, 36 frames): 198
 `/admin` has two sections for photographs (spec 6):
 
 - **photographs:** one post per row, newest first, with its counts and a `raw` pill for photographs awaiting RAW review. Inside: the post's place (the place rule: lowercase, at most 60 characters, printable Latin-1; saving marks it edited, so an import keeps it), `publish all` and `hide all`, each photograph's title and its own publish or hide. Publishing checks every photograph's private JPEG and eight previews first (`src/lib/photos/publish.ts`, ten R2 checks at a time) and publishes all or none, naming the master or preview that failed for each photograph. Saves purge `photos` and `logbook`.
+
+  **What hide does:** a hidden photograph leaves every page, list and downloads page, and its previews stop being served to anyone new. `/media` checks in D1 that a preview's photograph is published and answers 404 otherwise; a hide also purges the photograph's `photo-<id>` tag, so the edge drops its cached previews (if that purge fails, the saved line says the gallery may show the old version for a little while). Publishing again brings them back. What hide can't recall: a copy already in a visitor's browser (previews are cached for a year), a saved or shared image, or a search engine's copy of one. It is the way to take a photograph down from the site, not a promise that no copy exists anywhere.
 - **links:** issue a catalogue link for 1 to 30 days with a note; it is shown once with a copy button and never stored (a nonce stops a repeated form making a second). Working links are listed with a revoke form, which switches off catalogue links only.
 
 `bun run photos:link` issues and revokes catalogue links from the Mac without the admin; `--photo` is refused, because photo-scoped grants are made only inside print orders (plan B).

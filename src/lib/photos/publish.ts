@@ -1,3 +1,4 @@
+import { photoCacheTag } from "../media";
 import { hasAllPreviews, previewSize, type PhotoRow, type Preview } from "./store";
 
 export interface PublishDeps {
@@ -59,8 +60,7 @@ async function pooled(checks: (() => Promise<boolean>)[], limit: number): Promis
 /**
  * Publishes or hides photographs, all of them or none (spec 2.2 and 6.2). Publishing verifies each first: that it has a
  * post, its private JPEG (size, type and SHA-256) and its eight previews. Hiding asks R2 nothing. A repeat is fine
- * (ADR-0012). It doesn't purge: callers purge photos and logbook, since the home page's photo line depends on whether
- * anything is published.
+ * (ADR-0012). It doesn't purge: callers purge `publicationPurges`.
  */
 export async function setPublished(deps: PublishDeps, ids: string[], published: boolean): Promise<PublishOutcome> {
   // One parameter however many ids: D1 caps a statement at 100 bound parameters
@@ -94,6 +94,12 @@ export async function setPublished(deps: PublishDeps, ids: string[], published: 
   await deps.db.prepare("UPDATE photos SET published = ? WHERE id IN (SELECT value FROM json_each(?))").bind(published ? 1 : 0, list).run();
   return { ok: true };
 }
+
+/**
+ * The cache tags a publication change purges: photos and logbook, since the home page's photo line depends on whether
+ * anything is published, and on a hide each photograph's previews, which the media route then refuses (spec 6.2).
+ */
+export const publicationPurges = (ids: string[], published: boolean): string[] => ["photos", "logbook", ...(published ? [] : ids.map(photoCacheTag))];
 
 /** Says everything that stopped a publish, in the admin's error voice: the post, the master and which previews failed */
 export function publishRefusal(outcome: Extract<PublishOutcome, { postless: string[] }>): string {
