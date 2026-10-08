@@ -63,6 +63,15 @@ describe("sending", () => {
     expect(logs()).toContain("sender prints@curiousgeorge.dev is not verified; reply-to Hello@curiousgeorge.dev, to the recipient or the recipient");
   });
 
+  test("an address that only contains one of ours is still scrubbed", async () => {
+    const logs = captureLogs();
+    const { db } = await mailDeps();
+    const broken = testDeps(db, { email: { send: vi.fn(async () => { throw new Error("no mailbox prints@curiousgeorge.dev.au or x-prints@curiousgeorge.dev.evil.com"); }) } as unknown as SendEmail });
+    expect(await sendMail(broken, { to: "prints@curiousgeorge.dev.au", subject: "s", text: "t" }, "a test email")).toBe(false);
+    expect(logs()).toContain("no mailbox the recipient or the recipient");
+    expect(logs()).not.toContain("curiousgeorge.dev.");
+  });
+
   test("a line break in the recipient or subject can't start another header", async () => {
     const { email, deps } = await mailDeps();
     await sendMail(deps, { to: "buyer@example.com\r\nBcc: x@example.com", subject: "hi\nBcc: y@example.com", text: "t" }, "a test email");
