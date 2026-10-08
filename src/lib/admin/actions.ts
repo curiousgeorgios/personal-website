@@ -513,14 +513,15 @@ async function saveBuffer(form: FormData, { db }: ActionDeps): Promise<ActionRes
  * retry now (spec 20): one conditional write sets an attention order Artelo doesn't have back to paid, with a fresh
  * window, and only then does placeOrder run it, with its claim, lookup and fence (ADR-0026); nothing here talks to
  * Artelo. A live lease means an attempt is still running, so it is left alone. Any other status is never touched: a
- * refunded order's lease is the marker that Artelo may have it, and stays
+ * refunded order's lease is the marker that Artelo may have it, and stays. Nor is a fully refunded order, which the daily
+ * stranded-refund lookup can leave in needs_attention with no Artelo id: retrying it would print for a refunded buyer
  */
 async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<ActionResult> {
   const id = String(form.get("id") ?? "");
   if (!ORDER_ID.test(id)) return gone("order");
   const now = Math.floor(Date.now() / 1000);
   const result = await db
-    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND (lease_until IS NULL OR lease_until < ?)")
+    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND (lease_until IS NULL OR lease_until < ?)")
     .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, now)
     .run();
   if (result.meta.changes > 0) {

@@ -14,6 +14,14 @@ test("the margin: production at the rate plus 3%, the worst card fee, any freigh
   expect(marginFor({ priceCents: 5900, productionUsdCents: 1500, freightUsdCents: 2000, rate: 1.5, buffer: 0 })).toMatchObject({ shortfall: 195, margin: 3150 });
 });
 
+test("destination taxes ride on the delivery line, so their card fee and exchange count in the shortfall too", () => {
+  const taxes = [{ field: "usSalesTax", label: "us sales tax", cents: 420 }];
+  // Delivery: ceil(24.20 × 1.5) = $37; cost: 2420 × 1.545 = 3739 plus 3.5% of 3700 = 130, so 169 short
+  expect(marginFor({ priceCents: 5900, productionUsdCents: 1500, freightUsdCents: 2000, taxes, rate: 1.5, buffer: 0 })).toMatchObject({ deliveryAud: 3700, shortfall: 169, margin: 3176 });
+  // With the buffer, delivery covers it all
+  expect(marginFor({ priceCents: 5900, productionUsdCents: 1500, freightUsdCents: 2000, taxes, rate: 1.5, buffer: 0.08 })).toMatchObject({ deliveryAud: 4000, shortfall: 0, margin: 3345 });
+});
+
 test("under 15% fails, under 30% warns", () => {
   expect(verdict(marginFor({ priceCents: 5900, productionUsdCents: 4000, freightUsdCents: 3000, rate: 1.5, buffer: 0.08 }).share)).toBe("fail");
   expect(verdict(marginFor({ priceCents: 5900, productionUsdCents: 2600, freightUsdCents: 3000, rate: 1.5, buffer: 0.08 }).share)).toBe("warn");

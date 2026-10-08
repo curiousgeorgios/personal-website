@@ -46,6 +46,22 @@ describe("the webhook check", () => {
       expect((await readSettings(db)).webhookMissing).toBe(false);
     }
   });
+
+  test("entries with no url are unreadable, not missing: no email, and the key names are logged without a value", async () => {
+    const logs = captureLogs();
+    const { db, mail, deps } = await withHooks(() => json([{ endpoint: "https://curiousgeorge.dev/api/prints/artelo", topic: "OrderStatusChange" }]));
+    expect(await checkArteloWebhook(deps)).toBe(false);
+    expect((await readSettings(db)).webhookMissing).toBe(false);
+    expect(mail).not.toHaveBeenCalled();
+    expect(logs()).toContain("prints: artelo's webhook list couldn't be read: 1 entry, the first with keys endpoint, topic");
+    expect(logs()).not.toContain("curiousgeorge.dev");
+  });
+
+  test("an empty list is readable: the webhook is missing", async () => {
+    const { db, deps } = await withHooks(() => json({ data: [] }));
+    expect(await checkArteloWebhook(deps)).toBe(true);
+    expect((await readSettings(db)).webhookMissing).toBe(true);
+  });
 });
 
 test("the clean-up deletes expired orders over 30 days old with their lines and stripe events over 90 days old, nothing else", async () => {
@@ -53,9 +69,14 @@ test("the clean-up deletes expired orders over 30 days old with their lines and 
   await insertOrder(db, { id: "01k6x00000000000000000000a", status: "expired", created_at: NOW - 31 * 86_400 });
   await insertOrder(db, { id: "01k6x00000000000000000000b", status: "expired", created_at: NOW - 29 * 86_400 });
   await insertOrder(db, { id: "01k6x00000000000000000000c", status: "delivered", created_at: NOW - 400 * 86_400 });
+  // Every other status, as old: only expired orders go
+  const others = ["paid", "placed", "refunded", "cancelled", "needs_attention", "checkout", "in_production", "shipped"];
+  const kept = others.map((_, index) => `01k6x0000000000000000000k${index}`);
+  for (const [index, status] of others.entries()) await insertOrder(db, { id: kept[index], status, created_at: NOW - 400 * 86_400, paid_at: NOW - 400 * 86_400 });
   await db.prepare("INSERT INTO stripe_events (id, type, received_at) VALUES ('evt_old', 't', ?), ('evt_new', 't', ?)").bind(NOW - 91 * 86_400, NOW - 89 * 86_400).run();
   expect(await cleanUp(deps)).toBe(true);
-  expect((await db.prepare("SELECT id FROM print_orders ORDER BY id").all()).results).toEqual([{ id: "01k6x00000000000000000000b" }, { id: "01k6x00000000000000000000c" }]);
+  expect((await db.prepare("SELECT id FROM print_orders ORDER BY id").all()).results).toEqual([{ id: "01k6x00000000000000000000b" }, { id: "01k6x00000000000000000000c" }, ...kept.map((id) => ({ id }))]);
+  expect(await db.prepare("SELECT COUNT(*) AS n FROM print_order_items WHERE order_id LIKE '01k6x0000000000000000000k%'").first("n")).toBe(kept.length * 2);
   expect(await db.prepare("SELECT COUNT(*) AS n FROM print_order_items WHERE order_id = '01k6x00000000000000000000a'").first("n")).toBe(0);
   expect((await db.prepare("SELECT id FROM stripe_events").all()).results).toEqual([{ id: "evt_new" }]);
 });
@@ -126,24 +147,30 @@ describe("the stranded-refund lookup (ADR-0026)", () => {
     expect(pause).toHaveBeenCalledWith(300);
   });
 
-  test("an unreadable or failed lookup changes nothing, and the day still counts: it is tried again tomorrow", async () => {
+  test("an unreadable or failed lookup changes nothing but the check time, and the day still counts: it is asked again tomorrow", async () => {
     const logs = captureLogs();
-    const answers: Handler[] = [
-      () => json({ message: "down" }, 503),
-      () => json({ orders: "?" }),
-      // Something for our id that can't be matched to it: fail closed, as placement does
-      (request) => json([{ id: "artelo-1", name: new URL(request.url).searchParams.get("name") }]),
-    ];
-    for (const answer of answers) {
+    for (const answer of [() => json({ message: "down" }, 503), () => json({ orders: "?" })] as Handler[]) {
       const { db, mail, pause, deps } = await setUp(answer);
-      await insertOrder(db, refunded("01k6x0000000000000000000u1", { lease_until: NOW - 600 }));
-      const before = await getOrder(db, "01k6x0000000000000000000u1");
+      await insertOrder(db, refunded("01k6x0000000000000000000u1", { lease_until: NOW - 600, status_checked_at: NOW - 3 * DAY }));
+      const before = (await getOrder(db, "01k6x0000000000000000000u1"))!;
       await daily(deps, "refund_lookup", () => lookUpStrandedRefunds(deps, pause));
-      expect(await getOrder(db, "01k6x0000000000000000000u1")).toEqual(before);
+      expect(await getOrder(db, "01k6x0000000000000000000u1")).toEqual({ ...before, status_checked_at: NOW });
       expect((await readSettings(db)).daily.refund_lookup).toBe(NOW);
       expect(mail).not.toHaveBeenCalled();
     }
     expect(logs()).toContain("couldn't look up refunded order 01k6x0000000000000000000u1 at artelo");
+  });
+
+  test("an answer for our id that can't be matched is evidence artelo may have it: needs attention, and george's email goes", async () => {
+    const logs = captureLogs();
+    // Our id under name rather than orderId, with a buyer's details beside it, which never reach the logs
+    const { db, mail, pause, deps } = await setUp((request) => json([{ id: "artelo-1", name: new URL(request.url).searchParams.get("name"), customerAddress: { name: "Ada Lovelace", street1: "12 Example Street" } }]));
+    await insertOrder(db, refunded("01k6x0000000000000000000m1", { lease_until: NOW - 600, attention_notified_at: NOW - 5 * DAY }));
+    expect(await lookUpStrandedRefunds(deps, pause)).toBe(true);
+    expect(await getOrder(db, "01k6x0000000000000000000m1")).toMatchObject({ status: "needs_attention", attention_reason: REFUND_REASON, attention_notified_at: NOW, artelo_order_id: null, lease_until: null, status_checked_at: NOW });
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ to: "hello@curiousgeorge.dev", subject: "print order 01k6x0000000000000000000m1 needs attention" }));
+    expect(logs()).toContain("refunded order 01k6x0000000000000000000m1 has something at artelo that can't be matched to it");
+    expect(logs()).not.toMatch(/Lovelace|Example Street/);
   });
 
   test("only refunded orders with no artelo id paid in the last 30 days are looked up", async () => {
@@ -170,6 +197,18 @@ describe("the stranded-refund lookup (ADR-0026)", () => {
     await lookUpStrandedRefunds(testDeps(db, { fetch: fake.fetch, now: () => NOW + DAY }), pause);
     const second = lookups(fake.calls).slice(20);
     expect(second.slice(0, 5).sort()).toEqual(ids.filter((id) => !first.includes(id)).sort());
+  });
+
+  test("twenty that never answer can't hold every slot: the next run reaches the rest first", async () => {
+    captureLogs();
+    const { db, fake, pause, deps } = await setUp(() => json({ message: "down" }, 503));
+    const ids = Array.from({ length: 25 }, (_, index) => `01k6x00000000000000000t${String(index).padStart(3, "0")}`);
+    for (const [index, id] of ids.entries()) await insertOrder(db, refunded(id, { paid_at: NOW - DAY - index }));
+    await lookUpStrandedRefunds(deps, pause);
+    const first = lookups(fake.calls);
+    expect(first).toHaveLength(20);
+    await lookUpStrandedRefunds(testDeps(db, { fetch: fake.fetch, now: () => NOW + DAY }), pause);
+    expect(lookups(fake.calls).slice(20, 25).sort()).toEqual(ids.filter((id) => !first.includes(id)).sort());
   });
 
   test("with no artelo key yet, nothing is asked and the day counts", async () => {

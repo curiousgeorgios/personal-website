@@ -1,10 +1,12 @@
 // bun run prints:check --local | --remote [--persist-to DIR] (spec 17.5): every size and frame against Artelo's costs and
 // Price Check at five landmark addresses, two prints together to each, Antarctica's answer and the order lookup the
 // duplicate guard depends on. George runs it before opening prints and whenever Artelo's prices or the rate move a lot;
-// it is not part of CI (it needs the live key). The key comes from ARTELO_API_KEY and is never printed.
+// it is not part of CI (it needs the live key). The key comes from ARTELO_API_KEY and is never printed. Every run, --local
+// too (that only chooses the D1), creates one Artelo test order (isTestOrder), which costs nothing and is never produced
+// (spec 25 assumption 12); its Artelo id is printed.
 // Exit 1: a refused combination, a margin under 15% or a failed lookup. Warnings (exit 0): a margin under 30%, or a quote
 // that differs from the catalogue's costs by more than 5%.
-import { artelo, arteloAddress, ordersList, priceCheckBody, productInfo, readArteloOrder } from "../src/lib/prints/artelo.ts";
+import { artelo, arteloAddress, ordersList, priceCheckBody, productInfo, readArteloOrder, shapeOf } from "../src/lib/prints/artelo.ts";
 import { ANTARCTICA, COMBINATIONS, drifted, LANDMARKS, marginFor, verdict } from "../src/lib/prints/margin.ts";
 import { aud, rateText, usd } from "../src/lib/prints/money.ts";
 import { readOrderCosts } from "../src/lib/prints/quote.ts";
@@ -13,7 +15,7 @@ import { photoPlatform } from "./photo-platform.mjs";
 const args = process.argv.slice(2);
 const arg = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 if (args.includes("--local") === args.includes("--remote")) {
-  console.error("usage: bun run prints:check --local | --remote [--persist-to DIR]");
+  console.error("usage: bun run prints:check --local | --remote [--persist-to DIR]\nevery run creates one artelo test order, which costs nothing and is never produced.");
   process.exit(2);
 }
 const key = process.env.ARTELO_API_KEY;
@@ -22,10 +24,18 @@ if (!key) {
   process.exit(2);
 }
 const pace = Number(process.env.PRINTS_CHECK_PACE_MS ?? 250);
+const retryAfter = Number(process.env.PRINTS_CHECK_RETRY_MS ?? 1000);
 const deps = { config: { arteloBase: (process.env.ARTELO_API_BASE ?? "https://www.artelo.com/api/open").replace(/\/+$/, ""), secrets: { ARTELO_API_KEY: key } }, fetch: (input, init) => fetch(input, init) };
-// 250ms apart keeps the run under Artelo's 50 requests in 10 seconds
-const call = async (method, path, body) => {
-  await new Promise((resolve) => setTimeout(resolve, pace));
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** No answer, a busy Artelo or a server error: worth one more try, and never Artelo refusing what was asked */
+const transient = (result) => !result.ok && (result.status === null || result.status === 429 || result.status >= 500);
+// 250ms apart keeps the run under Artelo's 50 requests in 10 seconds, though the live site's own calls share that limit, so
+// a 429 or 5xx is asked once more a second later. The test order's create is retried on a 429 only, which Artelo didn't act on
+const call = async (method, path, body, { create = false } = {}) => {
+  await wait(pace);
+  const result = await artelo(deps, method, path, body);
+  if (!transient(result) || (create && result.status !== 429)) return result;
+  await wait(retryAfter);
   return artelo(deps, method, path, body);
 };
 
@@ -40,6 +50,8 @@ const warn = (text) => {
   console.log(process.env.CI ? `::warning::${text}` : `warn ${text}`);
 };
 const refused = (result) => `${result.status ?? "no answer"}${result.message ? `: ${result.message}` : ""}`;
+/** A refusal says the request is wrong; a failure to get an answer says nothing about it, so it reads differently */
+const trouble = (result, what) => (transient(result) ? `couldn't check ${what} (${refused(result)})` : `artelo refused ${what} (${refused(result)})`);
 const pct = (share) => `${Math.round(share * 100)}%`;
 // A margin can be a loss, which aud() rightly refuses
 const signed = (cents) => (cents < 0 ? `-${aud(-cents)}` : aud(cents));
@@ -49,11 +61,19 @@ const signed = (cents) => (cents < 0 ? `-${aud(-cents)}` : aud(cents));
 const platform = await photoPlatform({ remote: args.includes("--remote"), persistTo: arg("--persist-to") ?? ".wrangler/state" });
 let prices;
 let settings;
+let unmigrated = false;
 try {
   prices = Object.fromEntries((await platform.env.DB.prepare("SELECT tier, frame, amount FROM print_prices").all()).results.map((row) => [`${row.tier}:${row.frame}`, row.amount]));
   settings = Object.fromEntries((await platform.env.DB.prepare("SELECT key, value FROM print_settings").all()).results.map((row) => [row.key, row.value]));
+} catch (error) {
+  if (!/no such table/i.test(String(error?.message))) throw error;
+  unmigrated = true;
 } finally {
   await platform.dispose();
+}
+if (unmigrated) {
+  console.error("the store has no print tables: apply the migrations first");
+  process.exit(2);
 }
 const buffer = Number(settings.delivery_buffer ?? 0.08);
 let rate = Number(settings.usd_aud);
@@ -81,7 +101,7 @@ for (const combination of COMBINATIONS) {
     // Get Catalog Product Costs' required fields: shippingDestination, the three booleans and a listed frameStyle
     const result = await call("POST", "/catalog/get-costs", { catalogProductId: "IndividualArtPrint", size: combination.size.size, frameStyle: combination.frame === "oak" ? "Oak" : "Unframed", includeMats: false, includeFramingService: false, includeHangingPins: false, paperType: "ArchivalMatteFineArt", shippingDestination: country, quantity: 1 });
     if (!result.ok) {
-      fail(`${name}: artelo refused its catalogue costs to ${country} (${refused(result)})`);
+      fail(`${name}: ${trouble(result, `its catalogue costs to ${country}`)}`);
       continue;
     }
     const { productionCost, shippingCost } = result.body ?? {};
@@ -95,7 +115,7 @@ for (const combination of COMBINATIONS) {
     const line = { line: 1, quantity: 1, unitAmount: price, size: combination.size, frame: combination.frame, orientation: "Vertical" };
     const result = await call("POST", "/orders/price-check", priceCheckBody([line], landmark.address, rate, `check-quote-${Date.now()}`));
     if (!result.ok) {
-      fail(`${name} to ${landmark.label}: artelo refused the price check (${refused(result)})`);
+      fail(`${name} to ${landmark.label}: ${trouble(result, "the price check")}`);
       continue;
     }
     console.log(`  ${name} to ${landmark.label}: ${JSON.stringify(result.body?.orderCosts)}`);
@@ -105,7 +125,7 @@ for (const combination of COMBINATIONS) {
       continue;
     }
     singles.set(`${name}|${landmark.label}`, quoted.freightCents);
-    const margin = marginFor({ priceCents: price, productionUsdCents: quoted.productionCents, freightUsdCents: quoted.freightCents, rate, buffer });
+    const margin = marginFor({ priceCents: price, productionUsdCents: quoted.productionCents, freightUsdCents: quoted.freightCents, taxes: quoted.taxes, rate, buffer });
     console.log(`${name} to ${landmark.label}: production ${usd(quoted.productionCents)} (${aud(margin.productionAud)}), price ${aud(price)}, card fee ${aud(margin.cardFee)}, freight shortfall ${aud(margin.shortfall)}, margin ${signed(margin.margin)} (${pct(margin.share)}), delivery ${aud(margin.deliveryAud)}`);
     const judged = verdict(margin.share);
     if (judged === "fail") fail(`${name} to ${landmark.label}: the margin is ${pct(margin.share)}, under 15%`);
@@ -124,7 +144,7 @@ for (const landmark of LANDMARKS) {
   const result = await call("POST", "/orders/price-check", priceCheckBody(lines, landmark.address, rate, `check-quote-${Date.now()}`));
   const quoted = result.ok ? readOrderCosts(result.body?.orderCosts) : null;
   if (!quoted) {
-    fail(`two prints to ${landmark.label}: artelo refused or the answer couldn't be read (${result.ok ? "unreadable" : refused(result)})`);
+    fail(`two prints to ${landmark.label}: ${result.ok ? "the price check couldn't be read" : trouble(result, "the price check")}`);
     continue;
   }
   const alone = [small, large].map((combination) => singles.get(`${combination.family} ${combination.tier} ${combination.size.size} ${combination.frame}|${landmark.label}`));
@@ -146,15 +166,18 @@ const created = await call("POST", "/orders/create", {
   // orders never send it (Task 9's test pins that)
   dangerouslySkipDPICheck: true,
   items: [{ orderItemId: `${checkId}-1`, quantity: 1, unitPrice: prices["small:unframed"] / 100, productInfo: productInfo({ size: small.size, frame: "unframed", orientation: "Vertical" }, "https://curiousgeorge.dev/og.png") }],
-});
-if (!created.ok) fail(`lookup check: artelo refused the test order (${refused(created)}), so the lookup wasn't proved: don't open prints`);
+}, { create: true });
+if (!created.ok) fail(`lookup check: ${trouble(created, "the test order")}, so the lookup wasn't proved: don't open prints`);
 else {
+  const order = readArteloOrder(created.body);
+  console.log(order ? `lookup check: test order ${order.id} created (${order.status ?? "no status"})` : `lookup check: test order created, but artelo's answer couldn't be read (${shapeOf(created.body)})`);
   const lookup = await call("GET", `/orders/get?limit=5&name=${encodeURIComponent(checkId)}`);
   const list = lookup.ok ? ordersList(lookup.body) : null;
-  const answer = lookup.ok ? JSON.stringify(lookup.body).slice(0, 300) : refused(lookup);
-  if (!list) fail(`lookup check: get orders' answer for ${checkId} couldn't be read (${answer}), so every order would stall at its lookup: don't open prints`);
+  // Only the answer's shape, never a value: when the name filter is ignored, Get Orders lists real buyers' orders
+  if (!lookup.ok) fail(`lookup check: ${trouble(lookup, `the lookup of ${checkId}`)}: don't open prints`);
+  else if (!list) fail(`lookup check: get orders' answer for ${checkId} couldn't be read (${shapeOf(lookup.body)}), so every order would stall at its lookup: don't open prints`);
   else if (list.length === 0) fail(`lookup check: get orders' name filter didn't find ${checkId} just after it was created, so placing could create an order twice: don't open prints`);
-  else if (!list.some((entry) => readArteloOrder(entry)?.orderId === checkId)) fail(`lookup check: get orders listed ${checkId} without its id under orderId (${answer}), so placing can't match it: don't open prints`);
+  else if (!list.some((entry) => readArteloOrder(entry)?.orderId === checkId)) fail(`lookup check: get orders listed ${shapeOf(list)}; none holds ${checkId} under orderId, so placing can't match it: don't open prints`);
   else console.log("lookup check: ok");
 }
 

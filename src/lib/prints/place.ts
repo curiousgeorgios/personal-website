@@ -63,23 +63,35 @@ export function scrub(message: string, address: Address | null): string {
 }
 
 /**
- * Our order at Artelo, found by its id with Get Orders' name filter: null only when Artelo answers an empty list. Anything
- * else it can't match throws, so a caller never takes a failed lookup for "not there". The daily stranded-refund lookup
- * (daily.ts) asks the same way
+ * What Get Orders' name filter says about our order: found (an entry with Artelo's id and ours under orderId), absent
+ * (only an empty list), unmatched (entries, none of them matched to ours: almost certainly ours under another field
+ * name) or failed (no answer, or one that isn't a list). Each reason names a status, never anything personal
  */
-export async function lookUp(deps: PrintDeps, orderId: string): Promise<ArteloOrder | null> {
+export type LookupAnswer = { kind: "found"; order: ArteloOrder } | { kind: "absent" } | { kind: "unmatched" | "failed"; reason: string };
+
+export async function askArtelo(deps: PrintDeps, orderId: string): Promise<LookupAnswer> {
   const result = await artelo(deps, "GET", `/orders/get?limit=5&name=${encodeURIComponent(orderId)}`);
-  if (!result.ok) throw new Retryable(`the lookup at artelo failed (${result.status ?? "no answer"})`);
+  if (!result.ok) return { kind: "failed", reason: `the lookup at artelo failed (${result.status ?? "no answer"})` };
   const list = ordersList(result.body);
-  if (!list) throw new Retryable("the lookup at artelo answered something unreadable");
-  // Only an empty list means Artelo hasn't got it. A search for our id that finds something we can't match (another
-  // field name, no id to adopt by) is almost certainly ours: creating could make it twice, so the lookup counts as failed
-  if (list.length === 0) return null;
+  if (!list) return { kind: "failed", reason: "the lookup at artelo answered something unreadable" };
+  if (list.length === 0) return { kind: "absent" };
   for (const entry of list) {
     const found = readArteloOrder(entry);
-    if (found && found.orderId === orderId) return found;
+    if (found && found.orderId === orderId) return { kind: "found", order: found };
   }
-  throw new Retryable("the lookup at artelo answered orders it couldn't match to this one");
+  return { kind: "unmatched", reason: "the lookup at artelo answered orders it couldn't match to this one" };
+}
+
+/**
+ * Placement's lookup, fail-closed: null only when Artelo answers an empty list. A search for our id that finds something
+ * we can't match is almost certainly ours: creating could make it twice, so it counts as a failed lookup, as does anything
+ * unreadable. The daily stranded-refund lookup (daily.ts) asks the same way, through askArtelo
+ */
+async function lookUp(deps: PrintDeps, orderId: string): Promise<ArteloOrder | null> {
+  const answer = await askArtelo(deps, orderId);
+  if (answer.kind === "found") return answer.order;
+  if (answer.kind === "absent") return null;
+  throw new Retryable(answer.reason);
 }
 
 /** The address the delivery was quoted against, from the payment Stripe holds it on; in memory only (spec 18.2 step 3) */

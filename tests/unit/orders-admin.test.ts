@@ -84,6 +84,19 @@ describe("retry now never places what it mustn't", () => {
     expect(await unchanged({ status: "refunded", lease_until: 5, attempts: 3, refunded_amount: 28700 })).toEqual(refused);
   });
 
+  test("a fully refunded order in needs attention with no artelo id does nothing: it would print for a refunded buyer", async () => {
+    // The daily stranded-refund lookup leaves one so when artelo answers for it without a match
+    expect(await unchanged({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", refunded_amount: 28700, lease_until: null })).toEqual(refused);
+  });
+
+  test("a partly refunded order in needs attention can still be retried", async () => {
+    const db = await printDb();
+    await insertOrder(db, { id: ORDER, status: "needs_attention", attention_reason: "stuck", refunded_amount: 28699 });
+    const deps = depsOf(db);
+    expect(await runAction(formOf({ intent: "order.retry", id: ORDER }), deps)).toEqual({ ok: true, section: "orders", note: "retry" });
+    expect(deps.orders.placeLater).toHaveBeenCalledWith(ORDER);
+  });
+
   test("an order artelo has does nothing", async () => {
     expect(await unchanged({ status: "needs_attention", artelo_order_id: "artelo-1", attention_reason: "artelo needs something before it can print: open the order in artelo." })).toEqual(refused);
   });
@@ -212,6 +225,16 @@ describe("the orders section", () => {
     // Artelo has it: no retry, open it there instead
     expect(held.querySelector("form")).toBeNull();
     expect(text(held.querySelector(".open-in-artelo"))).toBe("open it in artelo (order 48214)");
+  });
+
+  test("a fully refunded order in needs attention shows no retry, only the refund link", async () => {
+    const db = await printDb();
+    await insertOrder(db, { id: "01k6x00000000000000000000r", status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", refunded_amount: 28700 });
+    await insertOrder(db, { id: "01k6x00000000000000000000p", status: "needs_attention", attention_reason: "stuck", refunded_amount: 28699, paid_at: NOW - 3600 });
+    const doc = await render(OrdersAdmin, { data: await loadOrdersAdmin(db, testConfig(), NOW), failure: null });
+    expect(doc.querySelector("#order-01k6x00000000000000000000r form")).toBeNull();
+    expect(doc.querySelector("#order-01k6x00000000000000000000r a.refund")).not.toBeNull();
+    expect(doc.querySelector('#order-01k6x00000000000000000000p form input[name="intent"][value="order.retry"]')).not.toBeNull();
   });
 
   test("the delivery reads as the buyer saw it: with destination taxes when the quote carried tax, plain otherwise (spec 16.1)", async () => {

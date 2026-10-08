@@ -2,7 +2,7 @@
 // runs this file under plain Node
 import type { Address } from "./address";
 import { FAMILIES, FRAMES, TIERS, type Frame, type PrintSize, type Tier } from "./catalogue.ts";
-import { deliveryAmount } from "./quote.ts";
+import { deliveryAmount, type TaxLine } from "./quote.ts";
 
 /** Stripe's international card rate in Australia, the worse of its two (assumption 15) */
 export const CARD_RATE = 0.035;
@@ -29,19 +29,22 @@ export interface Margin {
   cardFee: number;
   /** What the buyer pays for delivery at this rate and buffer */
   deliveryAud: number;
-  /** What the delivery line fails to cover of the freight and its card fee, worst case */
+  /** What the delivery line fails to cover of the freight, any destination tax and its card fee, worst case */
   shortfall: number;
   margin: number;
   /** The margin as a share of the price */
   share: number;
 }
 
-export function marginFor(input: { priceCents: number; productionUsdCents: number; freightUsdCents: number; rate: number; buffer: number }): Margin {
+/** taxes are the destination taxes Price Check quoted, which the delivery line passes on at cost like the freight */
+export function marginFor(input: { priceCents: number; productionUsdCents: number; freightUsdCents: number; taxes?: readonly TaxLine[]; rate: number; buffer: number }): Margin {
   const worst = input.rate * (1 + FX_MARGIN);
+  const taxes = input.taxes ?? [];
   const productionAud = Math.round(input.productionUsdCents * worst);
   const cardFee = Math.round(input.priceCents * CARD_RATE) + CARD_FIXED;
-  const deliveryAud = deliveryAmount(input.freightUsdCents, [], input.rate, input.buffer);
-  const shortfall = Math.max(0, Math.round(input.freightUsdCents * worst) + Math.round(deliveryAud * CARD_RATE) - deliveryAud);
+  const deliveryAud = deliveryAmount(input.freightUsdCents, taxes, input.rate, input.buffer);
+  const passedOn = input.freightUsdCents + taxes.reduce((sum, tax) => sum + tax.cents, 0);
+  const shortfall = Math.max(0, Math.round(passedOn * worst) + Math.round(deliveryAud * CARD_RATE) - deliveryAud);
   const margin = input.priceCents - productionAud - cardFee - shortfall;
   return { productionAud, cardFee, deliveryAud, shortfall, margin, share: margin / input.priceCents };
 }

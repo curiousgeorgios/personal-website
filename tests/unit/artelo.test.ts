@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { artelo, ARTELO_TIMEOUT_MS, arteloAddress, priceCheck, priceCheckBody, productInfo, type QuoteLine } from "../../src/lib/prints/artelo";
+import { artelo, ARTELO_TIMEOUT_MS, arteloAddress, hasWebhook, priceCheck, priceCheckBody, productInfo, readWebhooks, shapeOf, type QuoteLine } from "../../src/lib/prints/artelo";
 import { parseSize } from "../../src/lib/prints/catalogue";
 import { ADDRESS, captureLogs, fakeFetch, json, printDb, testDeps, US_ADDRESS, type Handler } from "./prints-fakes";
 
@@ -138,5 +138,26 @@ describe("priceCheck", () => {
     expect(await priceCheck(taxed.deps, LINES, ADDRESS, 1.5)).toEqual({ ok: false, refused: null });
     const under = await answering(() => json({ orderCosts: { arteloShipping: 250 } }));
     expect((await priceCheck(under.deps, LINES, ADDRESS, 1.5)).ok).toBe(true);
+  });
+});
+
+describe("an answer's shape, for logs and the terminal", () => {
+  test("entry counts and field names only, never a value; a key that isn't plainly a field name is only counted", () => {
+    expect(shapeOf([{ id: "artelo-1", name: "Ada Lovelace", customerAddress: { street1: "12 Example Street" } }, {}])).toBe("2 entries, the first with keys id, name, customerAddress");
+    expect(shapeOf([{ "ada@example.com": 1, id: 2, "Ada Lovelace": 3 }])).toBe("1 entry, the first with keys id and 2 more");
+    expect(shapeOf({ orders: "?", customer: "Ada Lovelace" })).toBe("an object with keys orders, customer");
+    expect(shapeOf([])).toBe("0 entries");
+    expect(shapeOf(["Ada Lovelace"])).toBe("1 entry");
+    expect(shapeOf("Ada Lovelace")).toBe("a string");
+    expect(shapeOf(null)).toBe("nothing readable");
+  });
+
+  test("a webhook list with entries but no url is unreadable; an empty one is readable", () => {
+    expect(readWebhooks([{ endpoint: "https://x.test", topic: "OrderStatusChange" }])).toBeNull();
+    expect(readWebhooks({ webhooks: [] })).toEqual([]);
+    expect(readWebhooks({ hooks: [] })).toBeNull();
+    const hooks = readWebhooks({ data: [{ url: "https://x.test/api/prints/artelo", topic: "OrderStatusChange" }, "?"] })!;
+    expect(hasWebhook(hooks, "https://x.test/api/prints/artelo")).toBe(true);
+    expect(hasWebhook([{ url: "https://x.test/api/prints/artelo", topic: "OrderCreated" }], "https://x.test/api/prints/artelo")).toBe(false);
   });
 });

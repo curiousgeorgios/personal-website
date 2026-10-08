@@ -226,3 +226,48 @@ export function ordersList(value: unknown): unknown[] | null {
   for (const key of ["orders", "data", "items"]) if (Array.isArray(record[key])) return record[key] as unknown[];
   return null;
 }
+
+/** Get Webhooks' list: an array, or one under webhooks, data or items; null for anything else */
+export function webhooksList(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  for (const key of ["webhooks", "data", "items"]) if (Array.isArray(record[key])) return record[key] as unknown[];
+  return null;
+}
+
+/**
+ * Artelo's webhooks as entries to match by url and topic; null when the list can't be read, including a non-empty list
+ * where no entry holds a string url (a shape this site doesn't know must never read as "missing")
+ */
+export function readWebhooks(value: unknown): Record<string, unknown>[] | null {
+  const list = webhooksList(value);
+  if (!list) return null;
+  const hooks = list.filter((hook): hook is Record<string, unknown> => !!hook && typeof hook === "object" && !Array.isArray(hook));
+  if (list.length > 0 && !hooks.some((hook) => typeof hook.url === "string")) return null;
+  return hooks;
+}
+
+export const hasWebhook = (hooks: readonly Record<string, unknown>[], url: string) => hooks.some((hook) => hook.url === url && hook.topic === "OrderStatusChange");
+
+/** A key name that is plainly a field's name; anything else (an email or a name used as a key, say) is only counted */
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
+const keysOf = (record: object) => {
+  const keys = Object.keys(record);
+  const named = keys.filter((key) => FIELD_NAME.test(key)).slice(0, 20);
+  const others = keys.length - named.length;
+  return `${named.join(", ") || "none"}${others > 0 ? ` and ${others} more` : ""}`;
+};
+
+/**
+ * What an answer looked like, by its entry count and key names only, never a value: Artelo's answers can hold buyers'
+ * names and addresses, and this goes to a log or a terminal (as spec 25 assumption 9 reads an unreadable webhook)
+ */
+export function shapeOf(value: unknown): string {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return `${value.length} ${value.length === 1 ? "entry" : "entries"}${first && typeof first === "object" && !Array.isArray(first) ? `, the first with keys ${keysOf(first)}` : ""}`;
+  }
+  if (value && typeof value === "object") return `an object with keys ${keysOf(value)}`;
+  return value === null ? "nothing readable" : `a ${typeof value}`;
+}

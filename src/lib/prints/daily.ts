@@ -1,23 +1,17 @@
-import { artelo, shipmentsColumn, type ArteloOrder } from "./artelo";
+import { artelo, hasWebhook, readWebhooks, shapeOf, shipmentsColumn, type ArteloOrder } from "./artelo";
 import { REFUND_REASON } from "./artelo-status";
 import { applyArteloUpdate, statusWord } from "./artelo-updates";
 import type { PrintConfig, PrintDeps } from "./config";
 import { mailAdmin } from "./mail";
-import { lookUp, mailNow } from "./place";
+import { askArtelo, mailNow } from "./place";
 import { writeSetting } from "./store";
 
 // The cron's daily jobs beside the exchange rate (spec 18.6 step 5), and the stranded-refund lookup (ADR-0026)
 
 export const webhookUrl = (config: PrintConfig) => `${config.siteOrigin}/api/prints/artelo`;
 
-/** Get Webhooks' list: an array, or one under webhooks, data or items; null for anything else */
-export function webhooksList(value: unknown): unknown[] | null {
-  if (Array.isArray(value)) return value;
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  for (const key of ["webhooks", "data", "items"]) if (Array.isArray(record[key])) return record[key] as unknown[];
-  return null;
-}
+/** Get Webhooks' list: it lives in artelo.ts, which bun run prints:webhook can import under plain Node */
+export { webhooksList } from "./artelo";
 
 /** Artelo lists a webhook with our URL and topic, or /admin and an email say it's missing; true once it has decided */
 export async function checkArteloWebhook(deps: PrintDeps): Promise<boolean> {
@@ -28,13 +22,14 @@ export async function checkArteloWebhook(deps: PrintDeps): Promise<boolean> {
     console.error("prints: couldn't list artelo's webhooks", result.status ?? "no answer");
     return false;
   }
-  const list = webhooksList(result.body);
-  if (!list) {
-    console.error("prints: artelo's webhook list couldn't be read");
+  // An answer this site can't read (no list, or entries with no url) decides nothing: it must never read as missing
+  const hooks = readWebhooks(result.body);
+  if (!hooks) {
+    console.error("prints: artelo's webhook list couldn't be read:", shapeOf(result.body));
     return false;
   }
   const url = webhookUrl(deps.config);
-  const found = list.some((hook) => !!hook && typeof hook === "object" && (hook as Record<string, unknown>).url === url && (hook as Record<string, unknown>).topic === "OrderStatusChange");
+  const found = hasWebhook(hooks, url);
   await writeSetting(deps.db, "artelo_webhook_missing", found ? "0" : "1", deps.now());
   if (!found) {
     // At most once a day: the check itself runs at most every 20 hours
@@ -92,6 +87,22 @@ async function flagStranded(deps: PrintDeps, id: string, found: ArteloOrder): Pr
 }
 
 /**
+ * Artelo answered entries for our id, none of which can be matched to this order: almost certainly it is there under
+ * another field name. Without Artelo's id, it goes to needs_attention with the refund reason all the same, so George's
+ * email goes and he looks for it in Artelo; admin's retry never places a fully refunded order
+ */
+async function flagUnmatched(deps: PrintDeps, id: string): Promise<void> {
+  const now = deps.now();
+  const flagged = await deps.db
+    .prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, lease_until = NULL, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL")
+    .bind(REFUND_REASON, now, now, id)
+    .run();
+  if (flagged.meta.changes === 0) return;
+  console.error("prints: refunded order", id, "has something at artelo that can't be matched to it, so it needs attention: look for it there");
+  await mailNow(deps);
+}
+
+/**
  * Artelo clearly hasn't got it: a lapsed lease is let go (a live one is an attempt still in flight, whose own outcome
  * handles the order), and the check time sends it to the back of the line, so a run's bound never hides the rest
  */
@@ -103,11 +114,17 @@ async function clearStranded(deps: PrintDeps, id: string): Promise<void> {
     .run();
 }
 
+/** An unreadable or failed lookup changes nothing but the check time, so twenty that never answer can't hold every slot */
+async function stampStranded(deps: PrintDeps, id: string): Promise<void> {
+  await deps.db.prepare("UPDATE print_orders SET status_checked_at = ? WHERE id = ? AND status = 'refunded' AND artelo_order_id IS NULL").bind(deps.now(), id).run();
+}
+
 /**
  * The daily stranded-refund lookup (ADR-0026): every refunded order with no Artelo id paid in the last 30 days is looked up
- * at Artelo with placement's own fail-closed lookup, at most twenty a run, the longest unchecked first. One Artelo has is
- * flagged for George; one it clearly hasn't loses a lapsed lease; an unreadable lookup changes nothing and is asked again
- * tomorrow. True once it has run; a write that throws still lets the rest go, then fails the step so the cron logs it
+ * at Artelo with placement's own fail-closed lookup, at most twenty a run, the longest unchecked first. One Artelo has, or
+ * answers for without a match, is flagged for George; one it clearly hasn't loses a lapsed lease; an unreadable lookup
+ * changes nothing but the check time and is asked again tomorrow. True once it has run; a write that throws still lets
+ * the rest go, then fails the step so the cron logs it
  */
 export async function lookUpStrandedRefunds(deps: PrintDeps, pause: (ms: number) => Promise<void> = sleep): Promise<boolean> {
   if (!deps.config.secrets.ARTELO_API_KEY) return true;
@@ -118,17 +135,16 @@ export async function lookUpStrandedRefunds(deps: PrintDeps, pause: (ms: number)
   let threw = 0;
   for (const [index, { id }] of (results as unknown as { id: string }[]).entries()) {
     if (index > 0) await pause(STRANDED_PAUSE_MS);
-    let found: ArteloOrder | null;
     try {
-      found = await lookUp(deps, id);
-    } catch (error) {
-      // The lookup's own messages name a status, never anything personal
-      console.error("prints: couldn't look up refunded order", id, "at artelo; tomorrow's check will ask again:", error instanceof Error ? error.message : typeof error);
-      continue;
-    }
-    try {
-      if (found) await flagStranded(deps, id, found);
-      else await clearStranded(deps, id);
+      const answer = await askArtelo(deps, id);
+      if (answer.kind === "found") await flagStranded(deps, id, answer.order);
+      else if (answer.kind === "unmatched") await flagUnmatched(deps, id);
+      else if (answer.kind === "absent") await clearStranded(deps, id);
+      else {
+        // The lookup's own reasons name a status, never anything personal
+        console.error("prints: couldn't look up refunded order", id, "at artelo; tomorrow's check will ask again:", answer.reason);
+        await stampStranded(deps, id);
+      }
     } catch (error) {
       threw += 1;
       console.error("prints: couldn't record artelo's answer about refunded order", id, error instanceof Error ? error.name : typeof error);
