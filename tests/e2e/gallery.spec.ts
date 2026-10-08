@@ -132,6 +132,32 @@ test.describe("with JavaScript", () => {
     expect(queries).toEqual(["?by=entry&before=1781392500&limit=4"]);
   });
 
+  test("keys that don't scroll fetch nothing: Tab, Shift and Cmd+A", async ({ page }) => {
+    const queries: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/photos") queries.push(request.url());
+    });
+    await page.goto("/photos");
+    const gap = await page.locator("a.more").evaluate((link) => link.getBoundingClientRect().top - window.innerHeight);
+    expect(gap).toBeLessThan(800);
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift");
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.press("Control+a");
+    await page.waitForTimeout(500);
+    expect(queries).toEqual([]);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(2);
+  });
+
+  test("an arrow key starts it, as does focusing the older entries link", async ({ page }) => {
+    await page.goto("/photos");
+    await page.keyboard.press("ArrowDown");
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    await page.goto("/photos");
+    await page.locator("a.more").focus();
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+  });
+
   test("nearing the end loads the next entries in place once and ends the list", async ({ page }) => {
     const queries: string[] = [];
     page.on("request", (request) => {
@@ -209,6 +235,24 @@ test.describe("with JavaScript", () => {
     expect(rendered).toContain("(max-width: 680px)");
   });
 
+  test("a cloned entry with several frames and no place has exactly the server's markup too", async ({ page, baseURL }) => {
+    const shape = (root: Element) => {
+      const walk = (el: Element): unknown => [el.tagName.toLowerCase(), [...el.attributes].map((a) => `${a.name}=${a.value}`).sort(), el.children.length > 0 ? [...el.children].map(walk) : el.textContent];
+      return JSON.stringify(walk(root));
+    };
+    // The cursor after the first post, so the batch starts at fixture-b, which the page already holds as rendered by the server
+    const first = (await (await page.request.get(`${baseURL}/api/photos?by=entry&limit=1`)).json()) as { next: number };
+    await page.route((url) => url.pathname === "/api/photos", (route) => route.continue({ url: `${baseURL}/api/photos?by=entry&before=${first.next}&limit=4` }));
+    await page.goto("/photos");
+    await toBottom(page);
+    await expect(page.locator("#post-fixture-b")).toHaveCount(2);
+    const [rendered, cloned] = await page.locator("#post-fixture-b").evaluateAll((all, source) => all.map((el) => new Function("return " + source)()(el)), shape.toString());
+    expect(cloned).toBe(rendered);
+    // Two frames, no place: the numbering and the bare date are in what was compared
+    expect(cloned).toContain("photo 2 of 2 from 14 june 2026");
+    expect(await page.locator("#post-fixture-b .entry-head").nth(1).textContent()).toBe("14.06.26");
+  });
+
   test("a loaded batch takes only the 240s on a phone, as the server's frames do", async ({ page }) => {
     test.skip(page.viewportSize()!.width > 680, "the phone project (a 3× iPhone)");
     await page.goto("/photos", { waitUntil: "networkidle" });
@@ -236,6 +280,21 @@ test.describe("with JavaScript", () => {
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => (window as unknown as { shifts: number }).shifts)).toBeLessThan(0.01);
+  });
+
+  test("a cursor that doesn't advance is a failure: the plain link comes back and nothing more is fetched", async ({ page }) => {
+    let calls = 0;
+    await page.route((url) => url.pathname === "/api/photos", (route) => {
+      calls++;
+      return route.fulfill({ json: { entries: [], next: 1781392500 } });
+    });
+    await page.goto("/photos");
+    await toBottom(page);
+    await expect.poll(() => calls).toBe(1);
+    await expect(page.locator("a.more")).toHaveText("older entries");
+    await expect(page.locator("a.more")).not.toHaveAttribute("aria-disabled");
+    await page.waitForTimeout(300);
+    expect(calls).toBe(1);
   });
 
   test("when a batch fails the link is a plain link again, and nothing more is fetched", async ({ page }) => {

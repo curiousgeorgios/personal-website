@@ -159,6 +159,9 @@ h1 { font-size: clamp(30px, 4.4vw, 40px); font-weight: 500; letter-spacing: -.01
 }
 /* .more-end is the line that stands where the gallery's older entries link would */
 .more, .more-end { margin-top: 12px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
+/* The same height as the link it replaces, so the swap moves nothing; it takes focus from the link without being one */
+.more-end { padding: 4px 0; }
+.more-end:focus-visible { outline: none; }
 .more { background: none; border: 0; cursor: pointer; padding: 4px 0; display: inline-flex; gap: 8px; align-items: center; }
 /* Drawn chevron: DM Mono has no arrow glyphs */
 .more .chev { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform 220ms var(--ease-out); }

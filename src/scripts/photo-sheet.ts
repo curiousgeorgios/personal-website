@@ -65,7 +65,12 @@ function start(more: HTMLAnchorElement, list: HTMLOListElement, entryTemplate: H
       const response = await fetch(`/api/photos?by=entry&before=${more.dataset.next}&limit=${BATCH}`);
       if (!response.ok) throw new Error(`the gallery answered ${response.status}`);
       const page = (await response.json()) as { entries: ApiEntry[]; next: number | null };
-      for (const data of page.entries) list.appendChild(entry(data));
+      // A cursor that doesn't move would fetch the same page for ever, so it counts as a failure
+      if (page.next !== null && String(page.next) === more.dataset.next) throw new Error("the gallery's cursor didn't advance");
+      // Built whole, then appended once: a bad entry halfway leaves the list as it was, so the plain link repeats nothing
+      const batch = document.createDocumentFragment();
+      for (const data of page.entries) batch.appendChild(entry(data));
+      list.appendChild(batch);
       if (page.next === null) {
         observer.disconnect();
         const end = document.createElement("p");
@@ -99,13 +104,23 @@ function start(more: HTMLAnchorElement, list: HTMLOListElement, entryTemplate: H
     if (busy) event.preventDefault();
   });
 
-  // Watching starts with the visitor's first scroll, by wheel, touch or keyboard. A two-entry page can already have the
-  // link inside the 800px margin on load, and observing then would fetch a batch nobody asked for
-  const begin = () => {
-    for (const type of ["scroll", "wheel", "touchmove", "keydown"]) removeEventListener(type, begin);
+  // Watching starts with the visitor's first sign of scrolling, never on load: a two-entry page can already have the link
+  // inside the 800px margin, and observing then would fetch a batch nobody asked for. A scroll, wheel or touch move is
+  // one; so is a key that scrolls (not Tab, Shift or a chord such as Cmd+F) and focus arriving on the link itself.
+  // Wheel, touch and keys count because a page too short to scroll fires no scroll event
+  const SCROLLING_KEYS = new Set(["PageDown", "PageUp", "End", "Home", " ", "ArrowDown", "ArrowUp"]);
+  const events = ["scroll", "wheel", "touchmove", "keydown"] as const;
+  const begin = (event: Event) => {
+    if (event.type === "keydown") {
+      const key = event as KeyboardEvent;
+      if (key.ctrlKey || key.metaKey || key.altKey || !SCROLLING_KEYS.has(key.key)) return;
+    }
+    for (const type of events) removeEventListener(type, begin);
+    more.removeEventListener("focusin", begin);
     observer.observe(more);
   };
-  for (const type of ["scroll", "wheel", "touchmove", "keydown"]) addEventListener(type, begin, { passive: true });
+  for (const type of events) addEventListener(type, begin, { passive: true });
+  more.addEventListener("focusin", begin);
 }
 
 const more = document.querySelector<HTMLAnchorElement>("a.more[data-next]");
