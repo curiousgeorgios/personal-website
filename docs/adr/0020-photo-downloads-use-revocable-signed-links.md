@@ -12,6 +12,8 @@ The token is a purpose-specific HS256 JWT signed with a 32-byte Worker secret. I
 
 Amended 2026-10-08 at George's direction: people get full-resolution access only through a catalogue-wide link, and one link opens every published photograph. The owner screen issues and revokes catalogue links only. A photo-scoped grant is used purely internally, as the short-lived file link the site gives Artelo for a paid print order (ADR-0021), never as a link a person receives. Ordering a print needs no link at all.
 
+A photograph can be published only once its post exists and its master and every preview (240, 480, 960 and 1600, in AVIF and WebP) are verified in storage; otherwise publishing refuses with the reason, because the public catalogue lists photographs through their posts and a postless one would be published yet invisible.
+
 Owners can issue and revoke links with a CLI, without Access, or through new endpoints inside the website's existing owner-only administration. This does not introduce an Access application for photography recipients. The existing site administration's authentication is outside this change.
 
 ## Consequences

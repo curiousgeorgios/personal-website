@@ -16,7 +16,7 @@ Amended 2026-10-08 at George's direction: the place lookup uses Apple's geocoder
 
 ## Consequences
 
-Entries read like the log ("14.02.25 · bondi, sydney") without the site holding anything that pinpoints an address. Photos without GPS simply show no place. Geocoding needs macOS and a network connection to Apple's geocoding service, and runs only during preparation, like the RAW rendering already does. A place that is too revealing for a particular post has to be caught by George and edited or hidden.
+A lookup that fails on a later import never erases a place found earlier: the import keeps the existing place unless George has edited or cleared it in `/admin`, which always wins. Entries read like the log ("14.02.25 · bondi, sydney") without the site holding anything that pinpoints an address. Photos without GPS simply show no place. Geocoding needs macOS and a network connection to Apple's geocoding service, and runs only during preparation, like the RAW rendering already does. A place that is too revealing for a particular post has to be caught by George and edited or hidden.
 
 ## Alternatives considered
 
