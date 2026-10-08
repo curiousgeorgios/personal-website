@@ -43,6 +43,33 @@ describe("posts", () => {
   });
 });
 
+describe("a place the lookup can't find", () => {
+  test("never replaces one it found, but a place cleared in /admin stays cleared", async () => {
+    await upsertPosts(db, [post()]);
+    await upsertPosts(db, [post({ place: null })]);
+    expect(await postRowOf("postA")).toMatchObject({ place: "bondi beach, sydney" });
+    await db.prepare("UPDATE photo_posts SET place = NULL, place_edited = 1 WHERE collection = 'postA'").run();
+    await upsertPosts(db, [post({ place: "bondi beach, sydney" })]);
+    expect(await postRowOf("postA")).toMatchObject({ place: null, place_edited: 1 });
+  });
+});
+
+describe("a post whose time another post already has", () => {
+  test("is refused by name, before anything is written", async () => {
+    await upsertPosts(db, [post()]);
+    const other = post({ collection: "postB" });
+    const fresh = post({ collection: "postC", publishedAt: "2025-03-03T10:00:00+11:00" });
+    await expect(upsertPosts(db, [fresh, other])).rejects.toThrow("Post postB has the same time as postA, already in the database");
+    expect(await postRowOf("postC")).toBeNull();
+    expect(await postRowOf("postB")).toBeNull();
+  });
+
+  test("lets a post keep its own time on a re-import", async () => {
+    await upsertPosts(db, [post()]);
+    await expect(upsertPosts(db, [post()])).resolves.toBeUndefined();
+  });
+});
+
 describe("photographs", () => {
   beforeEach(async () => {
     await upsertPosts(db, [post()]);

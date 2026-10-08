@@ -1,9 +1,10 @@
 // The import's writes to D1 (spec 7.3): posts first, because every public query joins a photograph to its post (spec 8).
 
-// The time and date always; the place only until George edits it in /admin (place_edited)
+// The time and date always; the place only until George edits it in /admin (place_edited). A place the lookup can't find
+// never replaces one it found; clearing a place in /admin sets place_edited, so that stays cleared.
 const POST_UPSERT = `INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES (?, ?, ?, ?)
   ON CONFLICT(collection) DO UPDATE SET published_at = excluded.published_at, published_on = excluded.published_on,
-  place = CASE WHEN photo_posts.place_edited = 1 THEN photo_posts.place ELSE excluded.place END`;
+  place = CASE WHEN photo_posts.place_edited = 1 THEN photo_posts.place ELSE COALESCE(excluded.place, photo_posts.place) END`;
 
 // A title comes from the manifest only when the row is first inserted, then only from /admin (spec 2.2). A changed master
 // is unpublished; an unchanged one keeps its publication.
@@ -19,6 +20,12 @@ export const postRow = (post) => [post.collection, Math.floor(Date.parse(post.pu
 
 export async function upsertPosts(db, posts) {
   if (posts.length === 0) return;
+  // published_at is unique: name the clashing post here rather than let D1's constraint error abort the batch unexplained
+  for (const post of posts) {
+    const [, seconds] = postRow(post);
+    const other = await db.prepare("SELECT collection FROM photo_posts WHERE published_at = ? AND collection != ?").bind(seconds, post.collection).first();
+    if (other) throw new Error(`Post ${post.collection} has the same time as ${other.collection}, already in the database`);
+  }
   await db.batch(posts.map((post) => db.prepare(POST_UPSERT).bind(...postRow(post))));
 }
 
