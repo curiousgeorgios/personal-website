@@ -25,6 +25,7 @@ describe("sending", () => {
       subject: "hi", text: "one <two>\n\nthree", html: "<p>one &lt;two&gt;</p>\n<p>three</p>",
     });
     expect(mailHtml("a\nb")).toBe("<p>a<br>b</p>");
+    expect(mailHtml('fish & "chips"')).toBe("<p>fish &amp; &quot;chips&quot;</p>");
   });
 
   test("a test build posts to the sink instead; a failure is logged with what it was about and nothing else", async () => {
@@ -41,6 +42,25 @@ describe("sending", () => {
     expect(await sendMail(broken, { to: "buyer@example.com", subject: "s", text: "t" }, "shipped email for order x")).toBe(false);
     expect(logs()).toContain("prints: couldn't send the shipped email for order x");
     expect(logs()).not.toContain("buyer@example.com");
+  });
+
+  test("a provider's error never puts the recipient in the log, in any case or percent-encoded", async () => {
+    const logs = captureLogs();
+    const { db } = await mailDeps();
+    for (const quoted of ["Buyer@Example.com", "BUYER@EXAMPLE.COM", "buyer%40example.com", "<buyer@example.com>"]) {
+      const broken = testDeps(db, { email: { send: vi.fn(async () => { throw new Error(`no such mailbox ${quoted}.`); }) } as unknown as SendEmail });
+      expect(await sendMail(broken, { to: "buyer@example.com", subject: "s", text: "t" }, "a test email")).toBe(false);
+    }
+    expect(logs()).toContain("no such mailbox the recipient");
+    expect(logs().toLowerCase()).not.toMatch(/buyer(@|%40)example/);
+  });
+
+  test("a line break in the recipient or subject can't start another header", async () => {
+    const { email, deps } = await mailDeps();
+    await sendMail(deps, { to: "buyer@example.com\r\nBcc: x@example.com", subject: "hi\nBcc: y@example.com", text: "t" }, "a test email");
+    const sent = email.send.mock.calls[0] as unknown as [{ to: string; subject: string }];
+    expect(sent[0].to).not.toMatch(/[\r\n]/);
+    expect(sent[0].subject).not.toMatch(/[\r\n]/);
   });
 });
 
@@ -89,15 +109,97 @@ describe("due mail", () => {
     expect(await db.prepare("SELECT shipped_email_at FROM print_orders").first("shipped_email_at")).toBe(NOW);
   });
 
-  test("no email from stripe, or stripe unreachable, sends nothing and leaves it due", async () => {
-    captureLogs();
+  test("no email from stripe, or stripe unreachable, sends nothing and leaves it due; the log names the order", async () => {
+    const logs = captureLogs();
     for (const handler of [stripeSession(null), () => json({}, 503)] as Handler[]) {
       const { db, email, deps } = await mailDeps({ "GET https://stripe.test/v1/checkout/sessions/cs_test_none": handler });
-      await insertOrder(db, { status: "shipped", stripe_session_id: "cs_test_none" });
+      const id = await insertOrder(db, { status: "shipped", stripe_session_id: "cs_test_none" });
       await sendDueMail(deps);
       expect(email.send).not.toHaveBeenCalled();
       expect(await db.prepare("SELECT shipped_email_at FROM print_orders").first("shipped_email_at")).toBeNull();
+      expect(logs()).toContain(`prints: no buyer email from stripe for order ${id}`);
     }
+  });
+
+  test("an order with no stripe session says so, and is given back", async () => {
+    const logs = captureLogs();
+    const { db, email, deps } = await mailDeps();
+    const id = await insertOrder(db, { status: "shipped", stripe_session_id: null });
+    await sendDueMail(deps);
+    expect(email.send).not.toHaveBeenCalled();
+    expect(logs()).toContain(`prints: no stripe session recorded for order ${id}`);
+    expect(await db.prepare("SELECT shipped_email_at FROM print_orders").first("shipped_email_at")).toBeNull();
+  });
+
+  test("a shipped email still due when the order has been delivered goes", async () => {
+    const { db, email, deps } = await mailDeps({ "GET https://stripe.test/v1/checkout/sessions/cs_test_late": stripeSession("buyer@example.com") });
+    await insertOrder(db, { status: "delivered", stripe_session_id: "cs_test_late", shipments: SHIPMENTS });
+    await sendDueMail(deps);
+    await sendDueMail(deps);
+    expect(email.send).toHaveBeenCalledTimes(1);
+  });
+
+  test("tracking keeps only https links and one line each of carrier and number", async () => {
+    const { db } = await mailDeps();
+    const id = await insertOrder(db, { status: "shipped" }, [["fixture-01", "small", "oak", 1]]);
+    const lines = (await orderLines(db, [id])).get(id)!;
+    const text = shippedText(lines, [
+      { carrier: "ups\nBcc: x", number: "1Z  9", url: "https://www.ups.com/track?n=1" },
+      { carrier: "dhl", number: "5", url: "javascript:alert(1)" },
+      { carrier: "post", number: "7", url: "http://insecure.example/7" },
+      { carrier: "x", number: "8", url: "https://a.example/ b" },
+    ], "https://x/page");
+    expect(text).toContain("tracking: ups Bcc: x 1Z 9 https://www.ups.com/track?n=1\ntracking: dhl 5\ntracking: post 7\ntracking: x 8\n\n");
+  });
+});
+
+describe("claims", () => {
+  test("a throw after the claim gives it back; the run's other emails still go and the next run sends the rest", async () => {
+    const logs = captureLogs();
+    const { db, email, fake } = await mailDeps({ "GET https://stripe.test/v1/checkout/sessions/cs_test_flaky": stripeSession("buyer@example.com") });
+    const shipped = await insertOrder(db, { id: "01k6x00000000000000000000a", status: "shipped", stripe_session_id: "cs_test_flaky", shipments: SHIPMENTS, updated_at: NOW - 30 });
+    await insertOrder(db, { id: "01k6x00000000000000000000b", status: "needs_attention", attention_reason: "stuck", updated_at: NOW - 20 });
+    await insertOrder(db, { id: "01k6x00000000000000000000c", status: "cancelled", admin_notified_at: 0, updated_at: NOW - 10 });
+    let thrown = false;
+    const flaky = new Proxy(db, {
+      get(target, property) {
+        if (property === "batch") return async (...args: Parameters<D1Database["batch"]>) => { if (!thrown) { thrown = true; throw new Error("d1 hiccup"); } return target.batch(...args); };
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const withEmail = { email: email as unknown as SendEmail, fetch: fake.fetch };
+    await sendDueMail(testDeps(flaky, withEmail));
+    expect(email.send).toHaveBeenCalledTimes(2);
+    expect(await db.prepare("SELECT shipped_email_at FROM print_orders WHERE id = ?").bind(shipped).first("shipped_email_at")).toBeNull();
+    expect(logs()).toContain(`for order ${shipped}`);
+    expect(logs()).not.toContain("hiccup");
+    await sendDueMail(testDeps(db, withEmail));
+    expect(email.send).toHaveBeenCalledTimes(3);
+    expect(email.send).toHaveBeenLastCalledWith(expect.objectContaining({ to: "buyer@example.com" }));
+    expect(await db.prepare("SELECT shipped_email_at FROM print_orders WHERE id = ?").bind(shipped).first("shipped_email_at")).toBe(NOW);
+  });
+
+  test("an in-flight claim younger than 15 minutes is left alone; an older one is claimed again and sent once", async () => {
+    const { db, email, deps } = await mailDeps({ "GET https://stripe.test/v1/checkout/sessions/cs_test_fly": stripeSession("buyer@example.com") });
+    await insertOrder(db, { id: "01k6x00000000000000000000a", status: "shipped", stripe_session_id: "cs_test_fly", shipments: SHIPMENTS, shipped_email_at: -(NOW - 100) });
+    await insertOrder(db, { id: "01k6x00000000000000000000b", status: "cancelled", admin_notified_at: -(NOW - 100) });
+    await sendDueMail(deps);
+    expect(email.send).not.toHaveBeenCalled();
+    await db.prepare("UPDATE print_orders SET shipped_email_at = shipped_email_at + 900, admin_notified_at = admin_notified_at + 900").run();
+    await sendDueMail(deps);
+    await sendDueMail(deps);
+    expect(email.send).toHaveBeenCalledTimes(2);
+    expect((await db.prepare("SELECT shipped_email_at, admin_notified_at FROM print_orders ORDER BY id").all()).results).toEqual([{ shipped_email_at: NOW, admin_notified_at: null }, { shipped_email_at: null, admin_notified_at: NOW }]);
+  });
+
+  test("two runs at once send an email once", async () => {
+    const { db, email, deps } = await mailDeps({ "GET https://stripe.test/v1/checkout/sessions/cs_test_race": stripeSession("buyer@example.com") });
+    email.send.mockImplementation(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); return { messageId: "m" }; });
+    await insertOrder(db, { status: "shipped", stripe_session_id: "cs_test_race", shipments: SHIPMENTS });
+    await insertOrder(db, { id: "01k6x00000000000000000000b", status: "needs_attention", attention_reason: "stuck" });
+    await Promise.all([sendDueMail(deps), sendDueMail(deps)]);
+    expect(email.send).toHaveBeenCalledTimes(2);
   });
 });
 

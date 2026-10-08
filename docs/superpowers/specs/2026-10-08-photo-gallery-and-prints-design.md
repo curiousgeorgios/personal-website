@@ -599,11 +599,11 @@ Artelo status to order status:
 
 Cloudflare Email Service through the `send_email` binding `EMAIL`, from `PRINT_FROM_EMAIL` (`prints@curiousgeorge.dev`, name `george vlachos`), with `replyTo: hello@curiousgeorge.dev`, always with both `text` and a plain `html` version.
 
-- **Shipped**, to the buyer, once (`shipped_email_at` set in the same statement that claims the send): the address is fetched from the Stripe session at send time (`customer_details.email`) and never stored. Subject `your prints are on their way` (`your print is on its way` for one). Body: `hi, your prints have left the printer:` then one line per print (`<name> · medium · oak frame`), then one line per shipment (`tracking: <carrier> <number> <tracking url>`), then `you can check on them here: <order page url>. thanks for buying them. - george`. The order page URL is rebuilt with the view key of 17.2.
+- **Shipped**, to the buyer, once (`shipped_email_at`: the claim marks the email in flight, the send marks it sent, and an in-flight claim older than 15 minutes is retried, so a crash costs a rare duplicate and never a lost email): the address is fetched from the Stripe session at send time (`customer_details.email`) and never stored. Subject `your prints are on their way` (`your print is on its way` for one). Body: `hi, your prints have left the printer:` then one line per print (`<name> · medium · oak frame`), then one line per shipment (`tracking: <carrier> <number> <tracking url>`), then `you can check on them here: <order page url>. thanks for buying them. - george`. The order page URL is rebuilt with the view key of 17.2.
 - **Needs attention**, to `ADMIN_EMAIL`, once each time an order enters `needs_attention` (`attention_notified_at`, cleared when it leaves): subject `print order <id> needs attention`, body the reason and `<SITE_ORIGIN>/admin/#orders`.
 - **Paid without a webhook** (18.6), **cancelled by Artelo** and **Artelo webhook missing** (at most once a day), to `ADMIN_EMAIL`.
 - Receipts are Stripe's free receipts, which show the payment description with the GST sentence (17.1).
-- A failed send is logged with the order id and retried by the next cron run while the guard column is still empty (the claim is released on failure).
+- A failed send is logged with the order id and retried by the next cron run: the claim is released on failure, so the guard column is empty again.
 
 ### 18.5 The order page, /prints/<order id>?key=…
 
