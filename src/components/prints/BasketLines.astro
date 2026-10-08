@@ -1,0 +1,28 @@
+---
+import { MAX_PRINTS } from "../../lib/prints/basket";
+import { printLine } from "../../lib/prints/catalogue";
+import { aud } from "../../lib/prints/money";
+import type { ResolvedBasket } from "../../lib/prints/store";
+
+// The basket's lines (spec 15.2): each change is a plain link, so it clears any quote; the browser's autofill refills the address
+interface Props {
+  basket: ResolvedBasket;
+}
+
+const { basket } = Astro.props;
+const change = (kind: "more" | "remove", line: number) => `/basket?items=${basket.items}&${kind}=${line}`;
+---
+<ol class="basket-lines">
+  {basket.lines.map((line) => (
+    <li class="basket-line">
+      {/* Eager: a basket holds at most ten, and their width and height keep the layout still. Each sits in an 88px box, so the lines' text starts in one column whatever the photo's shape */}
+      <span class="line-thumb">{line.thumb && <img src={line.thumb.url} width={line.thumb.width} height={line.thumb.height} alt="" loading="eager" decoding="async" />}</span>
+      <div>
+        <p class="line-name">{line.name}</p>
+        <p class="line-what">{printLine(line.tier, line.size, line.frame)}{line.quantity > 1 && ` × ${line.quantity}`} · {aud(line.unitAmount * line.quantity)}</p>
+        <p class="line-links">{basket.count < MAX_PRINTS && <><a href={change("more", line.line)}>one more</a> · </>}<a href={change("remove", line.line)}>remove one</a></p>
+      </div>
+    </li>
+  ))}
+</ol>
+<p class="basket-total">prints {aud(basket.printTotal)}</p>

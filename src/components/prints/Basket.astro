@@ -1,0 +1,42 @@
+---
+import Row from "../Row.astro";
+import AddressForm from "./AddressForm.astro";
+import BasketLines from "./BasketLines.astro";
+import QuoteTotal from "./QuoteTotal.astro";
+import { itemsQuery } from "../../lib/prints/basket";
+import type { BasketView } from "../../lib/prints/basket-page";
+import "../../styles/prints.css";
+
+// The basket page (spec 15.2): no script; every form posts to the basket's own URL, its items in the query string
+interface Props {
+  view: BasketView;
+}
+
+const { view } = Astro.props;
+const { basket } = view;
+const action = `/basket${itemsQuery(basket.items)}`;
+---
+<main class="book basket">
+  <Row label="basket" head>
+    <h1>your basket</h1>
+    <p class="intro">this basket lives in the address bar: bookmark or share this page to keep it.</p>
+    <p class="where"><a href={`/photos${itemsQuery(basket.items)}`}>keep looking</a></p>
+  </Row>
+  <Row label="prints" id="basket-prints">
+    {view.notes.map((note) => <p class="basket-note" role="status">{note}</p>)}
+    {basket.count === 0 ? (
+      <p class="empty">your basket is empty. <a href="/photos">find a photo you like.</a></p>
+    ) : (
+      <>
+        <BasketLines basket={basket} />
+        {!view.open && <p class="basket-closed">prints are closed for now.</p>}
+      </>
+    )}
+  </Row>
+  {basket.count > 0 && view.open && (
+    <Row label="deliver to" id="deliver-to"><AddressForm action={action} address={view.address} errors={view.errors} /></Row>
+  )}
+  {basket.count > 0 && view.open && view.quote && (
+    <Row label="total" id="total"><QuoteTotal action={action} quote={view.quote} address={view.address} gst={view.gst} /></Row>
+  )}
+</main>

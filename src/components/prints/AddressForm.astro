@@ -1,0 +1,51 @@
+---
+import type { Address, AddressErrors, AddressField } from "../../lib/prints/address";
+import { countryOptions } from "../../lib/prints/countries";
+
+// The address form (spec 15.4): shipping autocomplete tokens so the browser fills it from its own store; the address
+// travels only in this form's body, never in its action's query string
+interface Props {
+  action: string;
+  address: Address;
+  errors: AddressErrors & { form?: string };
+}
+
+const { action, address, errors } = Astro.props;
+const FIELDS: { name: AddressField; label: string; autocomplete: string; max: number; required: boolean }[] = [
+  { name: "name", label: "full name", autocomplete: "shipping name", max: 100, required: true },
+  { name: "line1", label: "street address", autocomplete: "shipping address-line1", max: 100, required: true },
+  { name: "line2", label: "apartment, unit or building", autocomplete: "shipping address-line2", max: 100, required: false },
+  { name: "city", label: "city or suburb", autocomplete: "shipping address-level2", max: 60, required: true },
+  { name: "state", label: "state or region", autocomplete: "shipping address-level1", max: 60, required: false },
+  { name: "postcode", label: "postcode", autocomplete: "shipping postal-code", max: 20, required: false },
+];
+const describedBy = (name: AddressField) => (errors[name] ? `deliver-${name}-error` : undefined);
+---
+<form method="post" action={action} id="deliver" class="basket-form">
+  {errors.form && <p class="basket-error" role="alert">{errors.form}</p>}
+  <input type="hidden" name="intent" value="quote" />
+  {FIELDS.map((field) => (
+    <div class:list={["field", { invalid: errors[field.name] }]}>
+      <label for={`deliver-${field.name}`}>{field.label}</label>
+      <input id={`deliver-${field.name}`} name={field.name} type="text" value={address[field.name]} autocomplete={field.autocomplete} maxlength={field.max}
+        required={field.required} aria-invalid={errors[field.name] ? "true" : undefined} aria-describedby={describedBy(field.name)} />
+      {errors[field.name] && <p class="basket-error" id={`deliver-${field.name}-error`}>{errors[field.name]}</p>}
+    </div>
+  ))}
+  <div class:list={["field", { invalid: errors.country }]}>
+    <label for="deliver-country">country</label>
+    <select id="deliver-country" name="country" autocomplete="shipping country" required aria-invalid={errors.country ? "true" : undefined} aria-describedby={describedBy("country")}>
+      <option value="">choose a country</option>
+      {countryOptions().map(([code, name]) => <option value={code} selected={code === address.country}>{name}</option>)}
+    </select>
+    {errors.country && <p class="basket-error" id="deliver-country-error">{errors.country}</p>}
+  </div>
+  <div class:list={["field", { invalid: errors.phone }]}>
+    <label for="deliver-phone">phone</label>
+    <input id="deliver-phone" name="phone" type="tel" value={address.phone} autocomplete="shipping tel" maxlength={20} required
+      aria-invalid={errors.phone ? "true" : undefined} aria-describedby={describedBy("phone")} />
+    {errors.phone && <p class="basket-error" id="deliver-phone-error">{errors.phone}</p>}
+  </div>
+  <p class="prints-hint">this address goes to stripe and artelo, to quote and deliver your prints. this site doesn't keep it.</p>
+  <button type="submit" class="print-button">quote delivery</button>
+</form>

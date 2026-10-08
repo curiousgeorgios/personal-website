@@ -51,5 +51,18 @@ function start() {
   }).listen(PORT, "127.0.0.1", () => console.log(`print stand-in on ${STAND_IN}`));
 }
 
+// Price Check (spec 23.3): US$30.00 freight for any basket, US$40.00 production a print, US$4.20 sales tax for a US
+// address and nothing elsewhere, and a refusal with a message for Antarctica
+route("POST", "/orders/price-check", ({ body, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  const order = JSON.parse(body);
+  received.priceChecks.push(order);
+  const country = order.customerAddress?.country;
+  if (country === "AQ") return [400, { message: "artelo doesn't deliver to antarctica" }];
+  const prints = order.items.reduce((count, item) => count + item.quantity, 0);
+  const tax = country === "US" ? 4.2 : 0;
+  return [200, { orderCosts: { productionCost: 40 * prints, arteloShipping: 30, usSalesTax: tax, gst: 0, hst: 0, pst: 0, total: 40 * prints + 30 + tax } }];
+});
+
 // Routes added by later tasks go above this line
 start();

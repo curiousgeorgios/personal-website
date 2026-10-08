@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import type { Page } from "@playwright/test";
 import { STAND_IN } from "./prints-site";
 
 // Helpers for the print specs. They write only to the prints servers' own stores and read the stand-in.
@@ -17,4 +18,45 @@ export async function standIn<T = unknown>(path: string, init?: RequestInit): Pr
   const response = await fetch(`${STAND_IN}${path}`, init);
   if (!response.ok) throw new Error(`the stand-in answered ${response.status} on ${path}`);
   return (await response.json()) as T;
+}
+
+/** fixture-b-01 medium oak and fixture-b-02 small unframed: $179 + $59 = $238 */
+export const TWO_PRINTS = "fixture-b-01:medium:oak,fixture-b-02:small:unframed";
+
+export interface TestAddress {
+  name: string;
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  postcode: string;
+  country: string;
+  phone: string;
+}
+
+/** A test address in Australia; the name makes it findable among the stand-in's requests */
+export const auAddress = (name: string): TestAddress => ({ name, line1: "12 Example Street", line2: "Unit 3", city: "Bondi Beach", state: "NSW", postcode: "2026", country: "AU", phone: "+61 400 000 000" });
+export const usAddress = (name: string): TestAddress => ({ name, line1: "1600 Example Avenue", line2: "", city: "Arlington", state: "VA", postcode: "22201", country: "US", phone: "+1 202 555 0100" });
+
+/** Its own rate-limit bucket for this test (spec 21.3): the context's page and request both send it */
+export async function asTestClient(page: Page): Promise<string> {
+  const client = `spec-${unique()}`;
+  await page.context().setExtraHTTPHeaders({ "X-Test-Client": client });
+  return client;
+}
+
+export async function fillAddress(page: Page, address: TestAddress) {
+  for (const name of ["name", "line1", "line2", "city", "state", "postcode", "phone"] as const) await page.locator(`#deliver [name="${name}"]`).fill(address[name]);
+  await page.locator('#deliver [name="country"]').selectOption(address.country);
+}
+
+export async function quoteDelivery(page: Page, address: TestAddress) {
+  await fillAddress(page, address);
+  await Promise.all([page.waitForNavigation(), page.getByRole("button", { name: "quote delivery" }).click()]);
+}
+
+/** The Price Checks the stand-in received for this address name */
+export async function priceChecksFor(name: string) {
+  const { priceChecks } = await standIn<{ priceChecks: { customerAddress: Record<string, string>; items: { quantity: number; productInfo: Record<string, unknown> }[] }[] }>("/__requests");
+  return priceChecks.filter((check) => check.customerAddress.name === name);
 }

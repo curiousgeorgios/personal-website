@@ -21,3 +21,29 @@
   .print-button:hover { border-color: color-mix(in oklab, var(--ink) 55%, transparent); }
 }
 .basket-link { margin-top: 8px; }
+
+/* The basket (spec 15.2) */
+.basket-lines { display: grid; gap: 14px; }
+.basket-line { display: flex; gap: 14px; align-items: flex-start; }
+.line-thumb { flex: none; width: 88px; }
+.basket-line img { display: block; width: auto; height: auto; max-width: 88px; max-height: 88px; background: #ecebe5; }
+.line-name { font-size: 16px; }
+.line-what, .line-links { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.line-links { margin-top: 2px; }
+.basket-total { margin-top: 16px; font: 12.5px/1.55 var(--mono); color: var(--ink); }
+.basket-note, .basket-closed { margin-bottom: 12px; color: var(--muted); }
+.basket-form { display: grid; gap: 12px; max-width: 34rem; }
+.basket-form .field { display: grid; gap: 4px; min-width: 0; }
+.basket-form label { font: 12px/1.5 var(--mono); color: var(--muted); }
+/* 16px keeps iOS from zooming into a focused field; the edge is 3:1 against the paper (WCAG 1.4.11), as the admin's */
+.basket-form input:not([type="hidden"]), .basket-form select {
+  font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink);
+  background: var(--mat); border: 1px solid #85857d; border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+.basket-form .invalid input, .basket-form .invalid select { border-color: #a83a24; }
+.basket-form input:focus-visible, .basket-form select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* --red is under 4.5:1 on paper for small text; this darker red is 5.6:1 */
+.basket-error { font-size: 14px; color: #a83a24; }
+.quote-line { font-size: 18px; margin-bottom: 8px; }
+.quote-line + .prints-hint { margin-bottom: 6px; }
+.pay-form { margin-top: 14px; }
