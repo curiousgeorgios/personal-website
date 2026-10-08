@@ -90,9 +90,6 @@ export function stamp(seconds: number): string {
   return `${part.day}.${part.month}.${part.year} ${part.hour}:${part.minute}`;
 }
 
-/** A tracking address worth a link: https only, one token, as the shipped email passes on (spec 18.4) */
-export const trackingHref = (url: string): string | null => (/^https:\/\/\S+$/i.test(url.trim()) ? url.trim() : null);
-
 /** Stripe's dashboard page for a payment, test or live by the order's stored livemode; the id stays one path segment */
 export const refundHref = (order: Pick<AdminOrder, "livemode" | "paymentIntent">): string | null =>
   order.paymentIntent ? `https://dashboard.stripe.com/${order.livemode ? "" : "test/"}payments/${encodeURIComponent(order.paymentIntent)}` : null;

@@ -2,7 +2,8 @@
 import Field from "./Field.astro";
 import { formState } from "../../lib/admin/form-state";
 import type { ActionFailure } from "../../lib/admin/actions";
-import { refundHref, STATUS_WORDS, stamp, trackingHref, type OrdersAdmin } from "../../lib/prints/admin";
+import { refundHref, STATUS_WORDS, stamp, type OrdersAdmin } from "../../lib/prints/admin";
+import { trackingHref } from "../../lib/prints/tracking";
 import { aud, rateText, usd } from "../../lib/prints/money";
 import { formatLogDate } from "../../lib/text";
 

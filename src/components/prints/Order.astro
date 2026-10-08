@@ -4,7 +4,7 @@ import { frameLabel, parseSize, printLine } from "../../lib/prints/catalogue";
 import { countryName } from "../../lib/prints/countries";
 import { aud } from "../../lib/prints/money";
 import { ORDER_STATUS_LINES } from "../../lib/prints/order-page";
-import { trackingHref } from "../../lib/prints/admin";
+import { trackingHref } from "../../lib/prints/tracking";
 import { shipmentsOf, type OrderLine, type OrderRow } from "../../lib/prints/store";
 import { formatLogDate } from "../../lib/text";
 import { sydneyDate } from "../../lib/time";
@@ -23,7 +23,7 @@ const one = lines.reduce((sum, line) => sum + line.quantity, 0) === 1;
 const label = order.delivery_taxed === 1 ? "delivery and destination taxes" : "delivery";
 const status = ORDER_STATUS_LINES[order.status][one ? 1 : 0];
 // Tracking is text from Artelo: it renders escaped, and only an https address becomes a link
-const shipments = order.status === "shipped" ? shipmentsOf(order) : [];
+const shipments = order.status === "shipped" || order.status === "delivered" ? shipmentsOf(order) : [];
 ---
 <main class="book order">
   <Row label="your order" head>

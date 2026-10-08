@@ -103,9 +103,13 @@ describe("the order page", () => {
     expect([...doc.querySelectorAll("a")].filter((link) => /^(javascript|http):/i.test(link.getAttribute("href") ?? ""))).toEqual([]);
   });
 
-  test("a delivered order shows no tracking and a page holds no address or email", async () => {
-    const doc = await render(Order, { ...(await load({ status: "delivered", shipments: JSON.stringify([{ carrier: "ups", number: "1Z", url: "https://example.com" }]) })), gst: GST });
-    expect(doc.querySelector(".tracking")).toBeNull();
+  test("a delivered order keeps its tracking, an order not yet shipped shows none, and a page holds no address or email", async () => {
+    const shipments = JSON.stringify([{ carrier: "ups", number: "1Z", url: "https://example.com/t" }]);
+    const doc = await render(Order, { ...(await load({ status: "delivered", shipments })), gst: GST });
+    expect(text(doc.querySelector(".order-status"))).toBe("delivered. enjoy them.");
+    expect([...doc.querySelectorAll(".tracking li")].map(text)).toEqual(["ups 1Z"]);
+    expect([doc.querySelector(".tracking a")!.getAttribute("href"), doc.querySelector(".tracking a")!.getAttribute("rel")]).toEqual(["https://example.com/t", "noopener noreferrer"]);
+    for (const status of ["paid", "placed", "in_production", "cancelled", "refunded"]) expect((await render(Order, { ...(await load({ status, shipments })), gst: GST })).querySelector(".tracking"), status).toBeNull();
     expect(doc.documentElement.outerHTML).not.toMatch(/@(?!curiousgeorge\.dev)|street|phone/i);
   });
 });

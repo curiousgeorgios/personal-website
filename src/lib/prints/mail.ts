@@ -2,6 +2,7 @@ import { frameLabel } from "./catalogue";
 import type { PrintDeps } from "./config";
 import { getOrder, orderLines, shipmentsOf, type OrderLine, type Shipment } from "./store";
 import { getSession } from "./stripe";
+import { trackingHref } from "./tracking";
 import { orderPageUrl } from "./view-key";
 
 // Emails (spec 18.4), driven by the orders' state: whatever is due goes out from the cron and right after a change. The
@@ -66,7 +67,7 @@ const isSingle = (lines: readonly OrderLine[]) => lines.reduce((sum, line) => su
 /** Artelo's carrier and number are text from outside: one line each, and only an https link is passed on */
 const flat = (text: string) => text.replace(/\s+/g, " ").trim();
 const trackingLine = (shipment: Shipment) => {
-  const link = /^https:\/\/\S+$/i.test(shipment.url.trim()) ? shipment.url.trim() : "";
+  const link = trackingHref(shipment.url) ?? "";
   const parts = [flat(shipment.carrier), flat(shipment.number), link].filter(Boolean);
   return parts.length > 0 ? `tracking: ${parts.join(" ")}` : "";
 };

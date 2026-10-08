@@ -1,6 +1,5 @@
-import { b64url, fromB64url } from "./seal";
 import type { OrderStatus } from "./store";
-import { viewKeyMatches } from "./view-key";
+import { isCanonicalViewKey, viewKeyMatches } from "./view-key";
 
 /** The order page's status line by status, [several prints, one print] (spec 18.5). Buyer words only: never Artelo's message or an internal reason */
 export const ORDER_STATUS_LINES: Record<OrderStatus, [string, string]> = {
@@ -22,20 +21,13 @@ const ORDER_ID = /^[0-9a-hjkmnp-tv-z]{26}$/;
 /** A canonical key (43 characters, 32 bytes, one spelling) that no order has: stands in for any key that isn't one */
 const DECOY_KEY = "A".repeat(43);
 
-/** The same test viewKeyMatches starts with: a key of the one canonical spelling */
-function isCanonicalKey(key: string | null): key is string {
-  if (!key || key.length !== 43) return false;
-  const signature = fromB64url(key);
-  return !!signature && signature.length === 32 && b64url(signature) === key;
-}
-
 /**
  * Whether a request may see an order's page (spec 18.5). One HMAC verification runs whatever arrives: a missing key, a
  * malformed key, a malformed order id, an unknown order id and a wrong key all cost the same, so how long the 404 takes
  * says nothing about whether an order exists. The order is read only after this says yes
  */
 export async function canViewOrder(secret: string, id: string, key: string | null): Promise<boolean> {
-  const canonical = isCanonicalKey(key);
+  const canonical = isCanonicalViewKey(key);
   const matches = await viewKeyMatches(secret, id, canonical ? key : DECOY_KEY);
   return matches && canonical && ORDER_ID.test(id);
 }
