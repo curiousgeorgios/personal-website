@@ -1,4 +1,4 @@
-import { GRANT_ID, PHOTO_ID, type PhotoToken } from "./tokens";
+import { GRANT_ID, PHOTO_ID, signPhotoToken, type PhotoToken } from "./tokens";
 
 export interface Preview {
   key: string;
@@ -178,10 +178,46 @@ export async function photoPageData(db: D1Database, id: string): Promise<PhotoPa
   return { photo: publicPhoto(row, [960, 1600]), publishedAt: row.published_at, index, total: ids.length, previous: ids[index - 1] ?? null, next: ids[index + 1] ?? null };
 }
 
+/** What an active grant says about itself: a print order's grant carries the order (spec 13.3) */
+export interface ActiveGrant {
+  orderId: string | null;
+}
+
+/** The grant behind a verified token when it is still working and matches the token exactly; null otherwise */
+export async function activeGrant(db: D1Database, token: PhotoToken, now: number): Promise<ActiveGrant | null> {
+  const row = await db.prepare("SELECT photo_id, expires_at, revoked_at, order_id FROM photo_download_grants WHERE id = ?").bind(token.grantId)
+    .first<{ photo_id: string | null; expires_at: number; revoked_at: number | null; order_id: string | null }>();
+  if (!row || row.revoked_at !== null || row.expires_at <= now || row.expires_at !== token.expiresAt || row.photo_id !== token.photoId) return null;
+  return { orderId: row.order_id };
+}
+
 export async function grantIsActive(db: D1Database, token: PhotoToken, now: number): Promise<boolean> {
-  const row = await db.prepare("SELECT photo_id, expires_at, revoked_at FROM photo_download_grants WHERE id = ?").bind(token.grantId)
-    .first<{ photo_id: string | null; expires_at: number; revoked_at: number | null }>();
-  return !!row && row.revoked_at === null && row.expires_at > now && row.expires_at === token.expiresAt && row.photo_id === token.photoId;
+  return (await activeGrant(db, token, now)) !== null;
+}
+
+/** A photograph's row whatever its publication: an order's link serves a paid print even if the photo is hidden later (spec 13.3) */
+export async function photoMaster(db: D1Database, id: string): Promise<PhotoRow | null> {
+  if (!PHOTO_ID.test(id)) return null;
+  return db.prepare("SELECT * FROM photos WHERE id = ?").bind(id).first<PhotoRow>();
+}
+
+/**
+ * The internal link Artelo fetches a paid print's master from (spec 18.2 step 4): a photo-scoped grant carrying its
+ * order, signed for `seconds`. Only print fulfilment calls this; no person ever receives the link (ADR-0020 as amended).
+ */
+export async function issueOrderGrant(db: D1Database, secret: string, orderId: string, photoId: string, seconds: number, origin: string, now = Math.floor(Date.now() / 1000)): Promise<string> {
+  const grant = { grantId: crypto.randomUUID(), photoId, expiresAt: now + seconds };
+  const token = await signPhotoToken(secret, grant, now);
+  await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, order_id) VALUES (?, ?, ?, ?)").bind(grant.grantId, photoId, grant.expiresAt, orderId).run();
+  const url = new URL(`/photos/downloads/${photoId}`, origin);
+  url.searchParams.set("token", token);
+  return url.href;
+}
+
+/** Switches off every working grant of one order, once its prints are in production (spec 18.3); returns how many */
+export async function revokeOrderGrants(db: D1Database, orderId: string, now: number): Promise<number> {
+  const result = await db.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE order_id = ? AND revoked_at IS NULL").bind(now, orderId).run();
+  return result.meta.changes;
 }
 
 /**
