@@ -52,6 +52,14 @@ Load-only; each passes when rerun alone. Plan 5's list ([plan 5 follow-ups](2026
 - `tests/e2e/prints-basket.spec.ts:67` (later batches of a carried basket's gallery keep it on their frames): failed once in 87 prints runs and passed 60 of 60 alone (Task 10).
 - `tests/e2e/prints-admin.spec.ts:16` (the buffer) and `:29` (an order Artelo won't take, then retry now): fail only under stress (repeated runs at once), when wrangler's local D1 answers `internal error` to two readers of one store (Task 12).
 
+- `tests/e2e/prints-order.spec.ts:76`: failed once with `SQLITE_BUSY` under full parallel load and passed alone (final fix wave).
+
+## From the final review
+
+- The buyer's order page keeps saying an order is being sorted out after George marks it resolved (`src/lib/prints/order-page.ts`); a resolved order could show a neutral line instead. Parked: resolving is for orders already dealt with outside the site, where George writes to the buyer himself.
+- No test pins the largest valid basket post (about 7,002 bytes) against the 8KB cap in `src/lib/prints/basket-page.ts`; a longer field limit later could cross it unnoticed.
+- `retry now` can act on a page loaded before the order changed. Safe as built: its conditional UPDATE re-checks every eligibility rule, so a stale click does only what a fresh one could.
+
 ## Assumptions to confirm
 
 The [plan](2026-10-08-plan-7-prints.md)'s last section, "Assumptions about Stripe and Artelo", lists each assumption a task depends on, with how it is checked. The three launch answers above are the ones still open beyond spec 25's list.
