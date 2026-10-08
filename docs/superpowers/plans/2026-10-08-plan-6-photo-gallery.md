@@ -22,7 +22,18 @@
 - Never run `wrangler deploy` (except `--dry-run`), any `--remote` command, `bun run photos:import --remote` or `bun run photos:link --remote`; never put a secret in a task. The only signing key in tasks is the admin server's fixture key, `1111…` (64 ones), already in `playwright.config.ts`.
 - `photos:prepare`, the geocoding and `photos:import` run on George's Mac at launch (spec 12). Tasks build and test that tooling with synthetic fixtures in temporary folders; they never open George's Photos library, his prepared assets or the production stores.
 - George never reviews artefacts. Any visual check is done by the implementer and by the task's reviewer, never handed to George.
-- Visual checks: with `bun run seed:photos` done, start `bun run dev:admin` in the background (Astro's dev server on 4321, the local admin bypass, the `.wrangler/state` store), wait for it with `curl --retry 30 --retry-connrefused --retry-delay 1 -sf http://localhost:4321/ -o /dev/null`, then shoot the page at both widths with every `<details>` opened, and open both images before committing:
+- Visual checks run on a throwaway fixture server built from the test build, never on `.wrangler/state` or `.dev.vars`:
+
+  ```bash
+  pkill -f "port 433[0-9]"; bun run build:test
+  rm -rf .wrangler/visual && bunx wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/visual \
+    && node scripts/seed-photo-test.mjs --persist-to .wrangler/visual
+  bunx wrangler dev -c dist/server/wrangler.json --port 4336 --persist-to .wrangler/visual \
+    --var PHOTO_LINK_SECRET:1111111111111111111111111111111111111111111111111111111111111111 &
+  curl --retry 30 --retry-connrefused --retry-delay 1 -sf http://localhost:4336/ -o /dev/null
+  ```
+
+  The test build's admin bypass answers `/admin/` on localhost. Shoot the page at both widths with every `<details>` opened and open both images before committing:
 
   ```bash
   node -e '
@@ -37,14 +48,14 @@
     }
     await browser.close();
   })();
-  ' "http://localhost:4321/photos" "$TMPDIR/photos"
+  ' "http://localhost:4336/photos" "$TMPDIR/photos"
   ```
 
-  Each task names the URL and what to look for. Stop the dev server afterwards.
+  Each task names the URL and what to look for. Afterwards: `pkill -f "port 4336"; rm -rf .wrangler/visual`.
 - No new dependency anywhere in this plan.
 - Run scripts and tests under Node 24 or later (`mise exec node@24 --` outside the home directory); the scripts import `.ts` files through Node's type stripping.
-- The e2e servers: 4331 is the main local server (`.wrangler/state`, seeded with fixtures, now including the photo fixture through `bun run seed:photos`); 4332 has an empty store; 4333 is the admin server with its own store and the fixture signing key, recreated every run; 4334 runs both Workers against a fixture site on 4400. Specs that write use only 4333 and 4334. On 4333 each spec keeps to its own photographs (see "Decisions").
-- Every task ends with `bun run typecheck` at 0 errors and the unit tests passing; tasks that touch pages rebuild with `bun run build:test` and run the e2e specs they name (stop stale servers first with `pkill -f "port 433[1234]"`). Match the existing code style: 2-space indent, double quotes, semicolons, short comments that say why.
+- The e2e servers: 4331 is the main local server (`.wrangler/state`, seeded with fixtures; George's own photo import lives there too, so no task seeds, reads or changes photographs in it); 4332 has an empty store; 4333 is the admin server with its own store and the fixture signing key, recreated every run; 4334 runs both Workers against a fixture site on 4400; 4335 (new, Task 1) has only the photo fixture, recreated every run, for the read-only photo specs. Specs that write use only 4333 and 4334. Visual checks use a sixth, throwaway server on 4336 (above). On 4333 each spec keeps to its own photographs (see "Decisions").
+- Every task ends with `bun run typecheck` at 0 errors and the unit tests passing; tasks that touch pages rebuild with `bun run build:test` and run the e2e specs they name (stop stale servers first with `pkill -f "port 433[0-9]"`). Match the existing code style: 2-space indent, double quotes, semicolons, short comments that say why.
 
 ## Review focus
 
@@ -58,7 +69,7 @@
 
 Recorded so reviewers know they are deliberate:
 
-- **The gallery specs run on the main server (4331).** `bun run seed:photos` seeds spec 11.3's six-post fixture into `.wrangler/state` (in `bun run check` and in CI, Task 1), so the read-only gallery, photo-page, budget and privacy specs never race the admin specs. The seed is idempotent and refuses a store that holds non-fixture photos, so it can never mix with a real local import; if George's local store holds one, the checks run against a fresh `.wrangler/state`.
+- **The read-only photo specs run on a fifth server (4335) whose store holds only spec 11.3's fixture and is recreated every run**, so they never race the admin specs and never touch George's local import in `.wrangler/state` (462 real photographs). The seed is idempotent and still refuses a store that holds non-fixture photos, as a guard against a mistyped `--persist-to`.
 - **On 4333 each spec keeps to its own photographs.** `photos.spec.ts` downloads `fixture-01` and `fixture-02` and publishes and hides `fixture-d-01`; `admin-photos.spec.ts` uses `fixture-b` (publishing and hiding), `fixture-c` (place and title) and `fixture-e` (a failed check); the downloads, links and privacy specs change only grants. Assertions about the catalogue's contents pin those ids, never the whole list.
 - **The fixture's facts** (spec 11.3 left them open): dates `2026-09-27T18:30:00+10:00` (`fixture`), `2026-06-14T09:15:00+10:00` (`fixture-b`), `2026-03-01T12:00:00+11:00` (`fixture-c`), `2025-12-25T08:00:00+11:00` (`fixture-d`), `2025-08-09T16:45:00+10:00` (`fixture-e`) and `2025-02-02T20:27:48+11:00` (`fixture-f`); places `bondi, sydney`, none, `fremantle, perth`, `manly, sydney`, `braddon, canberra` and `valletta, malta`. Only `fixture-01` has a title (`a test photograph`) and only `fixture-c-01` awaits RAW review. The first page's cursor is therefore `1766610000`.
 - **`photo-place.swift` uses MapKit's `MKReverseGeocodingRequest` and reads the five names from the returned map item's `placemark`.** `CLGeocoder` is deprecated in the macOS 26 SDK (and warns), so the spec sends the tool to MapKit; MapKit's new `address` and `addressRepresentations` carry a city and a region but not the suburb, council and state code the city map needs. The map item's `placemark` is the one MapKit object that does, and it carries a deprecation note of its own, so `swiftc` prints exactly one warning, which Task 3 expects. The output fields and the privacy position are the spec's. Compiled and run against synthetic JPEGs while planning (no network for the GPS check).
@@ -73,7 +84,8 @@ Recorded so reviewers know they are deliberate:
 - **The entry API leaves out `publishedAt`.** It's internal (the pager's cursor is `next`), so the JSON matches spec 3.6 exactly.
 - **The middleware's private paths move into `isPrivatePath()` in `src/lib/photos/http.ts`** (Task 10), the mechanism plan B extends to `/prints/`. Nothing else in the middleware changes in plan A: it already sends `PRIVATE_HEADERS` on `/photos/downloads`.
 - **`frameView` returns `null` for a photograph without its 240 preview** and the frame is skipped. The publish check makes it unreachable for published photographs; it only keeps a bad row from breaking a page.
-- **The layout-shift check after a batch scrolls the link to 400px below the viewport**, inside the script's 800px margin, which is where a visitor's scroll starts the fetch. Appended entries then land below the fold.
+- **The layout-shift check after a batch relies on the fixture's batch loading with the page** (the link starts inside the 800px margin) and asserts the appended entries land below the fold.
+- **The first eight frames stand in for the first row** (spec 3.3: the first row of the first entry loads eagerly, at most eight). A row holds eight frames at 1280px and about five at 375px, so a phone loads about three more eagerly than its first row; the server can't know the row's length, and the budget allows it.
 - **`scripts/lighthouse.mjs` given one root URL also measures `/photos` and the newest photograph's page** (found through the entry API), so the deploy job's existing step covers spec 10 unchanged.
 - **Notebook props and the robots and ingest changes move earlier than spec 1.2's step 8**, into the tasks that first need them (Tasks 9 and 10), so no task depends on a later one. Each page's e2e spec lives in its own task; Task 12 holds the privacy, budget and layout-shift checks and the docs.
 
@@ -109,28 +121,27 @@ src/styles/admin.css                            modify
 public/robots.txt                               modify: Disallow /photos/downloads
 scripts/photo-manifest.mjs, photo-places.mjs, photo-import-db.mjs, photo-place.swift, photo-cities.json   create
 scripts/prepare-photos.mjs, import-photos.mjs, photo-links.mjs, seed-photo-test.mjs, lighthouse.mjs      modify
-package.json                                    modify: seed:photos, check
-.github/workflows/ci.yml                        modify: seed the photo fixture
-playwright.config.ts                            modify: the phone project runs the gallery and photo-page specs
+.github/workflows/ci.yml                        modify: purge the photos tag after a deploy too
+playwright.config.ts                            modify: the gallery server (4335); the phone project runs the gallery and photo-page specs
 tests/unit/photo-entries, photo-manifest, prepare-photos, photo-workspace, photo-places, photo-import-db, photo-import-run, photo-publish, photo-actions, photographs-admin, gallery, gallery-page, photo-view, notebook, downloads-page, photo-links-route, link-actions, links-admin   create
 tests/unit/photo-downloads, purge, submit, store, logbook, logbook-page, ingest, middleware   modify
-tests/e2e/gallery, photo-page, downloads, admin-photos, admin-links, photo-store   create
+tests/e2e/gallery, photo-page, downloads, admin-photos, admin-links, photo-store, gallery-site   create
 tests/e2e/photos, admin, admin-layout, logbook, head, privacy, budgets, perf   modify
 docs/photo-gallery-backend.md, README.md, docs/superpowers/plans/2026-10-03-redesign-roadmap.md   modify
 docs/superpowers/plans/2026-10-08-plan-6-followups.md   create
 ```
 
-Tasks touch shared files in this order, so each builds on the last: `store.ts` (1, 2, 9, 10, 11), `http.ts` (1, 10), `seed-photo-test.mjs` (1, 2), `photos.spec.ts` (1, 2, 10), `prepare-photos.mjs` (2, 3, 4), `import-photos.mjs` (2, 4), `photo-manifest.mjs` (2, 3, 4), `photo-workspace.ts` and `prepare-photos.test.ts` (2, 3, 4), `purge.ts` and `submit.ts` (5, 6, 11), `actions.ts`, `validate.ts`, admin `store.ts`, `admin/index.astro`, `admin.css` and `admin-layout.spec.ts` (6, 11), `store.test.ts` and `submit.test.ts` (6, 11), `photo-store.ts` (6, 10), `admin-photos.spec.ts` (6, 9), `photo-entries.test.ts` (1, 9), `gallery.ts` (7, 9, 10), `gallery.test.ts` (7, 9), `photos.css` (7, 9, 10), `Gallery.astro` and `gallery.spec.ts` (7, 8), `photos/index.astro` (7, 8), `Notebook.astro` (9), `playwright.config.ts` (7, 9), `privacy.spec.ts`, `budgets.spec.ts` and `perf.spec.ts` (12).
+Tasks touch shared files in this order, so each builds on the last: `store.ts` (1, 2, 9, 10, 11), `http.ts` (1, 10), `seed-photo-test.mjs` (1, 2), `photos.spec.ts` (1, 2, 10), `prepare-photos.mjs` (2, 3, 4), `import-photos.mjs` (2, 4), `photo-manifest.mjs` (2, 3, 4), `photo-workspace.ts` and `prepare-photos.test.ts` (2, 3, 4), `purge.ts` and `submit.ts` (5, 6, 11), `actions.ts`, `validate.ts`, admin `store.ts`, `admin/index.astro`, `admin.css` and `admin-layout.spec.ts` (6, 11), `store.test.ts` and `submit.test.ts` (6, 11), `photo-store.ts` (6, 10), `admin-photos.spec.ts` (6, 9), `photo-entries.test.ts` (1, 9), `gallery.ts` (7, 9, 10), `gallery.test.ts` (7, 9), `photos.css` (7, 9, 10), `Gallery.astro` and `gallery.spec.ts` (7, 8), `photos/index.astro` (7, 8), `Notebook.astro` (9), `playwright.config.ts` (1, 7, 9), `logbook.spec.ts` (7), `privacy.spec.ts`, `budgets.spec.ts`, `perf.spec.ts` and `ci.yml` (12).
 
 ---
 
 ### Task 1: migration 0006, the entry mode, date and place
 
-The data layer the rest stands on: `photo_posts`, the RAW review flag and the grant's note and nonce (spec 8); every public query joins a photograph to its post and gains `date` and `place` (spec 2.2); `GET /api/photos?by=entry` answers a page of posts (spec 3.6). The photo fixture grows to spec 11.3's six posts and is seeded into the main store too.
+The data layer the rest stands on: `photo_posts`, the RAW review flag and the grant's note and nonce (spec 8); every public query joins a photograph to its post and gains `date` and `place` (spec 2.2); `GET /api/photos?by=entry` answers a page of posts (spec 3.6). The photo fixture grows to spec 11.3's six posts and gets its own e2e server (4335), recreated every run.
 
 **Files:**
-- Create: `migrations/0006_photo_gallery.sql`, `tests/unit/photo-entries.test.ts`
-- Modify: `src/lib/photos/store.ts`, `src/lib/photos/http.ts`, `src/pages/api/photos/index.ts`, `scripts/seed-photo-test.mjs`, `package.json`, `.github/workflows/ci.yml`
+- Create: `migrations/0006_photo_gallery.sql`, `tests/unit/photo-entries.test.ts`, `tests/e2e/gallery-site.ts`
+- Modify: `src/lib/photos/store.ts`, `src/lib/photos/http.ts`, `src/pages/api/photos/index.ts`, `scripts/seed-photo-test.mjs`, `playwright.config.ts`
 - Test: `tests/unit/photo-entries.test.ts`, `tests/unit/photo-downloads.test.ts`, `tests/e2e/photos.spec.ts`
 
 **Interfaces:**
@@ -145,7 +156,7 @@ The data layer the rest stands on: `photo_posts`, the RAW review flag and the gr
   - `entryPage(db: D1Database, before: number | null, limit: number, sizes?: readonly number[]): Promise<EntryPage>`
   - `photoById` and `photoPage` keep their signatures and now join `photo_posts`
 - Produces (`src/lib/photos/http.ts`): `entryOptions(url: URL): { before: number | null; limit: number } | null`
-- Produces: `bun run seed:photos` (the fixture in `.wrangler/state`)
+- Produces: the gallery e2e server on 4335 with the fixture alone, and `GALLERY = "http://localhost:4335"` in `tests/e2e/gallery-site.ts`
 
 - [ ] **Step 1: Write the failing unit tests**
 
@@ -462,7 +473,7 @@ export const GET: APIRoute = async ({ url, cache }) => {
 Run: `bun run test:unit tests/unit/photo-entries.test.ts tests/unit/photo-downloads.test.ts && bun run typecheck`
 Expected: PASS; 0 errors.
 
-- [ ] **Step 4: The six-post fixture, in the main store too**
+- [ ] **Step 4: The six-post fixture and its own server**
 
 Replace `scripts/seed-photo-test.mjs` with:
 
@@ -526,26 +537,40 @@ try {
 } finally { await platform.dispose(); }
 ```
 
-In `package.json`, add after the `"seed:snapshots"` line:
+In `playwright.config.ts`, add after the 4333 entry of `webServer`:
 
-```json
-    "seed:photos": "node scripts/seed-photo-test.mjs --persist-to .wrangler/state",
+```ts
+        // A fifth server with the photo fixture alone (spec 11.3), for the read-only gallery, photo-page, budget,
+        // layout-shift and privacy specs: deleted, migrated (with the logbook seed) and seeded afresh on every run, so
+        // George's own import in .wrangler/state is never read or changed
+        {
+          command:
+            "rm -rf .wrangler/gallery && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/gallery && node scripts/seed-photo-test.mjs --persist-to .wrangler/gallery && wrangler dev -c dist/server/wrangler.json --port 4335 --persist-to .wrangler/gallery",
+          url: "http://localhost:4335",
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
 ```
 
-and in the `"check"` script replace `bun run seed:snapshots --local && ` with `bun run seed:snapshots --local && bun run seed:photos && `.
+Create `tests/e2e/gallery-site.ts`:
 
-In `.github/workflows/ci.yml`, in the `check` job, add after `- run: bun run seed:snapshots --local`:
-
-```yaml
-      - run: bun run seed:photos
+```ts
+/** The e2e server holding only the photo fixture (spec 11.3), recreated on every run; no spec writes to it */
+export const GALLERY = "http://localhost:4335";
 ```
 
-Run: `bun run seed:photos && bun run seed:photos`
+Run: `rm -rf .wrangler/seed-check && bunx wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/seed-check && node scripts/seed-photo-test.mjs --persist-to .wrangler/seed-check && node scripts/seed-photo-test.mjs --persist-to .wrangler/seed-check; rm -rf .wrangler/seed-check`
 Expected: `Seeded 6 synthetic photo posts into local storage.` twice (the second run upserts).
 
 - [ ] **Step 5: The e2e catalogue tests**
 
-In `tests/e2e/photos.spec.ts`, replace the test `"catalogue grants expose protected links and stop working after revocation"` with:
+In `tests/e2e/photos.spec.ts`, add `import { GALLERY } from "./gallery-site";` after its `./admin` import. In `"public API returns responsive previews without drafts or private object keys"`, add after the `fixture-03` 404 line:
+
+```ts
+  expect(await (await request.get(`${ADMIN}/api/photos/fixture-01`)).json()).toMatchObject({ id: "fixture-01", date: "2026-09-27", place: "bondi, sydney" });
+```
+
+Replace the test `"catalogue grants expose protected links and stop working after revocation"` with:
 
 ```ts
 test("catalogue grants expose protected links and stop working after revocation", async ({ request }) => {
@@ -584,9 +609,9 @@ test("publishing requires verified assets and refreshes the catalogue", async ({
 and add at the end of the file:
 
 ```ts
-// On the main server (4331), whose photo fixture no spec changes
+// On the gallery server (4335), whose photo fixture no spec changes
 test("the entry mode pages posts newest first, with only the gallery's previews", async ({ request }) => {
-  const response = await request.get("/api/photos?by=entry&limit=4");
+  const response = await request.get(`${GALLERY}/api/photos?by=entry&limit=4`);
   expect(response.status()).toBe(200);
   expect(response.headers()["cache-control"]).toBe("public, max-age=60, stale-while-revalidate=300");
   const page = await response.json();
@@ -597,22 +622,22 @@ test("the entry mode pages posts newest first, with only the gallery's previews"
   expect(page.entries[1].place).toBeNull();
   expect(page.entries[0].photos.map((photo: { id: string }) => photo.id)).toEqual(["fixture-01", "fixture-02"]);
   expect(page.entries[0].photos[0].previews.map((preview: { url: string }) => preview.url.split("/").at(-1))).toEqual(["480.webp", "480.avif"]);
-  const rest = await (await request.get(`/api/photos?by=entry&before=${page.next}`)).json();
+  const rest = await (await request.get(`${GALLERY}/api/photos?by=entry&before=${page.next}`)).json();
   expect(rest.entries.map((entry: { collection: string }) => entry.collection)).toEqual(["fixture-e", "fixture-f"]);
   expect(rest.next).toBeNull();
   for (const query of ["by=entry&limit=13", "by=entry&before=abc", "by=entry&after=1", "by=post"]) {
-    expect((await request.get(`/api/photos?${query}`)).status()).toBe(400);
+    expect((await request.get(`${GALLERY}/api/photos?${query}`)).status()).toBe(400);
   }
 });
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/photos.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/photos.spec.ts --project=chromium`
 Expected: every test passes, the entry mode's among them.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/0006_photo_gallery.sql src/lib/photos/store.ts src/lib/photos/http.ts src/pages/api/photos/index.ts scripts/seed-photo-test.mjs package.json .github/workflows/ci.yml tests/unit/photo-entries.test.ts tests/unit/photo-downloads.test.ts tests/e2e/photos.spec.ts
+git add migrations/0006_photo_gallery.sql src/lib/photos/store.ts src/lib/photos/http.ts src/pages/api/photos/index.ts scripts/seed-photo-test.mjs playwright.config.ts tests/unit/photo-entries.test.ts tests/unit/photo-downloads.test.ts tests/e2e/photos.spec.ts tests/e2e/gallery-site.ts
 git commit -m "feat: photo posts with dates and places; the catalogue's entry mode"
 ```
 
@@ -964,7 +989,7 @@ In `tests/e2e/photos.spec.ts`, in `"public API returns responsive previews witho
 Run: `bun run typecheck && bun run test:unit`
 Expected: 0 errors; every unit test passes.
 
-Run: `pkill -f "port 433[1234]"; bun run seed:photos && bun run build:test && bun run test:e2e tests/e2e/photos.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/photos.spec.ts --project=chromium`
 Expected: every test passes; the publish test's verification now checks eight previews.
 
 - [ ] **Step 5: Commit**
@@ -1097,7 +1122,7 @@ test("the committed city map starts with the spec's two entries, and every city 
 });
 ```
 
-Add to `tests/unit/prepare-photos.test.ts` (and add `stat` is already imported; nothing else to import):
+Add to `tests/unit/prepare-photos.test.ts` (its imports already cover these tests):
 
 ```ts
 const BONDI = { subLocality: null, locality: "Bondi Beach", subAdministrativeArea: "Waverley Council", administrativeArea: "NSW", isoCountryCode: "AU" };
@@ -1510,7 +1535,13 @@ for (const post of posts) {
     if (!Object.hasOwn(places, photo.id)) {
       if (asked) await new Promise((done) => setTimeout(done, delay));
       asked = true;
-      places[photo.id] = JSON.parse((await run(tool, [photo.path])).stdout);
+      try {
+        places[photo.id] = JSON.parse((await run(tool, [photo.path])).stdout);
+      } catch {
+        // Apple's rate limit or the network: every finished lookup is already saved, so a rerun carries on from here
+        console.error(`Geocoding failed for ${photo.id}; run photos:prepare again (finished lookups are kept)`);
+        process.exit(1);
+      }
       // Saved after every lookup, so an interrupted run never asks again
       await writePrivateJson(placesPath, places);
     }
@@ -2287,7 +2318,7 @@ export const PATCH: APIRoute = async ({ params, request, cache }) => {
 Run: `bun run test:unit tests/unit/photo-publish.test.ts tests/unit/purge.test.ts tests/unit/submit.test.ts && bun run typecheck`
 Expected: PASS; 0 errors.
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/photos.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/photos.spec.ts --project=chromium`
 Expected: every test passes; the publish test hides and publishes `fixture-d-01` through `setPublished`.
 
 - [ ] **Step 4: Commit**
@@ -3107,13 +3138,13 @@ test("a place and a title are saved; a place the fonts can't draw comes back wit
 
 Task 9 adds one more test here, once the photo page exists: the edited place and title on the gallery and the photo's page.
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/admin-photos.spec.ts tests/e2e/admin-layout.spec.ts tests/e2e/photos.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/admin-photos.spec.ts tests/e2e/admin-layout.spec.ts tests/e2e/photos.spec.ts --project=chromium`
 Expected: every test passes.
 
 Run: `bun run test:e2e tests/e2e/admin-layout.spec.ts --project=phone`
 Expected: passes: the photographs section, every `<details>` open, fits a phone with 16px fields and 44px buttons.
 
-Look at it (Global constraints, visual checks) at `http://localhost:4321/admin/`, saved as `"$TMPDIR/admin"`: each post's summary on one line at 1280px and wrapping cleanly at 375px, previews 88px wide with their ratio, the raw pills beside the ids, the buttons in a row, nothing wider than the page.
+Look at it (Global constraints, visual checks) at `http://localhost:4336/admin/`, saved as `"$TMPDIR/admin"`: each post's summary on one line at 1280px and wrapping cleanly at 375px, previews 88px wide with their ratio, the raw pills beside the ids, the buttons in a row, nothing wider than the page.
 
 - [ ] **Step 6: Commit**
 
@@ -3130,7 +3161,7 @@ The gallery (spec 3): a notebook page with a `photos of` head row and an `entrie
 **Files:**
 - Create: `src/lib/photos/gallery.ts`, `src/components/Beacon.astro`, `src/components/photos/EntryHead.astro`, `src/components/photos/Frame.astro`, `src/components/photos/Entry.astro`, `src/components/photos/Gallery.astro`, `src/pages/photos/index.astro`, `src/styles/photos.css`, `tests/unit/gallery.test.ts`, `tests/unit/gallery-page.test.ts`, `tests/e2e/gallery.spec.ts`
 - Modify: `src/lib/logbook.ts`, `src/components/Logbook.astro`, `playwright.config.ts`
-- Test: `tests/unit/gallery.test.ts`, `tests/unit/gallery-page.test.ts`, `tests/unit/logbook.test.ts`, `tests/unit/logbook-page.test.ts`, `tests/e2e/gallery.spec.ts`, `tests/e2e/logbook.spec.ts`
+- Test: `tests/unit/gallery.test.ts`, `tests/unit/gallery-page.test.ts`, `tests/unit/logbook.test.ts`, `tests/unit/logbook-page.test.ts`, `tests/e2e/gallery.spec.ts`, `tests/e2e/logbook.spec.ts` (both reading the gallery server, 4335, through `GALLERY` from Task 1)
 
 **Interfaces:**
 - Consumes: `entryPage`, `ENTRY_LIMIT`, `Entry`, `PublicPhoto`, `PublicPreview` from `src/lib/photos/store.ts` (Task 1); `formatLogDate` from `src/lib/text.ts`; `Row.astro`; `Notebook.astro` (`title`, `description`, `noindex`).
@@ -3529,7 +3560,7 @@ const { entries, next, older } = Astro.props;
             {entries.map((entry, index) => <Entry entry={entry} first={index === 0} />)}
           </ol>
           {next !== null ? (
-            <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl">older entries</span></a>
+            <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl" aria-live="polite">older entries</span></a>
           ) : (
             <p class="more-end">that's every entry.</p>
           )}
@@ -3671,11 +3702,13 @@ Expected: PASS; 0 errors; every unit test passes.
 
 In `playwright.config.ts`, in the `phone` project's `testMatch`, change `admin-layout)\.spec\.ts$/` to `admin-layout|gallery)\.spec\.ts$/`, so the phone runs the gallery spec too.
 
-In `tests/e2e/logbook.spec.ts`, change the labels in `"renders the seeded logbook"` to `["logbook of", "now", "lately", "log", "photos", "on the turntable", "before", "say hi", "visitor info"]`, and add at the end of the file:
+In `tests/e2e/logbook.spec.ts`, leave `"renders the seeded logbook"` as it is (4331 publishes no fixture photo), add `import { GALLERY } from "./gallery-site";` to its imports and add at the end of the file:
 
 ```ts
-test("the home page points to the photos", async ({ page }) => {
-  await page.goto("/");
+// The gallery server (4335) has the logbook's seed and published photographs, so its home page has the line
+test("the home page points to the photos while one is published", async ({ page }) => {
+  await page.goto(`${GALLERY}/`);
+  await expect(page.locator(".row > .label")).toHaveText(["logbook of", "now", "lately", "log", "photos", "on the turntable", "before", "say hi", "visitor info"]);
   await expect(page.locator("#photos .body")).toHaveText("photos i've taken, kept like this log.");
   await expect(page.locator("#photos a")).toHaveAttribute("href", "/photos");
 });
@@ -3685,8 +3718,10 @@ Create `tests/e2e/gallery.spec.ts`:
 
 ```ts
 import { expect, test } from "@playwright/test";
+import { GALLERY } from "./gallery-site";
 
-// The gallery on the main server's photo fixture (spec 11.3), which no spec changes: six posts, newest first, four to a page
+// The gallery on the gallery server's photo fixture (spec 11.3), which no spec changes: six posts, newest first, four to a page
+test.use({ baseURL: GALLERY });
 
 test.describe("without JavaScript", () => {
   test.use({ javaScriptEnabled: false });
@@ -3780,7 +3815,7 @@ test("the gallery works under the CSP, with every script inline", async ({ page 
 });
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run seed:photos && bun run build:test && bun run test:e2e tests/e2e/gallery.spec.ts tests/e2e/logbook.spec.ts`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/gallery.spec.ts tests/e2e/logbook.spec.ts`
 Expected: every test passes in chromium, webkit and phone.
 
 Run: `bun run test:e2e tests/e2e/degraded.spec.ts tests/e2e/routes.spec.ts tests/e2e/budgets.spec.ts tests/e2e/analytics.spec.ts --project=chromium`
@@ -3789,7 +3824,7 @@ Expected: every test passes: the home page with its new line stays inside its bu
 Run: `grep -rl "ingest/i/v0/e" dist/client/_astro/ || echo "the beacon is inline"`
 Expected: `the beacon is inline`: no client file holds the beacon, so `Beacon.astro`'s script is inlined into every page that uses it.
 
-Look at it (Global constraints, visual checks) at `http://localhost:4321/photos`, saved as `"$TMPDIR/photos"`: the red rule and margin labels as on the home page, frames in rows with 6px gaps and their numbers under them, portrait and landscape frames the same height, entries 24px apart, the chevron before `older entries`, nothing wider than the page at 375px. Hover a frame at 1280px (open the page in a browser): a 1px red outline and the number turning ink, no movement.
+Look at it (Global constraints, visual checks) at `http://localhost:4336/photos`, saved as `"$TMPDIR/photos"`: the red rule and margin labels as on the home page, frames in rows with 6px gaps and their numbers under them, portrait and landscape frames the same height, entries 24px apart, the chevron before `older entries`, nothing wider than the page at 375px. Hover a frame at 1280px (open the page in a browser): a 1px red outline and the number turning ink, no movement.
 
 - [ ] **Step 6: Commit**
 
@@ -3904,7 +3939,7 @@ test.describe("with JavaScript", () => {
 });
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/gallery.spec.ts --project=chromium --grep "with JavaScript"`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/gallery.spec.ts --project=chromium --grep "with JavaScript"`
 Expected: FAIL: nothing loads (four entries remain) and no request goes to `/api/photos`.
 
 - [ ] **Step 2: The templates and the script**
@@ -3947,7 +3982,7 @@ const { entries, next, older } = Astro.props;
           </ol>
           {next !== null ? (
             <>
-              <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl">older entries</span></a>
+              <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl" aria-live="polite">older entries</span></a>
               {/* The same components, empty: photo-sheet.ts clones these, so an entry's markup lives in one place (spec 3.4) */}
               <template id="entry-template"><Entry entry={null} /></template>
               <template id="frame-template"><Frame view={null} /></template>
@@ -4032,7 +4067,11 @@ function start(more: HTMLAnchorElement, list: HTMLOListElement, entryTemplate: H
         const end = document.createElement("p");
         end.className = "more-end";
         end.textContent = "that's every entry.";
+        // Focus never moves (spec 3.4): if the link had it, the line that takes its place keeps it
+        const focused = document.activeElement === more;
+        if (focused) end.tabIndex = -1;
         more.replaceWith(end);
+        if (focused) end.focus({ preventScroll: true });
         return;
       }
       more.href = `/photos?before=${page.next}`;
@@ -4074,7 +4113,7 @@ In `src/pages/photos/index.astro`, add after `<Beacon />`:
   </script>
 ```
 
-Run: `bun run typecheck && pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/gallery.spec.ts`
+Run: `bun run typecheck && pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/gallery.spec.ts`
 Expected: 0 errors; every gallery test passes in chromium, webkit and phone, the four new ones among them, and `the gallery works under the CSP, with every script inline` still finds no `script[src]`.
 
 Run: `bun run test:e2e tests/e2e/admin-photos.spec.ts tests/e2e/photos.spec.ts --project=chromium`
@@ -4083,7 +4122,7 @@ Expected: every test passes.
 Run: `grep -rlE "ingest/i/v0/e|loading older entries" dist/client/_astro/ || echo "every script is inline"`
 Expected: `every script is inline`: neither the beacon nor `photo-sheet.ts` became a separate file.
 
-Look at it (Global constraints, visual checks) at `http://localhost:4321/photos`, then scroll a real browser to the end at 1280px and 375px: the label changes for a moment, the two older entries appear below the first four with the same spacing and frame sizes, and `that's every entry.` replaces the link. Nothing above the link moves.
+Look at it (Global constraints, visual checks) at `http://localhost:4336/photos`, then scroll a real browser to the end at 1280px and 375px: the label changes for a moment, the two older entries appear below the first four with the same spacing and frame sizes and `that's every entry.` replaces the link. Nothing above the link moves.
 
 - [ ] **Step 3: Commit**
 
@@ -4245,7 +4284,7 @@ test("a title with markup stays text", async () => {
 ```
 
 Run: `bun run test:unit tests/unit/photo-entries.test.ts tests/unit/gallery.test.ts tests/unit/photo-view.test.ts tests/unit/notebook.test.ts`
-Expected: FAIL: `photoPageData`, `photoSizes`, `photoName` and `PhotoView.astro` don't exist, and Notebook has no `ogImage` or `referrer`.
+Expected: FAIL: `photoPageData`, `photoSizes`, `photoName` and `PhotoView.astro` don't exist, and Notebook has no `ogImage` or `referrer`. `"a title with markup stays text"` already passes (Astro escapes `<title>`); it stays as a guard.
 
 - [ ] **Step 2: The data, the names and the layout's props**
 
@@ -4474,8 +4513,10 @@ Create `tests/e2e/photo-page.spec.ts`:
 
 ```ts
 import { expect, test } from "@playwright/test";
+import { GALLERY } from "./gallery-site";
 
-// The main server's photo fixture: fixture-01 (titled) and fixture-02 are published, fixture-03 is hidden
+// The gallery server's photo fixture: fixture-01 (titled) and fixture-02 are published, fixture-03 is hidden
+test.use({ baseURL: GALLERY });
 
 test("an untitled photo's page is headed by its date and place, and walks its post's published photos", async ({ page }) => {
   const response = await page.goto("/photos/fixture-02");
@@ -4567,13 +4608,13 @@ test("an edited place and title show on the gallery and the photo's page", async
 });
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/photo-page.spec.ts tests/e2e/gallery.spec.ts`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/photo-page.spec.ts tests/e2e/gallery.spec.ts`
 Expected: every test passes in chromium, webkit and phone.
 
 Run: `bun run test:e2e tests/e2e/admin-photos.spec.ts tests/e2e/head.spec.ts tests/e2e/routes.spec.ts --project=chromium`
 Expected: every test passes; the home page still shares `/og.png` (`head.spec.ts`).
 
-Look at it (Global constraints, visual checks) at `http://localhost:4321/photos/fixture-b-01` (a portrait) and `http://localhost:4321/photos/fixture-b-02` (a landscape), saved as `"$TMPDIR/photo-portrait"` and `"$TMPDIR/photo-landscape"`: the portrait no taller than the window, letterboxed on paper with nothing cropped; the landscape the column's full width; the chevrons pointing back and ahead; `the whole entry` on the same mono line.
+Look at it (Global constraints, visual checks) at `http://localhost:4336/photos/fixture-b-01` (a portrait) and `http://localhost:4336/photos/fixture-b-02` (a landscape), saved as `"$TMPDIR/photo-portrait"` and `"$TMPDIR/photo-landscape"`: the portrait no taller than the window, letterboxed on paper with nothing cropped; the landscape the column's full width; the chevrons pointing back and ahead; `the whole entry` on the same mono line.
 
 - [ ] **Step 5: Commit**
 
@@ -4630,6 +4671,9 @@ describe("Downloads", () => {
       ["/photos/downloads/post-01?token=a.b%2Bc%2Fd", "post-01.jpg", "download · 12.4 mb"],
       ["/photos/downloads/post-02?token=a.b%2Bc%2Fd", "post-02.jpg", "download · 1.0 mb"],
     ]);
+    // Each link is described by its preview's alt text, so a screen reader can tell them apart
+    expect(links[0].getAttribute("aria-describedby")).toBe("download-post-01");
+    expect(doc.querySelector("#download-post-01")!.getAttribute("alt")).toBe("photo 1 of 2 from 2 february 2025, bondi, sydney");
     const img = doc.querySelector(".download-list img")!;
     expect([img.getAttribute("loading"), img.getAttribute("alt"), img.getAttribute("src")]).toEqual(["lazy", "photo 1 of 2 from 2 february 2025, bondi, sydney", "/media/photos/previews/post-01/s/240.webp"]);
     expect(doc.querySelector("script")).toBeNull();
@@ -4841,11 +4885,11 @@ const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
                       {webp && (
                         <picture>
                           {avif && <source type="image/avif" srcset={avif.url} />}
-                          <img src={webp.url} width={webp.width} height={webp.height} alt={photoAlt(photo, index, entry.photos.length)} loading="lazy" decoding="async" />
+                          <img id={`download-${photo.id}`} src={webp.url} width={webp.width} height={webp.height} alt={photoAlt(photo, index, entry.photos.length)} loading="lazy" decoding="async" />
                         </picture>
                       )}
                       {/* The token lives only in these links (spec 5.2) */}
-                      <a href={`/photos/downloads/${photo.id}?token=${encodeURIComponent(list.token)}`} download={`${photo.id}.jpg`}>download · {megabytes(photo.downloadBytes)}</a>
+                      <a href={`/photos/downloads/${photo.id}?token=${encodeURIComponent(list.token)}`} download={`${photo.id}.jpg`} aria-describedby={webp ? `download-${photo.id}` : undefined}>download · {megabytes(photo.downloadBytes)}</a>
                     </li>
                   );
                 })}
@@ -4975,8 +5019,8 @@ and replace `const url = new URL(photoId === null ? "/api/photos/downloads" : \`
     const url = new URL("/photos/downloads", origin);
 ```
 
-Run: `bun run test:unit tests/unit/photo-links-route.test.ts && node scripts/photo-links.mjs --local --photo fixture-01 --output .wrangler/never.json; echo "exit $?"`
-Expected: the route's tests pass; then `photo links are internal: issue a catalogue link (leave out --photo)` and `exit 1`, before any store is opened or file written.
+Run: `bun run test:unit tests/unit/photo-links-route.test.ts && grep -n -- "--photo\|photoId" scripts/photo-links.mjs`
+Expected: the route's tests pass; the only `--photo` left is the refusal, which runs before the script opens a store or reads `.dev.vars`, and `photoId` appears only as `photoId: null`. Don't run the script itself: it reads George's local key.
 
 - [ ] **Step 4: The e2e specs**
 
@@ -4997,6 +5041,7 @@ Replace `tests/e2e/photos.spec.ts` with:
 import { expect, test } from "@playwright/test";
 import { signPhotoToken } from "../../src/lib/photos/tokens";
 import { ADMIN } from "./admin";
+import { GALLERY } from "./gallery-site";
 import { adminD1, catalogueLink } from "./photo-store";
 
 test.skip(({ browserName }) => browserName !== "chromium", "HTTP backend behaviour, checked once");
@@ -5020,6 +5065,7 @@ test("public API returns responsive previews without drafts or private object ke
   expect(preview.headers()["content-type"]).toBe("image/webp");
   expect(preview.headers()["cache-control"]).toContain("immutable");
   expect((await request.get(`${ADMIN}/api/photos/fixture-03`)).status()).toBe(404);
+  expect(await (await request.get(`${ADMIN}/api/photos/fixture-01`)).json()).toMatchObject({ id: "fixture-01", date: "2026-09-27", place: "bondi, sydney" });
   expect((await request.get(`${ADMIN}/api/photos?token=secret`)).status()).toBe(400);
 });
 
@@ -5098,9 +5144,9 @@ test("publishing requires verified assets and refreshes the catalogue", async ({
   expect((await request.get(`${ADMIN}/api/photos/fixture-d-01?`)).status()).toBe(200);
 });
 
-// On the main server (4331), whose photo fixture no spec changes
+// On the gallery server (4335), whose photo fixture no spec changes
 test("the entry mode pages posts newest first, with only the gallery's previews", async ({ request }) => {
-  const response = await request.get("/api/photos?by=entry&limit=4");
+  const response = await request.get(`${GALLERY}/api/photos?by=entry&limit=4`);
   expect(response.status()).toBe(200);
   expect(response.headers()["cache-control"]).toBe("public, max-age=60, stale-while-revalidate=300");
   const page = await response.json();
@@ -5111,11 +5157,11 @@ test("the entry mode pages posts newest first, with only the gallery's previews"
   expect(page.entries[1].place).toBeNull();
   expect(page.entries[0].photos.map((photo: { id: string }) => photo.id)).toEqual(["fixture-01", "fixture-02"]);
   expect(page.entries[0].photos[0].previews.map((preview: { url: string }) => preview.url.split("/").at(-1))).toEqual(["240.webp", "240.avif", "480.webp", "480.avif"]);
-  const rest = await (await request.get(`/api/photos?by=entry&before=${page.next}`)).json();
+  const rest = await (await request.get(`${GALLERY}/api/photos?by=entry&before=${page.next}`)).json();
   expect(rest.entries.map((entry: { collection: string }) => entry.collection)).toEqual(["fixture-e", "fixture-f"]);
   expect(rest.next).toBeNull();
   for (const query of ["by=entry&limit=13", "by=entry&before=abc", "by=entry&after=1", "by=post"]) {
-    expect((await request.get(`/api/photos?${query}`)).status()).toBe(400);
+    expect((await request.get(`${GALLERY}/api/photos?${query}`)).status()).toBe(400);
   }
 });
 ```
@@ -5197,13 +5243,13 @@ In `tests/e2e/head.spec.ts`, in `"static files are served"`, add after the `Disa
   expect(await (await request.get("/robots.txt")).text()).toContain("Disallow: /photos/downloads");
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/downloads.spec.ts tests/e2e/photos.spec.ts tests/e2e/head.spec.ts tests/e2e/ingest.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/downloads.spec.ts tests/e2e/photos.spec.ts tests/e2e/head.spec.ts tests/e2e/ingest.spec.ts --project=chromium`
 Expected: every test passes.
 
 Run: `bun run typecheck && bun run test:unit`
 Expected: 0 errors; every unit test passes.
 
-Look at it (Global constraints, visual checks): with the dev server running, run `bun run photos:key` (it keeps an existing local key), then `node scripts/photo-links.mjs --local --origin http://localhost:4321 --output .wrangler/plan6-link.json`, and shoot the `url` in that file, saved as `"$TMPDIR/downloads"`: entries headed as on the gallery, previews 88px tall, the download links in mono under them, nothing wider than the page at 375px. Afterwards revoke it with `node scripts/photo-links.mjs --local --revoke <grantId from the file>` and delete `.wrangler/plan6-link.json`.
+Look at it (Global constraints, visual checks): issue a link with `curl -s -X POST -H "Origin: http://localhost:4336" -H "Content-Type: application/json" -d '{}' http://localhost:4336/admin/photos/links` and shoot the `url` in the answer, saved as `"$TMPDIR/downloads"`: entries headed as on the gallery, previews 88px tall, the download links in mono under them, nothing wider than the page at 375px.
 
 - [ ] **Step 5: Commit**
 
@@ -5865,13 +5911,13 @@ test("copy puts the link on the clipboard", async ({ page, context }) => {
 });
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/admin-links.spec.ts tests/e2e/admin-layout.spec.ts tests/e2e/admin-photos.spec.ts tests/e2e/downloads.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/admin-links.spec.ts tests/e2e/admin-layout.spec.ts tests/e2e/admin-photos.spec.ts tests/e2e/downloads.spec.ts --project=chromium`
 Expected: every test passes.
 
 Run: `bun run test:e2e tests/e2e/admin-layout.spec.ts --project=phone`
 Expected: passes: the links section fits a phone, its fields 16px and its buttons 44px.
 
-Look at it (Global constraints, visual checks) at `http://localhost:4321/admin/`, then issue a link in a real browser on the dev server and look at the response at 375px: the notice, the link's field across the column, `copy` under it, the issue form below and the list of working links with their revoke boxes. Revoke the link you made afterwards.
+Look at it (Global constraints, visual checks) at `http://localhost:4336/admin/`, then issue a link through the form on 4336 and look at the response at 375px: the notice, the link's field across the column, `copy` under it, the issue form below and the list of working links with their revoke boxes. The store is thrown away afterwards, so nothing needs revoking.
 
 - [ ] **Step 6: Commit**
 
@@ -5883,15 +5929,15 @@ git commit -m "feat: the admin's links section: issue a catalogue link once, lis
 ---
 ### Task 12: privacy, budgets, layout shift, Lighthouse and the docs
 
-The checks spec 9 and 10 set for the new pages, and the docs. The privacy test adds `/photos`, a photograph's page and a downloads page: no `Set-Cookie`, empty storage, every request first party. The budget spec weighs `/photos` and a photograph's page (JavaScript under 10KB, HTML under 30KB, CSS under 15KB, two fonts, every script inline) and gates the images `/photos` loads before any scroll at 375 × 812 under 250KB. The perf spec holds layout shift under 0.01 at 1280px and 375px on `/photos` (after a batch loads too) and on a photograph's page. Lighthouse measures `/photos` and the newest photograph's page after each deploy. The docs say what plan 6 built.
+The checks spec 9 and 10 set for the new pages, and the docs. The privacy test adds `/photos`, a photograph's page and a downloads page: no `Set-Cookie`, empty storage, every request first party. The budget spec weighs `/photos` and a photograph's page (JavaScript under 10KB, HTML under 30KB, CSS under 15KB, two fonts, every script inline) and gates the images `/photos` loads before any scroll at 375 × 812 under 250KB. The perf spec holds layout shift under 0.01 at 1280px and 375px on `/photos` (after a batch loads too) and on a photograph's page. Lighthouse measures `/photos` and the newest photograph's page after each deploy, and the deploy purges the gallery's cached pages as well as the home page. The docs say what plan 6 built.
 
 **Files:**
-- Modify: `tests/e2e/privacy.spec.ts` (whole file below), `tests/e2e/budgets.spec.ts` (whole file below), `tests/e2e/perf.spec.ts`, `scripts/lighthouse.mjs` (whole file below), `docs/photo-gallery-backend.md` (whole file below), `README.md`, `docs/superpowers/plans/2026-10-03-redesign-roadmap.md`
+- Modify: `tests/e2e/privacy.spec.ts` (whole file below), `tests/e2e/budgets.spec.ts` (whole file below), `tests/e2e/perf.spec.ts`, `scripts/lighthouse.mjs` (whole file below), `.github/workflows/ci.yml`, `docs/photo-gallery-backend.md` (whole file below), `README.md`, `docs/superpowers/plans/2026-10-03-redesign-roadmap.md`
 - Create: `docs/superpowers/plans/2026-10-08-plan-6-followups.md`
 - Test: `tests/e2e/privacy.spec.ts`, `tests/e2e/budgets.spec.ts`, `tests/e2e/perf.spec.ts`
 
 **Interfaces:**
-- Consumes: every page from Tasks 7 to 10; `ADMIN` from `tests/e2e/admin.ts`; `withGpc` from `tests/e2e/gpc.ts`; `SLOW` from `tests/e2e/deck.ts`; the entry mode (Task 1).
+- Consumes: every page from Tasks 7 to 10; `GALLERY` from `tests/e2e/gallery-site.ts` (Task 1); `ADMIN` from `tests/e2e/admin.ts`; `withGpc` from `tests/e2e/gpc.ts`; `SLOW` from `tests/e2e/deck.ts`; the entry mode (Task 1).
 - Produces: `scripts/lighthouse.mjs` given one root URL measures it, `/photos` and the newest photograph's page.
 
 - [ ] **Step 1: The privacy test**
@@ -5902,6 +5948,7 @@ Replace `tests/e2e/privacy.spec.ts` with:
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN } from "./admin";
 import { SLOW } from "./deck";
+import { GALLERY } from "./gallery-site";
 import { withGpc } from "./gpc";
 
 /** Records, from here on, every cookie a response sets and every request to another origin */
@@ -5958,9 +6005,11 @@ test("cookies none, storage empty, every request first party", async ({ page, ba
 
 test("the photo pages set no cookies, keep storage empty and stay first party", async ({ page, baseURL }) => {
   if (process.env.PLAYWRIGHT_BASE_URL) await withGpc(page);
-  const seen = watch(page, new URL(baseURL!).origin);
+  // Locally the gallery server's fixture; after a deploy, the live site
+  const site = process.env.PLAYWRIGHT_BASE_URL ? baseURL! : GALLERY;
+  const seen = watch(page, new URL(site).origin);
   // A fresh query misses the edge cache, so a deploy's new version is what gets checked
-  await page.goto(`/photos?fresh=${Date.now()}`, { waitUntil: "networkidle" });
+  await page.goto(new URL(`/photos?fresh=${Date.now()}`, site).href, { waitUntil: "networkidle" });
   // Content-agnostic, so it passes on the live site before anything is published: follow a frame when there is one
   const frame = page.locator("a.frame-link").first();
   if (await frame.count()) {
@@ -6001,7 +6050,7 @@ test("the analytics proxy answers without a cookie", async ({ request, baseURL }
 });
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/privacy.spec.ts`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/privacy.spec.ts`
 Expected: every test passes in chromium and webkit; the photo pages follow a frame to `/photos/fixture-01`.
 
 - [ ] **Step 2: The budgets**
@@ -6012,6 +6061,7 @@ Replace `tests/e2e/budgets.spec.ts` with:
 import { gzipSync } from "node:zlib";
 import { expect, test, type Page } from "@playwright/test";
 import { SLOW } from "./deck";
+import { GALLERY } from "./gallery-site";
 
 /** What a page loads before any interaction: scripts, styles and HTML gzipped, fonts as they are, inline ones counted */
 async function weigh(page: Page, path: string) {
@@ -6057,12 +6107,12 @@ test("page weight stays inside the budgets", async ({ page, browserName }) => {
   expect(sizes.font).toBeLessThan(60 * 1024);
 });
 
-// Photo gallery spec 10, on the main server's photo fixture
+// Photo gallery spec 10, on the gallery server's photo fixture
 for (const path of ["/photos", "/photos/fixture-01"]) {
   test(`${path} stays inside the page budgets, with every script inline`, async ({ page, browserName }) => {
     test.skip(browserName !== "chromium", "measured once, in Chromium");
     test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local photo fixture");
-    const sizes = await weigh(page, path);
+    const sizes = await weigh(page, `${GALLERY}${path}`);
     console.log(`budgets for ${path} (bytes)`, sizes);
     expect(sizes.js).toBeGreaterThan(0);
     expect(sizes.js).toBeLessThan(10 * 1024);
@@ -6083,7 +6133,7 @@ test("/photos loads under 250KB of images before any scroll at 375 × 812", asyn
     if (response.request().resourceType() !== "image" || response.status() >= 300) return;
     reads.push(response.body().then((body) => { bytes += body.length; }));
   });
-  await page.goto("/photos", { waitUntil: "networkidle" });
+  await page.goto(`${GALLERY}/photos`, { waitUntil: "networkidle" });
   await Promise.all(reads);
   console.log("images before any scroll on /photos at 375px (bytes)", bytes);
   expect(bytes).toBeGreaterThan(0);
@@ -6128,7 +6178,7 @@ test("no layout shift while the page settles", async ({ page, browserName }) => 
 });
 ```
 
-In `tests/e2e/perf.spec.ts`, add at the end:
+In `tests/e2e/perf.spec.ts`, add `import { GALLERY } from "./gallery-site";` to its imports, and add at the end:
 
 ```ts
 /** Layout shift from the very start of the page, summed in the page as it happens */
@@ -6145,18 +6195,16 @@ async function watchShifts(page: Page) {
 }
 const shifted = (page: Page) => page.evaluate(() => (window as unknown as { shifted: number }).shifted);
 
-// Photo gallery spec 10, on the main server's photo fixture
+// Photo gallery spec 10, on the gallery server's photo fixture
 for (const [width, height] of [[1280, 800], [375, 812]]) {
   test(`nothing shifts on /photos at ${width}px, before or after the next entries load`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await watchShifts(page);
-    await page.goto("/photos", { waitUntil: "networkidle" });
-    // Where a visitor's scroll starts the fetch: the link 400px below the viewport, inside the script's 800px margin
-    await page.evaluate(() => {
-      const more = document.querySelector("a.more");
-      if (more) window.scrollTo(0, Math.max(0, more.getBoundingClientRect().top + window.scrollY - window.innerHeight - 400));
-    });
+    await page.goto(`${GALLERY}/photos`, { waitUntil: "networkidle" });
+    // On the fixture the link starts inside the script's 800px margin, so the batch loads as the page does; what matters
+    // is that the appended entries land below the fold, where they can't shift anything in view
     await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    expect(await page.locator("ol.entries > li.entry").nth(4).evaluate((li) => li.getBoundingClientRect().top)).toBeGreaterThan(height);
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(500);
     const cls = await shifted(page);
@@ -6167,7 +6215,7 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
   test(`nothing shifts on a photo's page at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await watchShifts(page);
-    await page.goto("/photos/fixture-b-01", { waitUntil: "networkidle" });
+    await page.goto(`${GALLERY}/photos/fixture-b-01`, { waitUntil: "networkidle" });
     await page.waitForTimeout(1000);
     const cls = await shifted(page);
     test.info().annotations.push({ type: "cls", description: `layout shift on a photo's page at ${width}px: ${cls}` });
@@ -6176,7 +6224,7 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
 }
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test && bun run test:e2e tests/e2e/budgets.spec.ts tests/e2e/perf.spec.ts --project=chromium`
+Run: `pkill -f "port 433[0-9]"; bun run build:test && bun run test:e2e tests/e2e/budgets.spec.ts tests/e2e/perf.spec.ts --project=chromium`
 Expected: every test passes; the log shows the photo pages' JavaScript well under 10KB (the beacon and `photo-sheet.ts`), and annotations show layout shift near 0 for each page and width.
 
 - [ ] **Step 3: Lighthouse on the photo pages**
@@ -6280,8 +6328,13 @@ for (const url of await pagesFor(given)) {
 if (strict && !inside) process.exit(1);
 ```
 
-Run: `pkill -f "port 433[1234]"; bun run build:test`, then start `bun run serve` in the background, wait for it with `curl --retry 30 --retry-connrefused --retry-delay 1 -sf http://localhost:4331/ -o /dev/null`, run `bun run lighthouse` and stop the server (`pkill -f "port 4331"`).
-Expected: three medians, for `http://localhost:4331/`, `http://localhost:4331/photos` and `http://localhost:4331/photos/fixture-01` (the newest post's first published photograph). A local over-budget line is a warning, not a failure; read each and note any in the task report.
+Run: `pkill -f "port 433[0-9]"; bun run build:test`, then start the gallery server's command from `playwright.config.ts` (`rm -rf .wrangler/gallery && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/gallery && node scripts/seed-photo-test.mjs --persist-to .wrangler/gallery && wrangler dev -c dist/server/wrangler.json --port 4335 --persist-to .wrangler/gallery`) in the background, wait for it with `curl --retry 30 --retry-connrefused --retry-delay 1 -sf http://localhost:4335/ -o /dev/null`, run `bun run lighthouse http://localhost:4335/` and stop the server (`pkill -f "port 4335"`).
+Expected: three medians, for `http://localhost:4335/`, `http://localhost:4335/photos` and `http://localhost:4335/photos/fixture-01` (the newest post's first published photograph). A local over-budget line is a warning, not a failure; read each and note any in the task report.
+
+In `.github/workflows/ci.yml`, in the `deploy` job, rename the step `Purge the cached home page` to `Purge the cached pages` and change its `--data '{"tags":["logbook"]}'` to `--data '{"tags":["logbook","photos"]}'`, so changed gallery markup isn't served from the edge for up to five minutes after a deploy.
+
+Run: `grep -n "Purge the cached pages" -A 4 .github/workflows/ci.yml`
+Expected: the renamed step, with `"tags":["logbook","photos"]`.
 
 - [ ] **Step 4: The docs**
 
@@ -6346,13 +6399,13 @@ For production the same import runs with `--remote` from the Mac (spec section 1
 ## Tests
 
 - Unit (Vitest, `node:sqlite` over the real migrations): the entry mode and its cursor, the post join, publication all or nothing at a concurrency of ten, the admin's photo and link actions, the place rule and naming with recorded placemarks, prepare on synthetic photos with a recorded geocoder, the import's writes and one real import into a temporary local store.
-- End to end (Playwright): the gallery with and without JavaScript, a photograph's page, the downloads page and its 403s, the admin's photographs and links sections, privacy, budgets and layout shift. The main server (4331) holds the six-post photo fixture (`bun run seed:photos`, spec 11.3); the admin server (4333) gets its own copy every run, and each spec there keeps to its own photographs.
+- End to end (Playwright): the gallery with and without JavaScript, a photograph's page, the downloads page and its 403s, the admin's photographs and links sections, privacy, budgets and layout shift. A gallery server (4335) gets the six-post photo fixture afresh on every run (spec 11.3); the admin server (4333) gets its own copy every run, and each spec there keeps to its own photographs.
 ````
 
 In `README.md`, replace the paragraph under `## Photographs` with:
 
 ```markdown
-The photo gallery: `/photos`, a page for each photograph and a private downloads page behind catalogue links, with the owner's photographs and links sections in `/admin`. How the pages, the catalogue, the preparation and the import work: [photo gallery guide](docs/photo-gallery-backend.md). `bun run seed:photos` puts the six-post test fixture in the local store.
+The photo gallery: `/photos`, a page for each photograph and a private downloads page behind catalogue links, with the owner's photographs and links sections in `/admin`. How the pages, the catalogue, the preparation and the import work: [photo gallery guide](docs/photo-gallery-backend.md). The e2e gallery server (4335) gets the six-post photo fixture afresh on every run (`scripts/seed-photo-test.mjs`).
 ```
 
 In `docs/superpowers/plans/2026-10-03-redesign-roadmap.md`, add a row after plan 5's:
@@ -6381,7 +6434,7 @@ What plan 6 (the photo gallery) found or left for later.
 
 ## Known gaps
 
-- The photo fixture's images are solid colour, so the 250KB image gate before scroll is trivially met locally; the real first batch (spec 3.3 measured about 121KB for the first entry) is checked by Lighthouse after the import.
+- The photo fixture's images are solid colour, so the 250KB image gate before scroll is trivially met locally; the real first batch (spec 3.3 measured about 121KB for the first entry) is checked by Lighthouse after the import. A cheap follow-up: fill the fixture's JPEGs with noise (sharp's `create.noise`), so their previews weigh what photographs do and the gate means something locally.
 - `og:image` is the 1600 WebP; a few link-preview services don't read WebP and show no image (spec 4).
 - `photo-place.swift` reads names from MapKit's deprecated `placemark`, the only MapKit object with the suburb, council and state code the city map needs. If Apple removes it, the tool needs MapKit's `address` fields and the city map a key built from them.
 - The admin's photographs section renders two forms per photograph, about 1KB each: a few hundred KB for the whole selection, fine for one owner on a phone, but worth paging if the selection grows past a thousand.
@@ -6400,12 +6453,12 @@ Expected: read each match for an Oxford comma (a comma before the last "and" or 
 
 - [ ] **Step 5: The whole suite**
 
-Run: `pkill -f "port 433[1234]"; bun run check`
+Run: `pkill -f "port 433[0-9]"; bun run check`
 Expected: typecheck at 0 errors, every unit test passing, the migrations and seeds applied and every e2e spec passing in chromium, webkit and phone.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/e2e/privacy.spec.ts tests/e2e/budgets.spec.ts tests/e2e/perf.spec.ts scripts/lighthouse.mjs docs/photo-gallery-backend.md README.md docs/superpowers/plans/2026-10-03-redesign-roadmap.md docs/superpowers/plans/2026-10-08-plan-6-followups.md
+git add tests/e2e/privacy.spec.ts tests/e2e/budgets.spec.ts tests/e2e/perf.spec.ts scripts/lighthouse.mjs .github/workflows/ci.yml docs/photo-gallery-backend.md README.md docs/superpowers/plans/2026-10-03-redesign-roadmap.md docs/superpowers/plans/2026-10-08-plan-6-followups.md
 git commit -m "test: privacy, budgets and layout shift on the photo pages; docs for the gallery"
 ```
