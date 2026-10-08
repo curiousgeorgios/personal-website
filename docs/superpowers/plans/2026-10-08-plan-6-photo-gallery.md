@@ -6430,11 +6430,11 @@ What plan 6 (the photo gallery) found or left for later.
 ## Launch
 
 - Spec section 12's four steps are George's: create the `curiousgeorge-photo-prints` bucket before this branch deploys, set a fresh `PHOTO_LINK_SECRET`, run `photos:prepare` and `photos:import --remote` from the Mac after the deploy has applied migration 0006 (filling `scripts/photo-cities.json` where prepare stops) and review and publish every post in `/admin`, places included, looking hardest at the RAW candidates.
-- After launch: issue the first catalogue link from `/admin` and open it on a phone; read the post-deploy Lighthouse medians for `/photos` and the newest photograph's page; confirm the deploy job's privacy test followed a frame on the live gallery.
+- After launch: issue the first catalogue link from `/admin` and open it on a phone; read the post-deploy Lighthouse medians for `/photos` and the newest photograph's page (load times and layout shift; Lighthouse doesn't measure image bytes); once photos are published, run the image budget gate and the privacy check against the live site (`PLAYWRIGHT_BASE_URL`), as the launch docs describe.
 
 ## Known gaps
 
-- The photo fixture's images are solid colour, so the 250KB image gate before scroll is trivially met locally; the real first batch (spec 3.3 measured about 121KB for the first entry) is checked by Lighthouse after the import. A cheap follow-up: fill the fixture's JPEGs with noise (sharp's `create.noise`), so their previews weigh what photographs do and the gate means something locally.
+- The photo fixture's images are solid colour, so the 250KB image gate before scroll is trivially met locally; the real first batch is checked by running the image budget gate against the live site after the first photos are published (Lighthouse doesn't measure image bytes). A cheap follow-up: fill the fixture's JPEGs with noise (sharp's `create.noise`), so their previews weigh what photographs do and the gate means something locally.
 - `og:image` is the 1600 WebP; a few link-preview services don't read WebP and show no image (spec 4).
 - `photo-place.swift` reads names from MapKit's deprecated `placemark`, the only MapKit object with the suburb, council and state code the city map needs. If Apple removes it, the tool needs MapKit's `address` fields and the city map a key built from them.
 - The admin's photographs section renders two forms per photograph, about 1KB each: a few hundred KB for the whole selection, fine for one owner on a phone, but worth paging if the selection grows past a thousand.
