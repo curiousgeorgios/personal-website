@@ -4,7 +4,7 @@
 - Owner: George Vlachos
 - Status: Design agreed with George, revised after critical review and George's answers to its product questions; ready for two implementation plans (section 1.2)
 - Extends: [the logbook redesign spec](2026-10-03-personal-site-redesign-design.md). "R6.1" below means its section 6.1. Everything that spec says about the visual system (R3), motion (R4.3), architecture (R6), admin (R7), analytics (R10), budgets (R11), security headers and accessibility (R12) and deployment (R13) applies here unless this spec says otherwise.
-- Decisions: [ADR-0020](../../adr/0020-photo-downloads-use-revocable-signed-links.md) (amended 2026-10-08), [ADR-0021](../../adr/0021-prints-sold-on-site-through-artelo.md) (amended 2026-10-08), [ADR-0022](../../adr/0022-photo-places-are-area-and-city-only.md) (amended 2026-10-08).
+- Decisions: [ADR-0020](../../adr/0020-photo-downloads-use-revocable-signed-links.md) (amended 2026-10-08), [ADR-0021](../../adr/0021-prints-sold-on-site-through-artelo.md) (amended 2026-10-08), [ADR-0022](../../adr/0022-photo-places-are-area-and-city-only.md) (amended 2026-10-08), [ADR-0023](../../adr/0023-the-gallery-stays-light-on-phones.md) (the gallery stays light on phones) and [ADR-0024](../../adr/0024-test-servers-never-hold-the-real-signing-key.md) (test servers never hold the real signing key).
 - Builds on: the photo backend of `a65ecc6` ([docs/photo-gallery-backend.md](../../photo-gallery-backend.md)): `src/lib/photos/`, `src/pages/api/photos/`, `src/pages/photos/downloads/[id].ts`, `src/pages/admin/photos/`, `migrations/0005_photos.sql`, `scripts/prepare-photos.mjs`, `scripts/import-photos.mjs` and `tests/e2e/photos.spec.ts`. Sections 2.2 and 13.2 list every change this spec makes to it.
 - Artelo facts come from its public API documentation, read on 2026-10-08 (Create Order, Price Check, Get Catalog Product Costs, Get Orders, Get Order by Id, Webhooks, Webhook Topics, Save Webhook, Getting Started) and from the enum lists in that documentation's own page bundle. Section 25 lists every assumption about Artelo and Stripe and how the build checks it.
 
@@ -42,8 +42,8 @@ Plan B: (1) the Worker entry probe (cron, `ratelimits` and `send_email` all surv
 
 | Route | Behaviour | Caching |
 |---|---|---|
-| `/photos` | The gallery, newest entry first, four entries per page (section 3) | Edge, tag `photos`, as R6.1 (`maxAge: 300, swr: 86400`) |
-| `/photos?before=<seconds>` | The next four entries posted before that time; `noindex` | Same, per URL |
+| `/photos` | The gallery, newest entry first, two entries per page (section 3) | Edge, tag `photos`, as R6.1 (`maxAge: 300, swr: 86400`) |
+| `/photos?before=<seconds>` | The next two entries posted before that time; `noindex` | Same, per URL |
 | `/photos/<id>` | One photograph (section 4) | Edge, tag `photos` |
 | `/photos/downloads?token=<token>` | The private full-resolution list (section 5) | Private headers, never cached |
 | `/photos/downloads/<id>?token=<token>` | Existing full-resolution JPEG download, unchanged in part 1 | Private headers |
@@ -89,30 +89,34 @@ One entry per post (`photos.collection`) that has at least one published photogr
 - Each frame is a link to `/photos/<id>`. Hover (fine pointers only, 200ms `ease`): the frame number turns `--ink` and a 1px `--red` outline appears around the image; no transforms. Focus-visible outlines as R12.2.
 - Alt text: the title when George has written one, otherwise `photo 2 of 14 from 2 february 2025, bondi, sydney` (place left out when unknown). `<n> of <m>` counts published photographs in post order.
 - Entries are 24px apart; the sheet starts 10px under the heading.
+- **Two entries per server-rendered page** (ADR-0023). The first design showed four, and on George's real photographs the four newest posts hold 68 frames: 374KB of images before any scroll at 375 × 812, over the 250KB budget of section 10. Three entries would still be about 293KB, so two is the most that fits (36 frames, 198KB measured; two 20-frame posts, the largest case, about 225KB). The catalogue API's batches stay at four (3.6) because the visitor is already scrolling by then.
 
 ### 3.3 Previews
 
-`/photos` uses only the 240 and 480 previews (each fitted inside a square of that size, with its actual width):
+`/photos` uses only the 240 and 480 previews (each fitted inside a square of that size, with its actual width). **On phones, which the notebook's 680px breakpoint decides, a frame is offered the 240 alone**, at every screen density (ADR-0023):
 
 ```html
 <picture>
-  <source type="image/avif" srcset="…/240.avif 160w, …/480.avif 320w" sizes="(max-width: 679px) 59px, 80px">
-  <img src="…/240.webp" srcset="…/240.webp 160w, …/480.webp 320w" sizes="(max-width: 679px) 59px, 80px"
+  <source media="(max-width: 680px)" type="image/avif" srcset="…/240.avif 160w" sizes="(max-width: 680px) 59px, 80px">
+  <source media="(max-width: 680px)" type="image/webp" srcset="…/240.webp 160w" sizes="(max-width: 680px) 59px, 80px">
+  <source type="image/avif" srcset="…/240.avif 160w, …/480.avif 320w" sizes="(max-width: 680px) 59px, 80px">
+  <img src="…/240.webp" srcset="…/240.webp 160w, …/480.webp 320w" sizes="(max-width: 680px) 59px, 80px"
        width="160" height="240" alt="…" loading="lazy" decoding="async">
 </picture>
 ```
 
 - `srcset` descriptors are each preview's real width; `width` and `height` are the 240 preview's real dimensions, so the browser knows the aspect ratio before any byte arrives. CSS sets `height: 120px` (88px on phones) and `width: auto`, which the attribute ratio resolves before load: no layout shift.
-- `sizes` is computed per frame as the rendered width, `round(120 × width ÷ height)` px and `round(88 × width ÷ height)` px below 680px. A portrait frame at 2× takes the 240; a landscape one takes the 480.
+- `sizes` is computed per frame as the rendered width, `round(120 × width ÷ height)` px and `round(88 × width ÷ height)` px at 680px and below (the notebook's own breakpoint, so the frames change when the layout does). On wider screens a portrait frame at 2× takes the 240 and a landscape one takes the 480.
+- **Phones take the 240 only.** A 3× phone would otherwise pick the 480 for a 59px portrait frame, and the first screen came to 1,235KB. Two phone-only `<source>` elements with `media="(max-width: 680px)"` carry the 240 alone, in AVIF and WebP, ahead of the general sources; the price is thumbnails that are a little soft on 3× screens, which suits a contact sheet meant to be scanned, with the sharp image one tap away on the photograph's page.
 - Only the first row of the first entry on the page (at most 8 frames) loads eagerly, the first with `fetchpriority="high"`; every other frame is lazy.
-- Measured on the real manifest (2026-10-08): the four newest posts hold 68 photographs. Their 480 AVIF previews total 1,277,837 bytes; the same frames at 240 AVIF total 391,541 bytes (first entry 20 frames, 120,526 bytes; its first four frames 25,081 bytes). Without JavaScript Chrome ignores `loading="lazy"` and fetches the whole batch, which is then about 392KB instead of 1.3MB. The gate is in section 10.
+- Measured on the real manifest (2026-10-08): the four newest posts hold 68 photographs. Their 480 AVIF previews total 1,277,837 bytes; the same frames at 240 AVIF total 391,541 bytes (first entry 20 frames, 120,526 bytes; its first four frames 25,081 bytes). Chrome's lazy loading fetches frames 1,250 to 3,000px below the screen, and without JavaScript it ignores `loading="lazy"` altogether, so a long first page downloads up front either way; the 240-only phone sources and the two-entry page (3.2) are what hold the first screen at 198KB, at 1× and at 3× alike (374KB and 1,235KB before). The gate is in section 10.
 - The 960 and 1600 previews are never used on `/photos`.
 
 ### 3.4 Pager and loading more
 
 - After the list, while older entries exist, a plain link: `<a class="more" href="/photos?before=<published_at of the last entry shown>" data-next="<same>">older entries</a>`, with the CSS chevron of R4.2. At the end the line reads `that's every entry.` instead.
-- `?before=` must match `^\d{1,10}$`; anything else gets the notebook 404. It selects posts with `published_at` strictly less than it. Four entries per page.
-- With JavaScript (`src/scripts/photo-sheet.ts`, an inline page script with no runtime imports, R6 and R11): an `IntersectionObserver` watches the link with `rootMargin: "0px 0px 800px 0px"`. When it intersects, the script fetches `/api/photos?by=entry&before=<data-next>&limit=4`, clones `<template id="entry-template">` and `<template id="frame-template">` (rendered by the server from the same component, so markup lives in one place) for each entry and frame, appends them to the list and moves `href` and `data-next` to the new cursor, or replaces the link with `that's every entry.` when `next` is `null`. Appended frames are all lazy.
+- `?before=` must match `^\d{1,10}$`; anything else gets the notebook 404. It selects posts with `published_at` strictly less than it. Two entries per page (3.2).
+- With JavaScript (`src/scripts/photo-sheet.ts`, an inline page script with no runtime imports, R6 and R11): an `IntersectionObserver` watches the link with `rootMargin: "0px 0px 800px 0px"`, but **only once the visitor has shown a sign of scrolling**: a scroll, wheel or touch move, a key that scrolls (the arrows, space, page and home keys, End, with no modifier; not Tab, Shift or a chord such as Cmd+F) or focus arriving on the link itself. A two-entry page is short, so the link can already sit inside the 800px margin on load, and observing then would fetch a batch of about 300KB nobody asked for (ADR-0023). When it intersects, the script fetches `/api/photos?by=entry&before=<data-next>&limit=4`, clones `<template id="entry-template">` and `<template id="frame-template">` (rendered by the server from the same component, so markup lives in one place) for each entry and frame, appends them to the list and moves `href` and `data-next` to the new cursor, or replaces the link with `that's every entry.` when `next` is `null`. Appended frames are all lazy.
 - While a batch loads the link reads `loading older entries…` and is `aria-disabled="true"`; one fetch at a time. On failure it goes back to `older entries` and the observer stops, so a click follows the plain link. Focus never moves; the URL never changes.
 
 ### 3.5 Caching
@@ -146,7 +150,7 @@ A shareable page for one published photograph. An unpublished or unknown id gets
 
 Part 2 adds a `prints` row between these two (section 15.1).
 
-The photograph is a `<picture>` with the 960 and 1600 previews in AVIF and WebP, `width` and `height` from the 1600 preview, `fetchpriority="high"` and `loading="eager"`. CSS: `width: 100%; height: auto; max-height: 82svh; object-fit: contain`, so the box is known before the image loads (no shift) and a tall portrait fits the viewport, letterboxed on paper. Because the height cap narrows portraits, `sizes` is computed per photograph from its ratio `r = width ÷ height`: `(max-width: 680px) min(calc(100vw - 67px), calc(82svh * r)), min(710px, calc(82svh * r))` (680px is the notebook's phone breakpoint, and 67px is what its column loses to padding, gap and rule), so a 2:3 portrait on a 900px-tall laptop (about 492px wide) fetches the 960, not the 1600. Its alt text follows 3.2. No closer look, zoom or lightbox: the 1600 preview is the largest image the public site serves.
+The photograph is a `<picture>` with the 960 and 1600 previews in AVIF and WebP, `width` and `height` from the 1600 preview, `fetchpriority="high"` and `loading="eager"`. CSS: `width: 100%; height: auto; max-height: 82svh; object-fit: contain`, so the box is known before the image loads (no shift) and a tall portrait fits the viewport, letterboxed on paper. Because the height cap narrows portraits, `sizes` is computed per photograph from its ratio `r = width ÷ height`: `(max-width: 680px) min(calc(100vw - 67px), calc(82svh * r)), min(710px, calc(82svh * r))` (680px is the notebook's phone breakpoint, the same one the frames on `/photos` use; an earlier draft wrote 679px and would have disagreed with the layout at exactly 680px; 67px is what the column loses to padding, gap and rule), so a 2:3 portrait on a 900px-tall laptop (about 492px wide) fetches the 960, not the 1600. Its alt text follows 3.2. No closer look, zoom or lightbox: the 1600 preview is the largest image the public site serves.
 
 A photograph's **name**, used wherever one photograph has to be named in a line of text (and, in part 2, at checkout, on the order page and in emails), is its title in quotes, or `photo 2 of 14 from 02.02.25` when it has none. `<title>` is `<h1 text> · photos · george vlachos`. The description is `a photo by george vlachos from 2 february 2025, bondi, sydney.` (place left out when unknown; "from" because the date is the post's, not the shutter's). `og:image` is the 1600 WebP with its real `og:image:width` and `og:image:height` (`ogImage` prop, 2.2). Known gap: a few link-preview services still don't read WebP and will show no image. Cached as 3.5. The beacon sends its `$pageview` as on `/`.
 
@@ -250,11 +254,11 @@ CREATE UNIQUE INDEX photo_grants_nonce ON photo_download_grants(request_nonce);
 
 ## 10. Performance budgets (part 1)
 
-R11's method applies to `/photos` (first batch) and `/photos/<id>`:
+R11's method applies to `/photos` (the first page of two entries) and `/photos/<id>`:
 
 - JavaScript before any interaction: under 10KB gzipped per page (the beacon plus `photo-sheet.ts`), all inline, no framework.
-- HTML under 30KB gzipped (the first batch of 68 frames is about 12KB), CSS under 15KB gzipped, the same two fonts.
-- Image bytes loaded before any scroll on `/photos` at 375 × 812: under 250KB, gated in the budget spec. On the real first batch the head row and the first entry's visible rows load well under that (the whole first entry at 240 AVIF is 121KB).
+- HTML under 30KB gzipped (the two-entry first page is about 8KB on the fixture), CSS under 15KB gzipped, the same two fonts.
+- Image bytes loaded before any scroll on `/photos` at 375 × 812: under 250KB, gated in the budget spec at 1× and at a 3× phone's density, which must load only 240 previews. The fixture's four frames weigh about 28KB; the same method on a store shaped like the real catalogue (two entries, 36 frames, previews weighing what real ones do) measured 198KB at both densities, and two 20-frame posts, the worst case, come to about 225KB. The Lighthouse run after the import is the check on the real photographs.
 - Cumulative layout shift under 0.01 at 1280px and 375px, on `/photos` including after one batch loads, and on `/photos/<id>`.
 - Largest contentful paint under 1.5s, a Lighthouse warning after each deploy: `scripts/lighthouse.mjs` takes several URLs and runs `/`, `/photos` and one photograph page.
 
@@ -269,14 +273,14 @@ R11's method applies to `/photos` (first batch) and `/photos/<id>`:
 
 ### 11.2 End to end (Playwright)
 
-- **Gallery** (Chromium, WebKit, phone): entries, headings and frames from the fixture; no place shown for a post without one; the plain `older entries` link without JavaScript; the next batch loading as the page nears the bottom; `that's every entry.`; `noindex` on a `?before=` page; a photograph page with previous and next; the 404 for an unpublished photograph; no layout shift.
+- **Gallery** (Chromium, WebKit, phone): entries, headings and frames from the fixture; no place shown for a post without one; the plain `older entries` link without JavaScript; nothing fetched until the visitor scrolls, then the next batch loading as the page nears the bottom; `that's every entry.`; `noindex` on a `?before=` page; a photograph page with previous and next; the 404 for an unpublished photograph; no layout shift.
 - **Downloads page:** a valid link lists every published photograph and downloads a JPEG whose bytes match the master; private headers and no `Set-Cookie`; no request carries a `Referer`; an expired link (a token the test signs with the fixture key and an already-expired grant row inserted with `wrangler d1 execute --command`), a revoked link and a garbled one each show the same 403 page; no beacon request.
 - **Admin** (on the admin server, 4333): publish and hide a post and a photograph; a verification failure publishes nothing; edit a place and a title; issue a link, see it once, reload without a second link, revoke it.
 - **Privacy and budgets:** as sections 9 and 10.
 
 ### 11.3 Fixture
 
-`scripts/seed-photo-test.mjs` seeds six posts, each photograph with eight previews, with `photo_posts` rows and fixed dates: `fixture` (the existing three 2048 × 2048 photographs, `fixture-03` unpublished, place `bondi, sydney`), `fixture-b` (`fixture-b-01` 4000 × 6000 portrait and `fixture-b-02` 6000 × 4000 landscape, both 2:3, no place), `fixture-c` (`fixture-c-01`, 1200 × 1800) and `fixture-d`, `fixture-e` and `fixture-f` (one 2048 × 2048 photograph each), so the gallery has a second page. Part 2 uses the same fixture for prints.
+`scripts/seed-photo-test.mjs` seeds six posts, each photograph with eight previews, with `photo_posts` rows and fixed dates: `fixture` (the existing three 2048 × 2048 photographs, `fixture-03` unpublished, place `bondi, sydney`), `fixture-b` (`fixture-b-01` 4000 × 6000 portrait and `fixture-b-02` 6000 × 4000 landscape, both 2:3, no place), `fixture-c` (`fixture-c-01`, 1200 × 1800) and `fixture-d`, `fixture-e` and `fixture-f` (one 2048 × 2048 photograph each), so the gallery has a second and a third page of two entries. The 240 and 480 previews are noise at a strength that makes each weigh what a real preview does at its size (about 0.15 bytes a pixel for the 240 AVIF), so the image budget measures something real; the 960 and 1600 stay flat colour. Part 2 uses the same fixture for prints.
 
 ## 12. Launch (part 1)
 
@@ -284,7 +288,7 @@ Only George can do these:
 
 - [ ] Create the R2 bucket **before this branch deploys**, because `wrangler.jsonc` already binds it: `bunx wrangler r2 bucket create curiousgeorge-photo-prints --location oc`; confirm it has no `r2.dev` URL and no custom domain.
 - [ ] Set `PHOTO_LINK_SECRET` (64 lowercase hex characters, fresh, not the local one): `bunx wrangler secret put PHOTO_LINK_SECRET`.
-- [ ] After the deploy has applied migration 0006, run the photo import from the Mac: `photos:prepare` (now with places, dates and 240 previews, filling `scripts/photo-cities.json` where it stops) then `photos:import --remote`, as in docs/photo-gallery-backend.md.
+- [ ] After the deploy has applied migration 0006 (the deploy job runs `migrations apply`), run the photo import from the Mac: `photos:prepare` (now with places, dates and 240 previews, and a version 2 manifest, so a folder prepared earlier is prepared again; filling `scripts/photo-cities.json` where it stops) then `photos:import --remote`, as in docs/photo-gallery-backend.md.
 - [ ] Review every post in `/admin` (places included, ADR-0022) and publish what should be public, looking hardest at the 96 RAW candidates (`raw` pills).
 
 After launch (agent or George): issue the first catalogue link from `/admin` and open it on a phone; check `/photos` against section 10 with the post-deploy Lighthouse run; check the privacy test passes on the live photo pages.

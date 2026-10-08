@@ -29,7 +29,20 @@ bun run check
 
 ## Photographs
 
-Photo catalogue and signed print-download APIs: [backend guide](docs/photo-gallery-backend.md). The preparation/import tools keep print masters private and import new assets as drafts; Claude owns the gallery UI.
+The photo gallery: `/photos`, a page for each photograph and a private downloads page behind catalogue links, with the owner's photographs and links sections in `/admin`. How the pages, the catalogue, the preparation and the import work: [photo gallery guide](docs/photo-gallery-backend.md). The e2e gallery server (4335) gets the six-post photo fixture afresh on every run (`scripts/seed-photo-test.mjs`), and every local test server passes the fixture signing key explicitly (`PHOTO_KEY_VAR` in `playwright.config.ts`), because `build:test` copies `.dev.vars` into `dist/server`.
+
+Decisions: [ADR-0020](docs/adr/0020-photo-downloads-use-revocable-signed-links.md) (amended; revocable signed links), [ADR-0022](docs/adr/0022-photo-places-are-area-and-city-only.md) (amended; area and city only), [ADR-0023](docs/adr/0023-the-gallery-stays-light-on-phones.md) (the gallery stays light on phones) and [ADR-0024](docs/adr/0024-test-servers-never-hold-the-real-signing-key.md) (test servers never hold the real signing key).
+
+Launch steps for the gallery, all George's, in this order:
+
+1. Create the `curiousgeorge-photo-prints` R2 bucket before this branch deploys, because `wrangler.jsonc` binds it.
+2. Apply migration 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`; the deploy job runs it).
+3. Set `PHOTO_LINK_SECRET` as a fresh Worker secret.
+4. From the Mac, run `bun run photos:prepare` and then `bun run photos:import --remote` (the manifest is now version 2).
+5. In `/admin`, review and publish the photographs, including the 96 RAW candidates.
+6. Issue the first catalogue link from `/admin`.
+
+Details, and what is still open: the guide's launch steps and [the plan 6 follow-ups](docs/superpowers/plans/2026-10-08-plan-6-followups.md).
 
 ## Snapshots and analytics
 

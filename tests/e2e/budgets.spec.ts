@@ -1,21 +1,18 @@
 import { gzipSync } from "node:zlib";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { SLOW } from "./deck";
+import { GALLERY } from "./gallery-site";
 
-test("page weight stays inside the budgets", async ({ page, browserName }) => {
-  test.skip(browserName !== "chromium", "measured once, in Chromium");
-  // A short window keeps the turntable out of reach, so this measures only what loads before any interaction;
-  // the scene is measured on its own below
-  await page.setViewportSize({ width: 1280, height: 400 });
-  const sizes = { js: 0, css: 0, html: 0, font: 0 };
-  let fonts = 0;
+/** What a page loads before any interaction: scripts, styles and HTML gzipped, fonts as they are, inline ones counted */
+async function weigh(page: Page, path: string) {
+  const sizes = { js: 0, css: 0, html: 0, font: 0, fonts: 0 };
   const reads: Promise<void>[] = [];
   page.on("response", (response) => {
     const type = response.request().resourceType();
     if (!["script", "stylesheet", "document", "font"].includes(type) || response.status() >= 300) return;
     reads.push(
       response.body().then((body) => {
-        if (type === "font") { sizes.font += body.length; fonts += 1; return; }
+        if (type === "font") { sizes.font += body.length; sizes.fonts += 1; return; }
         const bytes = gzipSync(body).length;
         if (type === "script") sizes.js += bytes;
         if (type === "stylesheet") sizes.css += bytes;
@@ -23,7 +20,7 @@ test("page weight stays inside the budgets", async ({ page, browserName }) => {
       }),
     );
   });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await page.goto(path, { waitUntil: "networkidle" });
   await Promise.all(reads);
   // Astro inlines small page scripts and every stylesheet into the HTML, so count those too
   const inline = await page.evaluate(() => ({
@@ -32,14 +29,72 @@ test("page weight stays inside the budgets", async ({ page, browserName }) => {
   }));
   sizes.js += gzipSync(inline.js).length;
   sizes.css += gzipSync(inline.css).length;
+  return sizes;
+}
+
+test("page weight stays inside the budgets", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "measured once, in Chromium");
+  // A short window keeps the turntable out of reach, so this measures only what loads before any interaction;
+  // the scene is measured on its own below
+  await page.setViewportSize({ width: 1280, height: 400 });
+  const sizes = await weigh(page, "/");
   console.log("budgets (bytes)", sizes);
   expect(sizes.js).toBeGreaterThan(0);
   expect(sizes.js).toBeLessThan(10 * 1024);
   expect(sizes.css).toBeLessThan(15 * 1024);
   expect(sizes.html).toBeLessThan(30 * 1024);
-  expect(fonts).toBe(2);
+  expect(sizes.fonts).toBe(2);
   expect(sizes.font).toBeLessThan(60 * 1024);
 });
+
+// Photo gallery spec 10, on the gallery server's photo fixture
+for (const path of ["/photos", "/photos/fixture-01"]) {
+  test(`${path} stays inside the page budgets, with every script inline`, async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "measured once, in Chromium");
+    test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local photo fixture");
+    const sizes = await weigh(page, `${GALLERY}${path}`);
+    console.log(`budgets for ${path} (bytes)`, sizes);
+    expect(sizes.js).toBeGreaterThan(0);
+    expect(sizes.js).toBeLessThan(10 * 1024);
+    expect(sizes.css).toBeLessThan(15 * 1024);
+    expect(sizes.html).toBeLessThan(30 * 1024);
+    expect(sizes.fonts).toBe(2);
+    await expect(page.locator("script[src]")).toHaveCount(0);
+  });
+}
+
+// The server page holds two entries and a phone takes only the 240 previews (spec 3.3, ADR-0023), so the first screen
+// weighs the same at 1× and at a 3× phone's density. The fixture's four frames weigh about 28KB; the same method on a
+// throwaway store with the real catalogue's shape (two entries, 36 frames of noise tuned to real bytes per pixel)
+// measured 198KB, against 1235KB before the two changes. The Lighthouse run after the import is the check on the real thing.
+for (const scale of [1, 3]) {
+  test.describe(`at ${scale}× density`, () => {
+    test.use({ deviceScaleFactor: scale });
+
+    test("/photos loads under 250KB of images before any scroll at 375 × 812", async ({ page, browserName }) => {
+      test.skip(browserName !== "chromium", "measured once, in Chromium");
+      test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local photo fixture");
+      await page.setViewportSize({ width: 375, height: 812 });
+      let bytes = 0;
+      const urls: string[] = [];
+      const reads: Promise<void>[] = [];
+      page.on("response", (response) => {
+        if (response.request().resourceType() !== "image" || response.status() >= 300) return;
+        urls.push(response.url());
+        reads.push(response.body().then((body) => { bytes += body.length; }));
+      });
+      await page.goto(`${GALLERY}/photos`, { waitUntil: "networkidle" });
+      await Promise.all(reads);
+      console.log(`images before any scroll on /photos at 375px, ${scale}× (bytes)`, bytes);
+      test.info().annotations.push({ type: "images", description: `${bytes} bytes before any scroll on /photos at 375px, ${scale}×` });
+      // Only the 240 previews, at any density: a 480 here is what made a 3× phone load 1235KB
+      expect(urls.length).toBeGreaterThan(0);
+      for (const url of urls) expect(url).toMatch(/\/240\.(avif|webp)$/);
+      expect(bytes).toBeGreaterThan(10 * 1024); // the fixture's previews are noise, so a near-empty page means nothing loaded
+      expect(bytes).toBeLessThan(250 * 1024);
+    });
+  });
+}
 
 test("the scene chunk stays under 190KB gzipped", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "measured once, in Chromium");
