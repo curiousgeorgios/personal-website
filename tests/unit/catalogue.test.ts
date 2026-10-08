@@ -34,6 +34,14 @@ describe("printsFor", () => {
     expect(tiers(3199, 4800)).not.toContain("large x16x24");
   });
 
+  test("an exact 200 pixels per inch on an ISO size isn't lost to float drift", () => {
+    // 1660 / 8.3 is 199.99999999999997 in floating point, but it is exactly 200 ppi
+    expect(1660 / 8.3).toBeLessThan(200);
+    expect(tiers(1660, 2340)).toEqual(["small x8dot3x11dot7"]);
+    expect(tiers(1659, 2340)).toBeNull();
+    expect(tiers(1660, 2339)).toBeNull();
+  });
+
   test("portraits and squares print vertical, landscapes horizontal", () => {
     expect(printsFor(4000, 6000)?.orientation).toBe("Vertical");
     expect(printsFor(2048, 2048)?.orientation).toBe("Vertical");

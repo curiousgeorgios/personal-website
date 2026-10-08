@@ -1,3 +1,4 @@
+import { isPhotoId } from "../photos/photo-id";
 import { isFrame, isTier, type Frame, type Tier } from "./catalogue";
 
 // The basket lives only in the URL's query string (spec 15.2, ADR-0021 as amended), so anyone can edit it: these pure
@@ -23,17 +24,16 @@ export interface BasketLine extends BasketEntry {
   quantity: number;
 }
 
-const PHOTO_ID = /^[A-Za-z0-9_-]{1,64}-\d{2,3}$/;
-const ENTRY = /^([A-Za-z0-9_-]{1,64}-\d{2,3}):([a-z]{1,12}):([a-z]{1,12})$/;
+const WORD = /^[a-z]{1,12}$/;
 
 /** The entries of an items value; anything malformed makes the whole basket empty (spec 15.2) */
 export function parseItems(value: string | null): RawEntry[] {
   if (!value || value.length > 2000) return [];
   const entries: RawEntry[] = [];
   for (const part of value.split(",")) {
-    const match = ENTRY.exec(part);
-    if (!match) return [];
-    entries.push({ photoId: match[1], tier: match[2], frame: match[3] });
+    const [photoId, tier, frame, ...rest] = part.split(":");
+    if (rest.length > 0 || !isPhotoId(photoId) || !WORD.test(tier ?? "") || !WORD.test(frame ?? "")) return [];
+    entries.push({ photoId, tier, frame });
   }
   return entries;
 }
@@ -52,15 +52,15 @@ export function groupLines(entries: readonly BasketEntry[]): BasketLine[] {
 
 /**
  * What is still on offer, grouped into lines; anything else, and anything past the tenth print, dropped and counted.
- * A photo id of the wrong shape counts as unavailable too: parseItems only ever makes well-formed ones, but an add
- * from readOp carries whatever the query string held, and a comma or colon in it must never reach itemsValue.
+ * A photo id of the wrong shape counts as unavailable too: a second layer behind parseItems and readOp, so a comma or
+ * colon can never reach itemsValue however the entries were built.
  */
 export function validate(entries: readonly RawEntry[], offered: (entry: BasketEntry) => boolean): { lines: BasketLine[]; unavailable: number; overCap: number } {
   const kept: BasketEntry[] = [];
   let unavailable = 0;
   let overCap = 0;
   for (const raw of entries) {
-    const entry = PHOTO_ID.test(raw.photoId) && isTier(raw.tier) && isFrame(raw.frame) ? { photoId: raw.photoId, tier: raw.tier, frame: raw.frame } : null;
+    const entry = isPhotoId(raw.photoId) && isTier(raw.tier) && isFrame(raw.frame) ? { photoId: raw.photoId, tier: raw.tier, frame: raw.frame } : null;
     if (!entry || !offered(entry)) unavailable += 1;
     else if (kept.length >= MAX_PRINTS) overCap += 1;
     else kept.push(entry);
@@ -77,10 +77,13 @@ export const basketHref = (items: string) => `/basket${itemsQuery(items)}`;
 
 export type BasketOp = { kind: "add"; entry: RawEntry } | { kind: "remove" | "more"; line: number };
 
-/** The one change a basket link or the print row asks for, or null */
+/**
+ * The one change a basket link or the print row asks for, or null. An add whose photo id is not well-formed is no
+ * change at all, so an unchecked id never leaves the parser; its tier and frame are checked later, by validate.
+ */
 export function readOp(params: URLSearchParams): BasketOp | null {
   const add = params.get("add");
-  if (add !== null) return { kind: "add", entry: { photoId: add, tier: params.get("size") ?? "", frame: params.get("frame") ?? "" } };
+  if (add !== null) return !isPhotoId(add) ? null : { kind: "add", entry: { photoId: add, tier: params.get("size") ?? "", frame: params.get("frame") ?? "" } };
   for (const kind of ["remove", "more"] as const) {
     const value = params.get(kind);
     if (value !== null) return { kind, line: /^\d{1,2}$/.test(value) ? Number(value) : 0 };

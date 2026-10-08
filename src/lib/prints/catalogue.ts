@@ -40,6 +40,9 @@ export const MIN_PPI = 200;
 /** The share of the long side cut away when a photograph of ratio r fills a print of ratio p edge to edge */
 export const crop = (r: number, p: number) => 1 - Math.min(r, p) / Math.max(r, p);
 
+/** At least MIN_PPI pixels per inch, compared in tenths of an inch so an exact 200 (1660 px on 8.3 in) isn't lost to float drift */
+const sharpEnough = (pixels: number, inches: number) => pixels * 10 >= MIN_PPI * Math.round(inches * 10);
+
 export interface Offer {
   tier: Tier;
   size: PrintSize;
@@ -60,7 +63,7 @@ export function printsFor(width: number, height: number): PhotoPrints | null {
   if (crop(r, family.ratio) > CROP_TOLERANCE) return null;
   const offers = TIERS.flatMap((tier): Offer[] => {
     const print = family.tiers[tier];
-    const fits = crop(r, print.long / print.short) <= CROP_TOLERANCE && Math.min(short / print.short, long / print.long) >= MIN_PPI;
+    const fits = crop(r, print.long / print.short) <= CROP_TOLERANCE && sharpEnough(short, print.short) && sharpEnough(long, print.long);
     return fits ? [{ tier, size: print }] : [];
   });
   return offers.length > 0 ? { family: family.name, orientation: width > height ? "Horizontal" : "Vertical", offers } : null;

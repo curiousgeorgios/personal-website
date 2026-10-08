@@ -1,8 +1,10 @@
 import { SignJWT, jwtVerify } from "jose";
+import { PHOTO_ID } from "./photo-id";
+
+export { PHOTO_ID };
 
 export const DEFAULT_LINK_SECONDS = 7 * 86400;
 export const MAX_LINK_SECONDS = 30 * 86400;
-export const PHOTO_ID = /^[A-Za-z0-9_-]{1,64}-\d{2,3}$/;
 export const GRANT_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const AUDIENCE = "photo-download";
 const ISSUER = "curiousgeorge.dev";

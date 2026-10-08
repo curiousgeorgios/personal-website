@@ -21,3 +21,16 @@ test("the gst sentence follows the setting", () => {
   expect(plural(1, "print", "prints")).toBe("1 print");
   expect(plural(3, "print", "prints")).toBe("3 prints");
 });
+
+test("an amount that isn't whole, non-negative cents never reaches a price", () => {
+  for (const bad of [-1, -5900, 0.5, 59.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) {
+    expect(() => aud(bad)).toThrow(RangeError);
+    expect(() => usd(bad)).toThrow(RangeError);
+  }
+  expect(aud(0)).toBe("$0");
+  expect(usd(0)).toBe("us$0.00");
+});
+
+test("a rate that isn't a positive number never reaches a price", () => {
+  for (const bad of [0, -1.5, Number.NaN, Number.POSITIVE_INFINITY]) expect(() => rateText(bad)).toThrow(RangeError);
+});

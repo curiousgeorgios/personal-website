@@ -82,27 +82,53 @@ describe("changes", () => {
 });
 
 describe("a crafted query string", () => {
-  test("an add whose photo id carries a separator or the wrong shape is dropped, never written back", () => {
+  test("an add whose photo id carries a separator or the wrong shape is no change at all", () => {
     for (const photoId of ["", "b-01:small:oak,c-01", "b-01,c-01", "b-01\n", "../b-01", "b-1", "é-01", "a".repeat(65) + "-01"]) {
-      const op = readOp(new URLSearchParams({ add: photoId, size: "small", frame: "oak" }));
-      expect(op?.kind).toBe("add");
-      const result = validate(op?.kind === "add" ? [op.entry] : [], offerAll);
-      expect(result.lines).toEqual([]);
-      expect(result.unavailable).toBe(1);
+      expect(readOp(new URLSearchParams({ add: photoId, size: "small", frame: "oak" }))).toBeNull();
     }
+    // a well-formed id still reaches validate, which checks tier and frame
+    const op = readOp(new URLSearchParams({ add: "b-01", size: "gold", frame: "oak" }));
+    expect(op).toEqual({ kind: "add", entry: { photoId: "b-01", tier: "gold", frame: "oak" } });
+    expect(validate(op?.kind === "add" ? [op.entry] : [], offerAll)).toEqual({ lines: [], unavailable: 1, overCap: 0 });
   });
 
-  test("hostile values never throw and never produce a line", () => {
-    for (const value of ["__proto__-01:small:oak,constructor-01:small:oak", "%00", "a-01:small:oak\n", " ", ",", ":", "a-01:small:oak,".repeat(300)]) {
-      expect(() => validate(parseItems(value), offerAll)).not.toThrow();
+  test("validate refuses a badly shaped id even when it is handed one directly", () => {
+    const result = validate([{ photoId: "b-01:small:oak,c-01", tier: "small", frame: "oak" }], offerAll);
+    expect(result).toEqual({ lines: [], unavailable: 1, overCap: 0 });
+  });
+
+  test("hostile values give an empty basket, or the canonical one, and never throw", () => {
+    const empty = ["__proto__-01:small:oak,constructor-01:small", "%00", "a-01:small:oak\n", " ", ",", ":", "a-01:small:oak:", "a-01:small:oak,", ",a-01:small:oak", "a-01:small:oak,".repeat(300), "a-01:small:oak;b-01:small:oak"];
+    for (const value of empty) expect(validate(parseItems(value), offerAll)).toEqual({ lines: [], unavailable: 0, overCap: 0 });
+    // __proto__ is only a string: a well-formed id, an ordinary line
+    expect(itemsValue(validate(parseItems("__proto__-01:small:oak"), offerAll).lines)).toBe("__proto__-01:small:oak");
+    // a tier named like an object property is dropped as unavailable, not looked up
+    expect(parseItems("a-01:toString:oak")).toEqual([]);
+    for (const tier of ["constructor", "length", "prototype"]) expect(validate(parseItems(`a-01:${tier}:oak`), offerAll)).toEqual({ lines: [], unavailable: 1, overCap: 0 });
+  });
+
+  test("the query string is decoded once, by URLSearchParams; the module never decodes", () => {
+    const items = (query: string) => new URLSearchParams(query).get("items");
+    // %2C and %3A decode to the real separators, so an encoded basket reads the same as a plain one
+    expect(itemsValue(validate(parseItems(items("items=a-01%3Asmall%3Aoak%2Cb-02%3Alarge%3Aunframed")), offerAll).lines)).toBe("a-01:small:oak,b-02:large:unframed");
+    // double encoding decodes to a literal %3A, which is no part of an entry: the whole basket is empty
+    expect(items("items=a-01%253Asmall%253Aoak")).toBe("a-01%3Asmall%3Aoak");
+    expect(parseItems(items("items=a-01%253Asmall%253Aoak"))).toEqual([]);
+    expect(parseItems(items("items=a-01%3Asmall%3Aoak%252Cb-02%3Asmall%3Aoak"))).toEqual([]);
+    // an encoded newline, space or NUL is rejected after the one decode
+    for (const encoded of ["%0A", "%20", "%00"]) expect(parseItems(items(`items=a-01%3Asmall%3Aoak${encoded}`))).toEqual([]);
+    // and the canonical value written back never contains a character that needs encoding
+    expect(itemsValue(validate(parseItems("a-01:small:oak,b-02:large:unframed"), offerAll).lines)).toMatch(/^[A-Za-z0-9_:,-]+$/);
+  });
+
+  test("odd line numbers read as line 0, which changes nothing", () => {
+    for (const query of ["remove=-1", "more=1e1", "more=%20", "remove=100", "remove=01x"]) {
+      const op = readOp(new URLSearchParams(query));
+      expect(op?.kind === "add" ? null : op?.line).toBe(0);
     }
-    expect(parseItems("a-01:small:oak\n")).toEqual([]);
-    expect(parseItems("a-01:small:oak,".repeat(300))).toEqual([]);
-    for (const query of ["remove=-1", "more=1e1", "more=%20", "remove=999", "add&size=", "remove=2&more=1"]) {
-      expect(() => readOp(new URLSearchParams(query))).not.toThrow();
-    }
-    expect(readOp(new URLSearchParams("remove=-1"))).toEqual({ kind: "remove", line: 0 });
-    expect(readOp(new URLSearchParams("more=1e1"))).toEqual({ kind: "more", line: 0 });
+    expect(readOp(new URLSearchParams("remove=999"))).toEqual({ kind: "remove", line: 0 });
+    expect(readOp(new URLSearchParams("remove=2&more=1"))).toEqual({ kind: "remove", line: 2 });
+    expect(readOp(new URLSearchParams("add&size=small"))).toBeNull();
   });
 
   test("a basket of many entries is capped at ten prints however it is padded", () => {
