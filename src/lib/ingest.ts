@@ -82,6 +82,16 @@ function parseEvent(text: string): IngestEvent | null {
   return { event: event as IngestEvent["event"], properties: (properties as Record<string, unknown> | undefined) ?? {} };
 }
 
+/** Whether a URL is the downloads page or one of its files, or carries a token in its query */
+function isDownloadsUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.pathname.startsWith("/photos/downloads") || url.searchParams.has("token");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Forwards one beacon event to PostHog's capture endpoint in cookieless server hash mode (spec 10). The key, the
  * country and the time are added here: the visitor's clock could put a visit in the wrong day of PostHog's daily hash.
@@ -100,8 +110,11 @@ export async function forwardEvent(
   const parsed = parseEvent(text);
   if (!parsed) return ingestAnswer(400);
   // The downloads page carries no beacon; should one ever be added, its events are still never counted (spec 2.2)
+  // $current_url is checked too, as defence in depth: it is forwarded as sent, and a hand-made event could carry the page's URL there
   const pathname = parsed.properties.$pathname;
   if (typeof pathname === "string" && pathname.startsWith("/photos/downloads")) return ingestAnswer(400);
+  const currentUrl = parsed.properties.$current_url;
+  if (typeof currentUrl === "string" && isDownloadsUrl(currentUrl)) return ingestAnswer(400);
   if (!config.key) return ingestAnswer(204);
   const properties: Record<string, unknown> = {};
   for (const name of INGEST_PROPERTIES) if (parsed.properties[name] !== undefined) properties[name] = parsed.properties[name];

@@ -19,7 +19,8 @@ test("a catalogue link lists every published photo and downloads the master, pri
     if (referer) referers.push(`${sent.url()} from ${referer}`);
     if (new URL(sent.url()).pathname.startsWith("/ingest")) counted.push(sent.url());
   });
-  page.on("response", async (answer) => { if ((await answer.allHeaders())["set-cookie"]) cookies.push(answer.url()); });
+  // headers() is synchronous, so no listener is still pending when the test ends and the page closes
+  page.on("response", (answer) => { if (answer.headers()["set-cookie"]) cookies.push(answer.url()); });
   const response = await page.goto(link.url);
   expect(response?.status()).toBe(200);
   expect(response?.headers()).toMatchObject({ "cache-control": "private, no-store", "cloudflare-cdn-cache-control": "no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" });
@@ -53,7 +54,12 @@ test("expired, revoked, garbled and missing links all get the same 403 page", as
   adminD1(`INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES ('${grant.grantId}', NULL, ${grant.expiresAt})`);
   const revoked = await catalogueLink(request);
   await request.delete(`${ADMIN}/admin/photos/links?grantId=${revoked.grantId}`, { headers: { Origin: ADMIN } });
-  const pages = [`/photos/downloads?token=${expired}`, `/photos/downloads${new URL(revoked.url).search}`, "/photos/downloads?token=garbled", "/photos/downloads"];
+  // Signed with the fixture key but photo-scoped (a grant made only inside the site), and signed with a key that isn't the site's
+  const scoped = { grantId: crypto.randomUUID(), photoId: "fixture-01", expiresAt: now + 600 };
+  adminD1(`INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES ('${scoped.grantId}', 'fixture-01', ${scoped.expiresAt})`);
+  const photoScoped = encodeURIComponent(await signPhotoToken(SECRET, scoped, now));
+  const wrongKey = encodeURIComponent(await signPhotoToken("2".repeat(64), { grantId: crypto.randomUUID(), photoId: null, expiresAt: now + 600 }, now));
+  const pages = [`/photos/downloads?token=${expired}`, `/photos/downloads${new URL(revoked.url).search}`, `/photos/downloads?token=${photoScoped}`, `/photos/downloads?token=${wrongKey}`, "/photos/downloads?token=garbled", "/photos/downloads"];
   const bodies = new Set<string>();
   for (const path of pages) {
     const response = await page.goto(`${ADMIN}${path}`);
@@ -64,4 +70,14 @@ test("expired, revoked, garbled and missing links all get the same 403 page", as
     bodies.add(await page.locator("main").innerText());
   }
   expect(bodies.size).toBe(1);
+});
+
+test("the page keeps its private headers on an encoded or doubled-slash path", async ({ page, request }) => {
+  // Astro normalises the URL before the middleware sees it; this pins that, so an upgrade that stopped doing so would show here
+  const link = await catalogueLink(request);
+  const search = new URL(link.url).search;
+  for (const path of ["/photos/%64ownloads", "//photos/downloads"]) {
+    const response = await page.goto(`${ADMIN}${path}${search}`);
+    expect(response?.headers()).toMatchObject({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
+  }
 });

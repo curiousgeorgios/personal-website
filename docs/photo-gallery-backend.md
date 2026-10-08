@@ -20,9 +20,9 @@ Public photo fields: `id`, `collection`, `title`, `width`, `height`, `downloadBy
 
 The public catalogue uses the `photos` cache tag. Publication endpoints invalidate it. `cacheInvalidated: false` means a write succeeded but public catalogue entries may remain cached for the configured 60-second fresh window plus 300-second stale window. Downloads check publication in D1 on each request.
 
-Owner writes require a matching Origin header; request bodies require `application/json`. Link issuance accepts `{ "photoId": "…", "expiresInSeconds": 604800 }`; omit `photoId` for the catalogue. Publication accepts `{ "published": true }`. JSON bodies are capped at 4 KB. Full-resolution links must not be embedded into public catalogue responses, external analytics, referrers or public static assets.
+Owner writes require a matching Origin header; request bodies require `application/json`. Link issuance accepts `{ "expiresInSeconds": 604800 }` and always issues a catalogue link; a `photoId` is refused with 400. Publication accepts `{ "published": true }`. JSON bodies are capped at 4 KB. Full-resolution links must not be embedded into public catalogue responses, external analytics, referrers or public static assets.
 
-Use responsive previews, bounded catalogue batches and intrinsic image dimensions. Fetch full-resolution bytes only on a download action. This backend adds no public page, UI, browser script or homepage link; Claude handles that work.
+Use responsive previews, bounded catalogue batches and intrinsic image dimensions. Fetch full-resolution bytes only on a download action. The one page this backend serves is the private downloads page, which has no browser script and no link from any public page.
 
 ## Local preparation and import
 

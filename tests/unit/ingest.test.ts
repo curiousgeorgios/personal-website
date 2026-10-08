@@ -195,6 +195,12 @@ test("an event from the downloads page is refused and never forwarded", async ()
     expect((await forwardEvent(post(body), config, upstream, serverNow)).status).toBe(400);
   }
   expect(upstream).not.toHaveBeenCalled();
+  // The URL property is checked too: a hand-made event could carry the page's address there with a public path
+  for (const $current_url of ["https://curiousgeorge.dev/photos/downloads?token=private", "https://curiousgeorge.dev/photos?token=private"]) {
+    const body = JSON.stringify({ ...pageview, properties: { ...pageview.properties, $pathname: "/photos", $current_url } });
+    expect((await forwardEvent(post(body), config, upstream, serverNow)).status).toBe(400);
+  }
+  expect(upstream).not.toHaveBeenCalled();
   const gallery = JSON.stringify({ ...pageview, properties: { ...pageview.properties, $pathname: "/photos" } });
   expect((await forwardEvent(post(gallery), config, upstream, serverNow)).status).toBe(204);
 });

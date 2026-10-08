@@ -145,9 +145,12 @@ export async function entryPage(db: D1Database, before: number | null, limit: nu
   };
 }
 
-/** Every published photograph, grouped into entries newest first, on one page (the downloads page, spec 5.2) */
+/** The most posts the downloads page lists. Far beyond the gallery's few hundred photographs; a larger library would be cut off here, deliberately, rather than grow one query without bound. */
+export const ALL_ENTRIES_LIMIT = 10_000;
+
+/** Every published photograph, grouped into entries newest first, on one page (the downloads page, spec 5.2), up to ALL_ENTRIES_LIMIT posts */
 export async function allEntries(db: D1Database, sizes: readonly number[]): Promise<Entry[]> {
-  return (await entryPage(db, null, 10_000, sizes)).entries;
+  return (await entryPage(db, null, ALL_ENTRIES_LIMIT, sizes)).entries;
 }
 
 /** One photograph's page (spec 4): the photograph, and where it sits among its post's published photographs */
