@@ -19,6 +19,23 @@ const run = (path: string, next: () => Promise<Response>) => {
 
 afterEach(() => vi.restoreAllMocks());
 
+test("private photo paths cannot inherit public cache headers or leak a token as a referrer", async () => {
+  for (const path of ["/photos/downloads/fixture-01?token=private", "/api/photos/downloads?token=private"]) {
+    const response = await run(path, () => Promise.resolve(new Response("ok", { headers: { "Cache-Control": "public, max-age=999", "Cache-Tag": "photos" } })));
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Cloudflare-CDN-Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.has("Cache-Tag")).toBe(false);
+  }
+});
+
+test("a failed private photo route retains cache exclusion", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await run("/photos/downloads/fixture-01", () => Promise.reject(new Error("down")));
+  expect(response.status).toBe(503);
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+});
+
 describe("middleware, when the page throws", () => {
   test("/admin answers a plain 500 that still carries the admin and security headers", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

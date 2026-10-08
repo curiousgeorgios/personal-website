@@ -2,6 +2,7 @@ import { defineMiddleware } from "astro:middleware";
 import { env } from "cloudflare:workers";
 import type { AccessIdentity } from "./lib/admin/access";
 import { adminIdentity, isAdminPath, originAllowed } from "./lib/admin/gate";
+import { PRIVATE_HEADERS } from "./lib/photos/http";
 
 // Astro sends Content-Security-Policy itself (security.csp in astro.config.mjs); these are the rest.
 const SECURITY_HEADERS: Record<string, string> = {
@@ -19,6 +20,7 @@ const refuse = (message: string) => plain(message, 403);
 export const onRequest = defineMiddleware(async (context, next) => {
   const { request, url } = context;
   const admin = isAdminPath(url.pathname);
+  const privatePhotos = url.pathname === "/api/photos/downloads" || url.pathname === "/api/photos/downloads/" || url.pathname === "/photos/downloads" || url.pathname.startsWith("/photos/downloads/");
   let response: Response;
   // Every write must come from this site. Astro's own check is off, so these 403s get the headers below.
   if (!originAllowed(request, url)) {
@@ -43,7 +45,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
       response = refuse("forbidden");
     }
   } else {
-    response = await next();
+    if (privatePhotos) {
+      try { response = await next(); }
+      catch { console.error("photos: route unavailable"); response = plain("Downloads are temporarily unavailable.", 503); }
+    } else response = await next();
   }
   // Redirect responses have immutable headers, so always copy before setting
   const secured = new Response(response.body, response);
@@ -56,6 +61,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
     secured.headers.set("Cloudflare-CDN-Cache-Control", "no-store");
     secured.headers.delete("Cache-Tag");
     secured.headers.set("X-Robots-Tag", "noindex");
+  }
+  if (privatePhotos) {
+    for (const [name, value] of Object.entries(PRIVATE_HEADERS)) secured.headers.set(name, value);
+    secured.headers.delete("Cache-Tag");
   }
   return secured;
 });

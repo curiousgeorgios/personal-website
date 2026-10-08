@@ -1,6 +1,6 @@
 // Media lives in R2 and is served same-origin under /media/<key> (spec 6.2). Keys are unique and never reused,
 // so a file can be cached for a year.
-export const MEDIA_PREFIXES = ["audio/", "covers/", "snapshots/"];
+export const MEDIA_PREFIXES = ["audio/", "covers/", "snapshots/", "photos/previews/"];
 
 export function isMediaKey(key: string): boolean {
   if (!MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix))) return false;

@@ -17,6 +17,8 @@ declare namespace App {
 
 declare namespace Cloudflare {
   interface Env {
+    /** 32 random bytes as lowercase hex. Kept in a Worker secret, never in the public catalogue. */
+    PHOTO_LINK_SECRET?: string;
     /** The PostHog project key, a Worker secret (wrangler secret put POSTHOG_KEY). Unset locally, so /ingest drops events */
     POSTHOG_KEY?: string;
   }

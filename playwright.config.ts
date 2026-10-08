@@ -32,7 +32,7 @@ export default defineConfig({
         // afresh on every run, so it's never reused
         {
           command:
-            "rm -rf .wrangler/admin && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/admin && wrangler dev -c dist/server/wrangler.json --port 4333 --persist-to .wrangler/admin",
+            "rm -rf .wrangler/admin && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/admin && node scripts/seed-photo-test.mjs --persist-to .wrangler/admin && wrangler dev -c dist/server/wrangler.json --port 4333 --persist-to .wrangler/admin --var PHOTO_LINK_SECRET:1111111111111111111111111111111111111111111111111111111111111111",
           url: "http://localhost:4333",
           reuseExistingServer: false,
           timeout: 120_000,

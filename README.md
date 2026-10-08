@@ -27,6 +27,10 @@ bun run check
 
 `/admin` sits behind Cloudflare Access, and the Worker also requires the token's email to be `ADMIN_EMAIL` (`wrangler.jsonc`, ADR-0016); the page shows the day the Access session ends, or on its last day the time (until 14:30). Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "it's on the logbook now" there, because the dev server's cache accepts the purge and does nothing. Against a built Worker under `wrangler dev` (the end-to-end servers on ports 4331 to 4333) there's no cache to purge, so saves say "the logbook may show the old version for a little while".
 
+## Photographs
+
+Photo catalogue and signed print-download APIs: [backend guide](docs/photo-gallery-backend.md). The preparation/import tools keep print masters private and import new assets as drafts; Claude owns the gallery UI.
+
 ## Snapshots and analytics
 
 The snapshots Worker lives in `workers/snapshots/`. `bun run dev:snapshots` runs it on its own, with its own store (`.wrangler/snapshots-dev`, migrated first) and its own dev registry, so the site's servers never reach it; its nightly run, started with `curl http://localhost:8790/__scheduled`, captures the lines' real pages into that store. The end-to-end suite runs it beside the site on port 4334, with local Browser Rendering (wrangler downloads Chrome on first use) capturing a fixture site on port 4400. Run scripts under Node 24 (`mise exec node@24 --` outside your home directory): wrangler's Chrome download has hung under Node 26.
