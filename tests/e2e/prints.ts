@@ -1,16 +1,28 @@
 import { execFileSync } from "node:child_process";
-import type { Page } from "@playwright/test";
-import { PRINTS, STAND_IN } from "./prints-site";
+import { createHmac } from "node:crypto";
+import { expect, type Page } from "@playwright/test";
+import { FIXTURE_SECRETS, PRINTS, STAND_IN } from "./prints-site";
 
 // Helpers for the print specs. They write only to the prints servers' own stores and read the stand-in.
 
 /** A suffix unique to this attempt, so parallel and retried tests never collide */
 export const unique = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 46656).toString(36)}`;
 
-/** SQL on a prints server's own local store: reading a row, or setting test data (spec 11.2's rule) */
+/**
+ * SQL on a prints server's own local store: reading a row, or setting test data (spec 11.2's rule). Two of these at once
+ * on one store can fail with wrangler's "internal error" (parallel specs poll it), so a failure is tried again after a
+ * short random wait. Writes must therefore be idempotent: set a value, never add to one
+ */
 export function printsD1<T = Record<string, unknown>>(sql: string, store = ".wrangler/prints"): T[] {
-  const output = execFileSync("bunx", ["wrangler", "d1", "execute", "curiousgeorge-logbook", "--local", "--persist-to", store, "--json", "--command", sql], { encoding: "utf8" });
-  return (JSON.parse(output) as { results: T[] }[])[0]?.results ?? [];
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const output = execFileSync("bunx", ["wrangler", "d1", "execute", "curiousgeorge-logbook", "--local", "--persist-to", store, "--json", "--command", sql], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      return (JSON.parse(output) as { results: T[] }[])[0]?.results ?? [];
+    } catch (error) {
+      if (attempt >= 6) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200 + Math.floor(Math.random() * 600));
+    }
+  }
 }
 
 /** JSON from the stand-in */
@@ -82,4 +94,66 @@ export interface StandInSession {
 /** The stand-in's Checkout Sessions made for this shipping name */
 export async function sessionsFor(name: string): Promise<StandInSession[]> {
   return (await standIn<StandInSession[]>("/__stripe/sessions")).filter((entry) => entry.form["payment_intent_data[shipping][name]"] === name);
+}
+
+/** A basket quoted for an Australian test address and sent to checkout; the order and its session at the stand-in */
+export async function checkoutOrder(page: Page, name: string, items = TWO_PRINTS, site = PRINTS): Promise<{ orderId: string; sessionId: string }> {
+  await page.goto(`${site}/basket?items=${items}`);
+  await quoteDelivery(page, auAddress(name));
+  const response = await postPayForm(page, site);
+  if (response.status() !== 303) throw new Error(`checkout answered ${response.status()}`);
+  const sessionId = response.headers()["location"].split("/").at(-1)!;
+  const [found] = (await sessionsFor(name)).filter((entry) => entry.session.id === sessionId);
+  return { orderId: found.session.client_reference_id, sessionId };
+}
+
+/** Completes a session at the stand-in as Checkout would; its checkout.session.completed event, for the spec to deliver */
+export async function payAtStandIn(sessionId: string, extra: Record<string, unknown> = {}) {
+  return standIn<{ event: { id: string } & Record<string, unknown> }>("/__stripe/pay", { method: "POST", body: JSON.stringify({ session: sessionId, ...extra }) });
+}
+
+export function stripeSignature(body: string, secret: string, t = Math.floor(Date.now() / 1000)) {
+  return `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${body}`).digest("hex")}`;
+}
+
+/** Delivers an event to a prints server as Stripe would: signed, and with no Origin */
+export async function deliverStripe(site: string, event: unknown, secret: string = FIXTURE_SECRETS.STRIPE_WEBHOOK_SECRET): Promise<number> {
+  const body = JSON.stringify(event);
+  return (await fetch(`${site}/api/prints/stripe`, { method: "POST", body, headers: { "Content-Type": "application/json", "Stripe-Signature": stripeSignature(body, secret) } })).status;
+}
+
+export async function waitForStatus(orderId: string, status: string, store = ".wrangler/prints") {
+  await expect.poll(() => printsD1<{ status: string }>(`SELECT status FROM print_orders WHERE id = '${orderId}'`, store)[0]?.status, { timeout: 30_000 }).toBe(status);
+}
+
+/** How the stand-in answers this order's creation: "ok", "down" or { refuse: photoId } */
+export async function setMode(orderId: string, mode: "ok" | "down" | { refuse: string }) {
+  await fetch(`${STAND_IN}/__mode`, { method: "POST", body: JSON.stringify({ order: orderId, mode }) });
+}
+
+export interface StandInOrder {
+  id: string;
+  orderId: string;
+  status: string;
+  order: { customerAddress: Record<string, string>; isTestOrder: boolean; items: { orderItemId: string; quantity: number; productInfo: Record<string, unknown> & { designs: { sourceImage: { url: string } }[] } }[] };
+  designs: { url: string; status: number; type: string; sha256: string; width: number; height: number }[];
+}
+
+export async function arteloOrdersFor(orderId: string): Promise<StandInOrder[]> {
+  return (await standIn<StandInOrder[]>("/__orders")).filter((entry) => entry.orderId === orderId);
+}
+
+/** The sink's emails whose subject or text contains this */
+export async function mailFor(match: string) {
+  return (await standIn<{ to: string; subject: string; text: string; html: string; replyTo: string; from: { email: string; name: string } }[]>("/__mail")).filter((mail) => mail.subject.includes(match) || mail.text.includes(match));
+}
+
+/**
+ * Runs the prints cron once through wrangler's local explorer, as snapshots-live.spec.ts does: GET /__scheduled can't
+ * reach a Worker built with no_bundle
+ */
+export async function runCron(site = PRINTS) {
+  const response = await fetch(`${site}/cdn-cgi/local/explorer/api/local/scheduled?worker=personal-website`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cron: "*/5 * * * *" }) });
+  const answer = (await response.json().catch(() => null)) as { success?: boolean } | null;
+  if (!response.ok || !answer?.success) throw new Error(`the cron answered ${response.status}`);
 }

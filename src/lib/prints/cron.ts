@@ -3,6 +3,7 @@ import { refreshRate } from "./fx";
 import { sendDueMail } from "./mail";
 import { placeDue } from "./place";
 import { readSettings, writeSetting, type DailyJob } from "./store";
+import { reconcileCheckouts } from "./stripe-events";
 
 /** A daily job runs when its timestamp is this old: 20 hours, so a five-minute cron drifting never skips a day */
 export const DAILY_EVERY = 20 * 3600;
@@ -36,6 +37,7 @@ export async function runSteps(steps: readonly CronStep[]): Promise<string[]> {
 export function cronSteps(deps: PrintDeps): CronStep[] {
   return [
     ["placing due orders", () => placeDue(deps)],
+    ["reconciling checkouts", () => reconcileCheckouts(deps)],
     ["unsent emails", () => sendDueMail(deps)],
     ["exchange rate", () => daily(deps, "fx", async () => (await refreshRate(deps)) !== "failed")],
   ];

@@ -57,3 +57,27 @@ export const getPaymentIntent = (deps: PrintDeps, id: string) => stripe(deps, "G
 
 /** An order is live or test by the key that made it (spec 17.2 step 3), standard or restricted */
 export const livemodeOf = (key: string): 0 | 1 => (LIVE_STRIPE_KEY.test(key) ? 1 : 0);
+
+/** Stripe's signed timestamp may be at most five minutes from now (spec 18.1) */
+export const SIGNATURE_TOLERANCE = 300;
+
+export function fromHex(text: string): Uint8Array<ArrayBuffer> | null {
+  if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return null;
+  return Uint8Array.from(text.match(/../g)!, (byte) => Number.parseInt(byte, 16));
+}
+
+/** Stripe-Signature: t=<seconds>,v1=<hex>[,v1=…], an HMAC-SHA256 of "<t>.<raw body>", compared in constant time by Web Crypto */
+export async function verifyStripeSignature(secret: string, header: string | null, body: string, now: number): Promise<boolean> {
+  if (!secret || !header) return false;
+  const pairs = header.split(",").map((part) => {
+    const at = part.indexOf("=");
+    return [part.slice(0, at).trim(), part.slice(at + 1).trim()] as const;
+  });
+  const t = pairs.find(([name]) => name === "t")?.[1];
+  const signatures = pairs.filter(([name]) => name === "v1").map(([, value]) => fromHex(value)).filter((value): value is Uint8Array<ArrayBuffer> => value !== null);
+  if (!t || !/^\d{1,12}$/.test(t) || Math.abs(now - Number(t)) > SIGNATURE_TOLERANCE || signatures.length === 0) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const data = new TextEncoder().encode(`${t}.${body}`);
+  for (const signature of signatures) if (await crypto.subtle.verify("HMAC", key, signature, data)) return true;
+  return false;
+}
