@@ -30,8 +30,8 @@ const RULES: Record<AddressField, { required?: string; max: number }> = {
   country: { required: "choose a country.", max: 2 },
   phone: { required: "add a phone number.", max: 20 },
 };
-/** Control characters and line or paragraph separators: every field is one line of printable text */
-const NOT_ONE_LINE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+/** Control characters, line and paragraph separators and the bidi overrides and isolates that reorder how text shows: every field is one line of printable text */
+const NOT_ONE_LINE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
 export function checkAddress(fields: Address): { ok: true; address: Address } | { ok: false; errors: AddressErrors } {
   const errors: AddressErrors = {};
@@ -46,7 +46,7 @@ export function checkAddress(fields: Address): { ok: true; address: Address } | 
   if (!errors.phone) {
     // The carrier may need it; digits and the usual separators only
     if (!/^[0-9 +()-]+$/.test(fields.phone)) errors.phone = "use digits, spaces, +, -, ( and ) only.";
-    else if (fields.phone.length < 6 || (fields.phone.match(/\d/g) ?? []).length < 6) errors.phone = "that phone number looks too short.";
+    else if ((fields.phone.match(/\d/g) ?? []).length < 6) errors.phone = "that phone number looks too short.";
   }
   return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, address: { ...fields } };
 }

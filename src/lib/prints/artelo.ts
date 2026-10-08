@@ -2,7 +2,7 @@ import type { Address } from "./address";
 import type { Frame, Orientation, PrintSize } from "./catalogue";
 import type { PrintDeps } from "./config";
 // With its extension: bun run prints:check (Task 14) runs this file under plain Node, which resolves no bare relative paths
-import { readOrderCosts, type OrderCosts } from "./quote.ts";
+import { DELIVERY_CEILING_CENTS, deliveryAmount, MAX_BUFFER, readOrderCosts, type OrderCosts } from "./quote.ts";
 
 // Artelo's open API (spec 16.1, 18.2, 18.3), through fetch with the key and a 15-second timeout. Nothing here throws:
 // every call answers ok with a body, or not ok with a status (null for a network error, a timeout or an unreadable 2xx).
@@ -29,6 +29,8 @@ export async function artelo(deps: PrintDeps, method: "GET" | "POST", path: stri
       headers: { Authorization: `Bearer ${deps.config.secrets.ARTELO_API_KEY}`, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(ARTELO_TIMEOUT_MS),
+      // A redirect is never followed: the key goes to the configured host and nowhere else, and a 3xx is unavailable
+      redirect: "manual",
     });
   } catch {
     return { ok: false, status: null, message: "" };
@@ -120,6 +122,10 @@ export async function priceCheck(deps: PrintDeps, lines: readonly QuoteLine[], a
     console.error("prints: artelo's price check answer couldn't be read");
     return { ok: false, refused: null };
   }
-  if (costs.unknown.length > 0) console.warn("prints: artelo's price check has charges this site doesn't know:", costs.unknown.join(", "));
+  // Spec 16.1's sanity ceiling, at the largest buffer the settings allow: a figure this high is a misread, not a price
+  if (deliveryAmount(costs.freightCents, costs.taxes, rate, MAX_BUFFER) > DELIVERY_CEILING_CENTS) {
+    console.error("prints: ignored an artelo price check whose delivery is over the ceiling");
+    return { ok: false, refused: null };
+  }
   return { ok: true, costs };
 }

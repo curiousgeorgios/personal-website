@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 import type { PrintDeps } from "../../src/lib/prints/config";
-import { daily, runScheduled, runSteps } from "../../src/lib/prints/cron";
+import { cronSteps, daily, runScheduled, runSteps } from "../../src/lib/prints/cron";
 import { readSettings } from "../../src/lib/prints/store";
-import { NOW, testDeps } from "./prints-fakes";
+import { captureLogs, fakeFetch, json, NOW, testDeps } from "./prints-fakes";
 import { sqliteD1 } from "./sqlite-d1";
 
 afterEach(() => vi.restoreAllMocks());
@@ -46,4 +46,19 @@ test("a daily job runs when its timestamp is over 20 hours old, and records the 
   const failing = vi.fn(async () => false);
   await daily(deps, "cleanup", failing);
   expect((await readSettings(deps.db)).daily.cleanup).toBe(0);
+});
+
+test("the cron's exchange-rate step stores the rate; a bad answer counts as done for the day, a failed fetch does not", async () => {
+  captureLogs();
+  const answering = (handler: () => Response) => testDeps(sqliteD1(), { fetch: fakeFetch({ "GET https://fx.test/latest": handler }).fetch });
+  const good = answering(() => json({ date: "2026-10-07", rates: { AUD: 1.5237 } }));
+  await runScheduled(good);
+  expect(await readSettings(good.db)).toMatchObject({ rate: 1.5237, daily: { fx: NOW } });
+  const odd = answering(() => json({ date: "2026-10-07", rates: { AUD: 15 } }));
+  await runScheduled(odd);
+  expect(await readSettings(odd.db)).toMatchObject({ rate: null, daily: { fx: NOW } });
+  const down = answering(() => new Response("down", { status: 503 }));
+  await runScheduled(down);
+  expect(await readSettings(down.db)).toMatchObject({ rate: null, daily: { fx: 0 } });
+  expect(cronSteps(down).map(([name]) => name)).toEqual(["exchange rate"]);
 });

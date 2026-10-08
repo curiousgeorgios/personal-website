@@ -18,43 +18,74 @@ export interface OrderCosts {
   productionCents: number | null;
   /** Every non-zero tax field */
   taxes: TaxLine[];
-  /** Numeric fields that are neither a known cost nor a tax, by name, so a new Artelo charge is noticed */
-  unknown: string[];
 }
 
-const KNOWN_COSTS = new Set(["productionCost", "arteloShipping", "branding", "customPricingAdjustment", "holidayFees", "wholesaleDiscount", "amountRefunded", "total"]);
-const TAX_ORDER = ["usSalesTax", "gst", "hst", "pst"];
+// Only the tax fields in Artelo's Price Check reference count as tax: a name that merely looks like one (a total, a rate, a
+// fee with "vat" inside it) must never set what a buyer pays. Anything else this site doesn't know refuses the quote.
+const TAX_ORDER = ["usSalesTax", "gst", "hst", "pst"] as const;
 const TAX_LABELS: Record<string, string> = { usSalesTax: "us sales tax", gst: "canadian gst", hst: "canadian hst", pst: "canadian pst" };
-const TAX_LIKE = /tax|vat|gst|hst|pst|duty/i;
-const rank = (field: string) => (TAX_ORDER.includes(field) ? TAX_ORDER.indexOf(field) : TAX_ORDER.length);
+/** Charges that sit in Artelo's total beside production, freight and tax; wholesaleDiscount comes off it */
+const ADDED_COSTS = ["productionCost", "branding", "customPricingAdjustment", "holidayFees"];
+const RECOGNISED = new Set([...TAX_ORDER, ...ADDED_COSTS, "arteloShipping", "wholesaleDiscount", "amountRefunded", "total"]);
+
+/** The largest delivery buffer print_settings accepts (spec 16.4) */
+export const MAX_BUFFER = 0.2;
+/** A sanity ceiling on the converted delivery, A$500 in cents: anything above it is a misread, not a price (spec 16.1) */
+export const DELIVERY_CEILING_CENTS = 50_000;
 
 export const cents = (dollars: number) => Math.round(dollars * 100);
 
-/** Reads Price Check's orderCosts (or an order's details); null when there is no usable arteloShipping */
+/**
+ * Reads Price Check's orderCosts (or an order's details). Null, unavailable, when it can't be trusted: no usable
+ * arteloShipping, a negative or non-numeric amount, a charge field this site doesn't know, or parts that don't add up to
+ * Artelo's total. The reason is logged, by field name, never with anything about the buyer.
+ */
 export function readOrderCosts(value: unknown): OrderCosts | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const costs = value as Record<string, unknown>;
   const freight = costs.arteloShipping;
   if (typeof freight !== "number" || !Number.isFinite(freight) || freight < 0) return null;
-  const taxes: TaxLine[] = [];
-  const unknown: string[] = [];
+  const refuse = (reason: string) => {
+    console.error("prints: ignored an artelo price check:", reason);
+    return null;
+  };
+  const amounts = new Map<string, number>();
   for (const [field, amount] of Object.entries(costs)) {
-    if (typeof amount !== "number" || !Number.isFinite(amount) || KNOWN_COSTS.has(field)) continue;
-    if (TAX_ORDER.includes(field) || TAX_LIKE.test(field)) {
-      if (amount !== 0) taxes.push({ field, label: TAX_LABELS[field] ?? field.toLowerCase(), cents: cents(amount) });
-    } else unknown.push(field);
+    const recognised = RECOGNISED.has(field);
+    if (typeof amount !== "number") {
+      // A recognised charge that isn't a number can't be summed; anything else (a currency, a note) isn't a charge
+      if (recognised && amount !== null && amount !== undefined) return refuse(`${field} is not an amount`);
+      continue;
+    }
+    if (!Number.isFinite(amount) || amount < 0) return refuse(`${field} is not a usable amount`);
+    if (!recognised) return refuse(`a charge this site doesn't know: ${field}`);
+    amounts.set(field, amount);
   }
-  taxes.sort((a, b) => rank(a.field) - rank(b.field) || a.field.localeCompare(b.field));
-  const production = costs.productionCost;
-  return { freightCents: cents(freight), productionCents: typeof production === "number" && Number.isFinite(production) ? cents(production) : null, taxes, unknown };
+  const taxes: TaxLine[] = [];
+  for (const field of TAX_ORDER) {
+    const tax = cents(amounts.get(field) ?? 0);
+    if (tax !== 0) taxes.push({ field, label: TAX_LABELS[field], cents: tax });
+  }
+  const total = amounts.get("total");
+  if (total !== undefined) {
+    const added = ADDED_COSTS.reduce((sum, field) => sum + cents(amounts.get(field) ?? 0), 0);
+    const parts = added + cents(freight) + taxes.reduce((sum, tax) => sum + tax.cents, 0) - cents(amounts.get("wholesaleDiscount") ?? 0);
+    if (Math.abs(cents(total) - parts) > 1) return refuse(`total ${cents(total)} against its parts ${parts} (cents)`);
+  }
+  const production = amounts.get("productionCost");
+  return { freightCents: cents(freight), productionCents: production === undefined ? null : cents(production), taxes };
 }
 
-/** AUD cents, a whole number of dollars: ceil((freight + tax) × rate × (1 + buffer)) */
+/** AUD cents, a whole number of dollars: ceil((freight + tax) × rate × (1 + buffer)). Refuses inputs the settings never allow */
 export function deliveryAmount(freightCents: number, taxes: readonly TaxLine[], rate: number, buffer: number): number {
   const usdCents = freightCents + taxes.reduce((sum, tax) => sum + tax.cents, 0);
+  if (!Number.isSafeInteger(usdCents) || usdCents < 0) throw new RangeError(`not an amount in cents: ${usdCents}`);
+  if (!Number.isFinite(rate) || rate <= 0) throw new RangeError(`not a rate: ${rate}`);
+  if (!(buffer >= 0 && buffer <= MAX_BUFFER)) throw new RangeError(`not a buffer: ${buffer}`);
   const dollars = (usdCents / 100) * rate * (1 + buffer);
-  // Six decimals first, so a product like 25 × 1.6 = 40.000000000000004 stays 40
-  return Math.ceil(Number(dollars.toFixed(6))) * 100;
+  // Floating point leaves noise above a whole dollar (150 × 1.5 × 1.08 is 243.00000000000003); 1e-10 clears it and is far
+  // below the smallest real fraction (a cent, times a four-decimal rate, times a whole-percent buffer: 1e-8)
+  return Math.max(0, Math.ceil(dollars - 1e-10)) * 100;
 }
 
 export const hasTax = (taxes: readonly TaxLine[]) => taxes.some((tax) => tax.cents > 0);
@@ -66,7 +97,8 @@ export const deliveryLabel = (taxes: readonly TaxLine[]): "delivery" | "delivery
 export function breakdown(quote: { freightCents: number; taxes: readonly TaxLine[]; rate: number; buffer: number }): string {
   const parts = [`artelo's freight ${usd(quote.freightCents)}`, ...quote.taxes.map((tax) => `${tax.label} ${usd(tax.cents)}`)];
   const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
-  const buffer = Math.round(quote.buffer * 100);
+  // One decimal, so a buffer that isn't a whole percent isn't misstated; none at all leaves the clause out
+  const buffer = Number((quote.buffer * 100).toFixed(1));
   let text = `${list} for this address, converted at ${rateText(quote.rate)} per us$1${buffer > 0 ? `, plus ${buffer}% in case the exchange rate moves` : ""}, rounded up to the dollar.`;
   if (quote.taxes.length === 1) text += " artelo charges me that tax for posting to this address, so it's passed on at cost.";
   if (quote.taxes.length > 1) text += " artelo charges me those taxes for posting to this address, so they're passed on at cost.";

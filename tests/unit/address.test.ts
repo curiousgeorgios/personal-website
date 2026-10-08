@@ -43,6 +43,13 @@ describe("checkAddress", () => {
     expect(errorsOf({ country: "au" }).country).toBe("choose a country.");
   });
 
+  test("line and paragraph separators and bidi controls are not plain text", () => {
+    for (const bad of ["\u2028", "\u2029", "\u202e", "\u202a", "\u2066", "\u2069", "\u0007", "\u0085"]) {
+      expect(errorsOf({ line1: `12 Example${bad}Street` }).line1).toBe("one line of plain text.");
+    }
+    expect(check({ name: "Zo\u200d\u00eb", line1: "12 Example Street" }).ok).toBe(true);
+  });
+
   test("names in other scripts and with punctuation pass untouched (review focus 1)", () => {
     const address = { ...ADDRESS, name: "Zoë O'Brien & Sons", line1: "東京都渋谷区 1-2-3", line2: "<b>unit</b> 3", country: "JP" };
     expect(checkAddress(address)).toEqual({ ok: true, address });

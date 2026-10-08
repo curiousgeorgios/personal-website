@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { artelo, arteloAddress, priceCheck, priceCheckBody, productInfo, type QuoteLine } from "../../src/lib/prints/artelo";
+import { artelo, ARTELO_TIMEOUT_MS, arteloAddress, priceCheck, priceCheckBody, productInfo, type QuoteLine } from "../../src/lib/prints/artelo";
 import { parseSize } from "../../src/lib/prints/catalogue";
 import { ADDRESS, captureLogs, fakeFetch, json, printDb, testDeps, US_ADDRESS, type Handler } from "./prints-fakes";
 
@@ -38,18 +38,42 @@ describe("the request", () => {
     expect(productInfo(LINES[0], "https://x/master")).toMatchObject({ designs: [{ sourceImage: { url: "https://x/master" }, fitOptions: { canvas: "Paper", style: "Outside" } }] });
   });
 
-  test("the key goes in the authorization header, with a 15-second timeout", async () => {
+  test("the key goes in the authorization header, with a 15-second timeout, and a redirect is never followed", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
     const { fake, deps } = await answering(() => json({ orderCosts: { arteloShipping: 30 } }));
     await artelo(deps, "POST", "/orders/price-check", {});
     expect(fake.calls[0].headers.get("authorization")).toBe("Bearer artelo-fixture-key");
-    expect((vi.mocked(fake.fetch).mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    const init = vi.mocked(fake.fetch).mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(ARTELO_TIMEOUT_MS).toBe(15_000);
+    expect(timeout).toHaveBeenCalledWith(15_000);
+    expect(init.redirect).toBe("manual");
+  });
+});
+
+describe("artelo", () => {
+  test("never throws: a 2xx that can't be read, a network error and a redirect are all not ok", async () => {
+    for (const [handler, status] of [
+      [() => new Response("<html>ok</html>", { status: 200 }), null],
+      [() => new Response("", { status: 204 }), null],
+      [() => { throw new TypeError("network"); }, null],
+      [() => new Response(null, { status: 302, headers: { Location: "https://elsewhere.test/" } }), 302],
+    ] as [Handler, number | null][]) {
+      const { deps } = await answering(handler);
+      expect(await artelo(deps, "POST", "/orders/price-check", {})).toMatchObject({ ok: false, status });
+    }
+  });
+
+  test("a readable 2xx is ok with its body", async () => {
+    const { deps } = await answering(() => json({ hello: "there" }, 201));
+    expect(await artelo(deps, "POST", "/orders/price-check", {})).toEqual({ ok: true, status: 201, body: { hello: "there" } });
   });
 });
 
 describe("priceCheck", () => {
   test("a quote reads the freight and taxes, with an orderId that is never stored", async () => {
     const { fake, deps } = await answering(() => json({ orderCosts: { productionCost: 80, arteloShipping: 30, usSalesTax: 4.2, total: 114.2 } }));
-    expect(await priceCheck(deps, LINES, US_ADDRESS, 1.5)).toEqual({ ok: true, costs: { freightCents: 3000, productionCents: 8000, taxes: [{ field: "usSalesTax", label: "us sales tax", cents: 420 }], unknown: [] } });
+    expect(await priceCheck(deps, LINES, US_ADDRESS, 1.5)).toEqual({ ok: true, costs: { freightCents: 3000, productionCents: 8000, taxes: [{ field: "usSalesTax", label: "us sales tax", cents: 420 }] } });
     expect(JSON.parse(fake.calls[0].body).orderId).toMatch(/^quote-[0-9a-f]{16}$/);
   });
 
@@ -83,10 +107,36 @@ describe("priceCheck", () => {
     }
   });
 
-  test("a charge this site doesn't know is logged by name, and the quote goes ahead", async () => {
+  test("a charge this site doesn't know refuses the quote and is logged by name", async () => {
     const logs = captureLogs();
-    const { deps } = await answering(() => json({ orderCosts: { arteloShipping: 30, remoteAreaFee: 5 } }));
-    expect((await priceCheck(deps, LINES, ADDRESS, 1.5)).ok).toBe(true);
-    expect(logs()).toContain("remoteAreaFee");
+    for (const field of ["remoteAreaFee", "heavyDutyBox", "totalTax", "totalWithTax"]) {
+      const { deps } = await answering(() => json({ orderCosts: { arteloShipping: 30, usSalesTax: 4.2, [field]: 5 } }));
+      expect(await priceCheck(deps, LINES, ADDRESS, 1.5)).toEqual({ ok: false, refused: null });
+      expect(logs()).toContain(field);
+    }
+  });
+
+  test("a negative or non-finite amount, or a total that doesn't add up, is unavailable rather than a refusal of the address", async () => {
+    const logs = captureLogs();
+    for (const orderCosts of [{ arteloShipping: 30, usSalesTax: -4.2 }, { arteloShipping: 30, gst: -1 }, { arteloShipping: 30, productionCost: 80, usSalesTax: 4.2, total: 118.4 }]) {
+      const { deps } = await answering(() => json({ orderCosts }));
+      expect(await priceCheck(deps, LINES, ADDRESS, 1.5)).toEqual({ ok: false, refused: null });
+    }
+    const huge = await answering(() => new Response('{"orderCosts":{"arteloShipping":30,"usSalesTax":1e999}}', { status: 200 }));
+    expect(await priceCheck(huge.deps, LINES, ADDRESS, 1.5)).toEqual({ ok: false, refused: null });
+    expect(logs()).toMatch(/usSalesTax is not a usable amount/);
+    expect(logs()).toMatch(/total 11840 against its parts 11420/);
+  });
+
+  test("a delivery over the ceiling is logged and refused; just under it quotes", async () => {
+    const logs = captureLogs();
+    // 400 × 1.5 × 1.2 is A$720; 250 × 1.5 × 1.2 is A$450
+    const over = await answering(() => json({ orderCosts: { arteloShipping: 400 } }));
+    expect(await priceCheck(over.deps, LINES, ADDRESS, 1.5)).toEqual({ ok: false, refused: null });
+    expect(logs()).toContain("over the ceiling");
+    const taxed = await answering(() => json({ orderCosts: { arteloShipping: 200, usSalesTax: 200 } }));
+    expect(await priceCheck(taxed.deps, LINES, ADDRESS, 1.5)).toEqual({ ok: false, refused: null });
+    const under = await answering(() => json({ orderCosts: { arteloShipping: 250 } }));
+    expect((await priceCheck(under.deps, LINES, ADDRESS, 1.5)).ok).toBe(true);
   });
 });
