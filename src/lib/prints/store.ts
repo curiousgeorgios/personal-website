@@ -1,4 +1,8 @@
-import { FRAMES, TIERS, type Frame, type Tier } from "./catalogue";
+import { photoName, previewOf } from "../photos/gallery";
+import { previewSize, type Preview, type PublicPreview } from "../photos/store";
+import type { QuoteLine } from "./artelo";
+import { itemsValue, printCount, validate, type BasketLine, type RawEntry } from "./basket";
+import { FRAMES, TIERS, offerFor, printsFor, type Frame, type Tier } from "./catalogue";
 
 // The prints tables (migration 0007): the fixed price list, the settings and the orders. Addresses are never written
 // here (spec 21.2): an order row holds its country, amounts, ids, statuses and bookkeeping, nothing personal.
@@ -127,4 +131,115 @@ export function shipmentsOf(order: Pick<OrderRow, "shipments">): Shipment[] {
   if (!Array.isArray(parsed)) return [];
   // These render on the buyer's page and in /admin: keep only parcels with all three fields as strings
   return parsed.filter((item): item is Shipment => !!item && typeof item === "object" && ["carrier", "number", "url"].every((key) => typeof (item as Record<string, unknown>)[key] === "string"));
+}
+
+/** A photograph as a basket, an order and an email name and show it */
+export interface BasketPhoto {
+  id: string;
+  title: string;
+  /** Its post's date, YYYY-MM-DD */
+  date: string;
+  width: number;
+  height: number;
+  /** Its place among its post's published photographs (plus itself when hidden), for its name (spec 4) */
+  index: number;
+  total: number;
+  published: boolean;
+  /** Its 240 and 480 previews */
+  previews: PublicPreview[];
+}
+
+export interface FactRow {
+  id: string;
+  title: string;
+  print_width: number;
+  print_height: number;
+  previews: string;
+  published: number;
+  published_on: string;
+  idx: number;
+  total: number;
+}
+
+/** What naming and showing a photograph needs, joined to its post; the caller adds the WHERE */
+export const PHOTO_FACTS = `SELECT photos.id, photos.title, photos.print_width, photos.print_height, photos.previews, photos.published, photo_posts.published_on,
+  (SELECT COUNT(*) FROM photos AS s WHERE s.collection = photos.collection AND (s.published = 1 OR s.id = photos.id) AND s.position < photos.position) AS idx,
+  (SELECT COUNT(*) FROM photos AS s WHERE s.collection = photos.collection AND (s.published = 1 OR s.id = photos.id)) AS total
+  FROM photos JOIN photo_posts ON photo_posts.collection = photos.collection`;
+
+export function toBasketPhoto(row: FactRow): BasketPhoto {
+  const previews = (JSON.parse(row.previews) as Preview[]).filter((preview) => previewSize(preview.key) === 240 || previewSize(preview.key) === 480);
+  return {
+    id: row.id, title: row.title, date: row.published_on, width: row.print_width, height: row.print_height, index: row.idx, total: row.total, published: row.published === 1,
+    previews: previews.map(({ key, width, height, format }) => ({ url: `/media/${key}`, width, height, format })),
+  };
+}
+
+export const photoNameOf = (photo: BasketPhoto) => photoName({ title: photo.title, date: photo.date }, photo.index, photo.total);
+
+/** A basket line with everything a page, a quote and checkout need: its Artelo size, orientation, price and name */
+export interface PricedLine extends BasketLine, QuoteLine {
+  name: string;
+  /** The 240 WebP, for the basket */
+  thumb: PublicPreview | null;
+  /** The 480 WebP, for Stripe's page */
+  image: PublicPreview | null;
+}
+
+export interface ResolvedBasket {
+  lines: PricedLine[];
+  /** The canonical items value, "" when empty */
+  items: string;
+  count: number;
+  /** AUD cents */
+  printTotal: number;
+  unavailable: number;
+  overCap: number;
+}
+
+/** The basket against what is published and offered now: the server trusts nothing from the query string (spec 15.2) */
+export function priceBasket(entries: readonly RawEntry[], photos: ReadonlyMap<string, BasketPhoto>, prices: PriceList): ResolvedBasket {
+  const prints = (photoId: string) => {
+    const photo = photos.get(photoId);
+    return photo ? printsFor(photo.width, photo.height) : null;
+  };
+  const { lines, unavailable, overCap } = validate(entries, (entry) => offerFor(prints(entry.photoId), entry.tier) !== undefined);
+  const priced = lines.map((line): PricedLine => {
+    const photo = photos.get(line.photoId)!;
+    const offers = prints(line.photoId)!;
+    return {
+      ...line, size: offerFor(offers, line.tier)!.size, orientation: offers.orientation, unitAmount: prices[line.tier][line.frame], name: photoNameOf(photo),
+      thumb: previewOf(photo, 240, "webp") ?? null, image: previewOf(photo, 480, "webp") ?? null,
+    };
+  });
+  return { lines: priced, items: itemsValue(lines), count: printCount(lines), printTotal: priced.reduce((sum, line) => sum + line.unitAmount * line.quantity, 0), unavailable, overCap };
+}
+
+/** The basket's photographs, the price list and the settings in one batch */
+export async function loadBasket(db: D1Database, entries: readonly RawEntry[]): Promise<{ basket: ResolvedBasket; settings: PrintSettings }> {
+  const ids = [...new Set(entries.map((entry) => entry.photoId))];
+  const [facts, prices, settings] = await db.batch([
+    // Many ids as one JSON parameter: D1 caps a statement at 100 bound parameters
+    db.prepare(`${PHOTO_FACTS} WHERE photos.published = 1 AND photos.id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(ids)),
+    db.prepare(PRICES_SQL),
+    db.prepare(SETTINGS_SQL),
+  ]);
+  const photos = new Map((facts.results as unknown as FactRow[]).map((row) => [row.id, toBasketPhoto(row)]));
+  return {
+    basket: priceBasket(entries, photos, toPrices(prices.results as unknown as { tier: string; frame: string; amount: number }[])),
+    settings: toSettings(settings.results as unknown as { key: string; value: string }[]),
+  };
+}
+
+export async function resolveBasket(db: D1Database, entries: readonly RawEntry[]): Promise<ResolvedBasket> {
+  return (await loadBasket(db, entries)).basket;
+}
+
+/** The price list and the settings in one batch, for a photograph's print row */
+export async function loadPrintContext(db: D1Database): Promise<{ prices: PriceList; settings: PrintSettings }> {
+  const [prices, settings] = await db.batch([db.prepare(PRICES_SQL), db.prepare(SETTINGS_SQL)]);
+  return {
+    prices: toPrices(prices.results as unknown as { tier: string; frame: string; amount: number }[]),
+    settings: toSettings(settings.results as unknown as { key: string; value: string }[]),
+  };
 }

@@ -9,11 +9,13 @@ interface Props {
   entry: Entry | null;
   /** The page's first entry: its first row loads eagerly */
   first?: boolean;
+  /** The carried basket's query ("?items=…", spec 15.3), or "" */
+  query?: string;
 }
 
-const { entry, first = false } = Astro.props;
+const { entry, first = false, query = "" } = Astro.props;
 // Alt text counts published photographs in post order: the entry holds only those (spec 3.2)
-const views = entry ? entry.photos.map((photo, index) => frameView(photo, index, entry.photos.length)).filter((view): view is FrameView => view !== null) : [];
+const views = entry ? entry.photos.map((photo, index) => frameView(photo, index, entry.photos.length, query)).filter((view): view is FrameView => view !== null) : [];
 ---
 <li class="entry" id={entry ? `post-${entry.collection}` : undefined}>
   <EntryHead date={entry?.date ?? null} place={entry?.place ?? null} />

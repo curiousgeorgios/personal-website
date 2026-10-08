@@ -99,4 +99,10 @@ describe("Logbook", () => {
     ]);
     expect(text(doc.querySelector("#visitor-info .signoff"))).toBe("fewer tabs, more arvos.");
   });
+
+  test("while prints are open the photos line says some come as prints", async () => {
+    const doc = await render(Logbook, { data: { ...full, photos: true }, prints: true });
+    expect(text(doc.querySelector("#photos .body"))).toBe("photos i've taken, kept like this log. some come as prints.");
+    expect(text((await render(Logbook, { data: { ...full, photos: true } })).querySelector("#photos .body"))).toBe("photos i've taken, kept like this log.");
+  });
 });

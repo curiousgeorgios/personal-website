@@ -63,11 +63,11 @@ export interface FrameView {
 }
 
 /** A frame for the photograph at `index` of the `total` published in its post; null without a 240 preview (never for a published one) */
-export function frameView(photo: PublicPhoto, index: number, total: number): FrameView | null {
+export function frameView(photo: PublicPhoto, index: number, total: number, query = ""): FrameView | null {
   const small = previewOf(photo, 240, "webp");
   if (!small) return null;
   return {
-    href: `/photos/${photo.id}`,
+    href: `/photos/${photo.id}${query}`,
     avif: srcsetOf(photo, [240, 480], "avif"),
     webp: srcsetOf(photo, [240, 480], "webp"),
     phoneAvif: srcsetOf(photo, [240], "avif"),

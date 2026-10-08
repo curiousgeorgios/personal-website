@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { FIXTURE_STRIPE_KEY, PRINTS, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
 
 // Set PLAYWRIGHT_BASE_URL to run specs against a deployed site (CI runs the privacy spec after deploy)
 const remote = process.env.PLAYWRIGHT_BASE_URL;
@@ -66,6 +67,17 @@ export default defineConfig({
         {
           command: `rm -rf .wrangler/gallery && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/gallery && node scripts/seed-photo-test.mjs --persist-to .wrangler/gallery && wrangler dev -c dist/server/wrangler.json --port 4335 --persist-to .wrangler/gallery ${PHOTO_KEY_VAR}`,
           url: "http://localhost:4335",
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+        // The print providers' stand-in: Artelo, the exchange rate, Stripe's three endpoints and the mail sink (spec 23.3)
+        { command: "node tests/fixtures/artelo-site.mjs", url: `${STAND_IN}/__requests`, reuseExistingServer: false, timeout: 30_000 },
+        // A sixth server for the print specs, every provider stood in, recreated every run like the admin server. Stripe
+        // points at the stand-in too, so the money specs run on every run; a first failed order goes straight to
+        // needs_attention (PRINT_RETRY_WINDOW=0, spec 19). Specs trigger the cron through wrangler's local explorer (runCron). Its own dev registry, as the snapshots server has
+        {
+          command: `${printStore(".wrangler/prints")} && WRANGLER_REGISTRY_PATH=.wrangler/prints/registry wrangler dev -c dist/server/wrangler.json --port 4337 --persist-to .wrangler/prints ${PHOTO_KEY_VAR} ${printVars(PRINTS)} --var STRIPE_SECRET_KEY:${FIXTURE_STRIPE_KEY} --var STRIPE_API_BASE:${STAND_IN}/stripe --var PRINT_RETRY_WINDOW:0`,
+          url: PRINTS,
           reuseExistingServer: false,
           timeout: 120_000,
         },

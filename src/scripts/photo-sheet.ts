@@ -13,6 +13,9 @@ const BATCH = 4;
 function start(more: HTMLAnchorElement, list: HTMLOListElement, entryTemplate: HTMLTemplateElement, frameTemplate: HTMLTemplateElement) {
   const label = more.querySelector(".lbl")!;
   let busy = false;
+  // The carried basket (spec 15.3): later batches' frames and the pager keep it, as the server's do
+  const items = list.dataset.items ?? "";
+  const query = items ? `?items=${items}` : "";
 
   const frame = (view: FrameView) => {
     const node = frameTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
@@ -44,7 +47,7 @@ function start(more: HTMLAnchorElement, list: HTMLOListElement, entryTemplate: H
     node.querySelector(".entry-place")!.textContent = data.place ? ` · ${data.place}` : "";
     const sheet = node.querySelector(".sheet")!;
     data.photos.forEach((photo, index) => {
-      const view = frameView(photo, index, data.photos.length);
+      const view = frameView(photo, index, data.photos.length, query);
       if (view) sheet.appendChild(frame(view));
     });
     return node;
@@ -83,7 +86,7 @@ function start(more: HTMLAnchorElement, list: HTMLOListElement, entryTemplate: H
         if (focused) end.focus({ preventScroll: true });
         return;
       }
-      more.href = `/photos?before=${page.next}`;
+      more.href = `/photos?before=${page.next}${items ? `&items=${items}` : ""}`;
       more.dataset.next = String(page.next);
       settle();
       // A short batch can leave the link still near the end; the observer only calls back on a change, so ask again

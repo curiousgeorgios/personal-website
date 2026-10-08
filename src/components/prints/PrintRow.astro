@@ -1,0 +1,37 @@
+---
+import { sizeLabel, type PhotoPrints } from "../../lib/prints/catalogue";
+import { aud } from "../../lib/prints/money";
+import type { PriceList } from "../../lib/prints/store";
+import "../../styles/prints.css";
+
+// The print row (spec 15.1): a plain get form with no script, landing on /basket with this print appended
+interface Props {
+  photoId: string;
+  prints: PhotoPrints;
+  prices: PriceList;
+  /** The carried basket's items, or null */
+  items: string | null;
+  /** The gst sentence for the current setting */
+  gst: string;
+}
+
+const { photoId, prints, prices, items, gst } = Astro.props;
+---
+<form method="get" action="/basket" id="prints" class="print-form">
+  <p>a print of this photo, made by artelo on archival matte paper and posted from the us.</p>
+  {items && <input type="hidden" name="items" value={items} />}
+  <input type="hidden" name="add" value={photoId} />
+  <fieldset>
+    <legend>size</legend>
+    {prints.offers.map((offer, index) => (
+      <label class="choice size-choice"><input type="radio" name="size" value={offer.tier} checked={index === 0} /> {sizeLabel(offer)} · {aud(prices[offer.tier].unframed)}, or {aud(prices[offer.tier].oak)} framed</label>
+    ))}
+  </fieldset>
+  <fieldset>
+    <legend>frame</legend>
+    <label class="choice frame-choice"><input type="radio" name="frame" value="unframed" checked /> unframed</label>
+    <label class="choice frame-choice"><input type="radio" name="frame" value="oak" /> oak frame</label>
+  </fieldset>
+  <button type="submit" class="print-button">add to basket</button>
+  <p class="prints-hint">delivery is quoted for your address in the basket. {gst}</p>
+</form>

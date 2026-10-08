@@ -92,4 +92,24 @@ describe("Gallery", () => {
     expect(doc.querySelector("ol.entries img")!.getAttribute("alt")).toBe('<b>dawn</b> & "co"');
     expect(doc.querySelector("ol.entries b")).toBeNull();
   });
+
+  test("a carried basket rides on every frame and the pager, shows in the head row and reaches the script", async () => {
+    const carry = { items: "fixture-01:small:oak,fixture-01:small:oak", count: 2 };
+    const doc = await render(Gallery, { entries: PAGE, next: 1735092000, older: true, carry });
+    expect([...doc.querySelectorAll("#post-DFkL1xrsnOH a.frame-link")].map((a) => a.getAttribute("href"))).toEqual([
+      "/photos/DFkL1xrsnOH-01?items=fixture-01:small:oak,fixture-01:small:oak", "/photos/DFkL1xrsnOH-03?items=fixture-01:small:oak,fixture-01:small:oak",
+    ]);
+    expect(doc.querySelector("a.more")!.getAttribute("href")).toBe("/photos?before=1735092000&items=fixture-01:small:oak,fixture-01:small:oak");
+    expect(doc.querySelector("ol.entries")!.getAttribute("data-items")).toBe(carry.items);
+    expect(text(doc.querySelector(".where"))).toBe("back to the logbook · newest entries · basket · 2 prints");
+    expect(doc.querySelector('.where a[href="/photos?items=fixture-01:small:oak,fixture-01:small:oak"]')).not.toBeNull();
+    expect(doc.querySelector('.where a[href="/basket?items=fixture-01:small:oak,fixture-01:small:oak"]')).not.toBeNull();
+  });
+
+  test("while prints are open the intro says some come as prints", async () => {
+    expect(text((await render(Gallery, { entries: PAGE, next: null, older: false, prints: true })).querySelector(".intro"))).toBe(
+      "photos i've taken, one entry per instagram post, newest first. some come as prints.",
+    );
+    expect((await render(Gallery, { entries: PAGE, next: null, older: false })).querySelector("ol.entries")!.hasAttribute("data-items")).toBe(false);
+  });
 });
