@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { FIXTURE_STRIPE_KEY, PRINTS, PRINTS_NO_RATE, PRINTS_STRIPE, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
+import { Agent, setGlobalDispatcher } from "undici";
 
 // Set PLAYWRIGHT_BASE_URL to run specs against a deployed site (CI runs the privacy spec after deploy)
 const remote = process.env.PLAYWRIGHT_BASE_URL;
@@ -7,6 +8,12 @@ const remote = process.env.PLAYWRIGHT_BASE_URL;
 // build:test copies George's .dev.vars into dist/server, so a test server started without this would load his real
 // photo signing key. Every test server passes this fixture key instead, and the specs that sign links use the same one.
 const PHOTO_KEY_VAR = `--var PHOTO_LINK_SECRET:${"1".repeat(64)}`;
+
+// Every worker loads this file, so the specs' own fetches (to the stand-in and the test servers) open a fresh connection
+// each time rather than reusing a kept-alive one. On a loaded runner, a reused connection was reset mid-request (CI run
+// 37847366341: "other side closed" on a stand-in call; reproduced locally under load, on both the stand-in and the
+// prints server, and gone with reuse off). The specs make few requests, so the cost is small
+setGlobalDispatcher(new Agent({ pipelining: 0 }));
 
 export default defineConfig({
   testDir: "tests/e2e",
