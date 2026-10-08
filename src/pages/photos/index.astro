@@ -12,8 +12,6 @@ import "../../styles/photos.css";
 const before = Astro.url.searchParams.get("before");
 // Anything but a plain count of seconds is the notebook 404 (spec 3.4); a null body makes Astro render 404.astro
 if (before !== null && !/^\d{1,10}$/.test(before)) return new Response(null, { status: 404 });
-// A page reached with a basket is that visitor's own: never edge-cached, never indexed (spec 15.3)
-const carrying = Astro.url.searchParams.has("items");
 
 let page: EntryPage | null = null;
 try {
@@ -23,10 +21,11 @@ try {
 }
 let carry: Carry | null = null;
 let prints = false;
-if (page) {
-  if (carrying) carry = await readCarry(env.DB, Astro.url);
-  prints = await printsOpenNow(printConfig(env), env.DB);
-}
+if (page) prints = await printsOpenNow(printConfig(env), env.DB);
+// A page reached with a basket is that visitor's own: never edge-cached, never indexed (spec 15.3). Only while prints are
+// open: a closed site ignores ?items= altogether, so it is the plain cached page and reads no basket (spec 16.5)
+const carrying = prints && Astro.url.searchParams.has("items");
+if (carrying) carry = await readCarry(env.DB, Astro.url);
 if (page && !carrying) {
   // As the home page (R6.1): fresh for five minutes at the edge, then stale while it refreshes; saves purge the tag
   Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["photos"] });

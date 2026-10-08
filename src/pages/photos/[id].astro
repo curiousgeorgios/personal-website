@@ -24,24 +24,29 @@ try {
 }
 // Unpublished or unknown: the notebook 404, uncached (spec 4)
 if (!down && !page) return new Response(null, { status: 404 });
-// A page reached with a basket is that visitor's own: never edge-cached, never indexed (spec 15.3)
-const carrying = Astro.url.searchParams.has("items");
 const config = printConfig(env);
+const hasItems = Astro.url.searchParams.has("items");
 let prints: { offers: PhotoPrints; prices: PriceList; gst: string } | null = null;
-let carry: Carry | null = null;
+let open = false;
 if (page) {
   const offers = printsFor(page.photo.width, page.photo.height);
-  // The row only while prints are open and this photograph gets a size (spec 15.1); a failed read just leaves it out
-  if (offers && canOpen(config)) {
+  // Read only while prints could open, and only when something shows: the row (this photograph gets a size) or a carried basket
+  if ((offers || hasItems) && canOpen(config)) {
     try {
       const context = await loadPrintContext(env.DB);
-      if (printsStatus(config, context.settings.rate).open) prints = { offers, prices: context.prices, gst: gstSentence(config.gst) };
+      open = printsStatus(config, context.settings.rate).open;
+      // The row only while prints are open and this photograph gets a size (spec 15.1); a failed read just leaves it out
+      if (open && offers) prints = { offers, prices: context.prices, gst: gstSentence(config.gst) };
     } catch (error) {
       console.error("prints: a photo page couldn't read the price list", error instanceof Error ? error.message : String(error));
     }
   }
-  if (carrying) carry = await readCarry(env.DB, Astro.url);
 }
+// A page reached with a basket is that visitor's own: never edge-cached, never indexed (spec 15.3). Only while prints are
+// open: a closed site ignores ?items= altogether, so it is the plain cached page and reads no basket (spec 16.5)
+const carrying = open && hasItems;
+let carry: Carry | null = null;
+if (page && carrying) carry = await readCarry(env.DB, Astro.url);
 if (page && !carrying) {
   Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["photos"] });
   Astro.response.headers.set("Cache-Control", "no-cache");

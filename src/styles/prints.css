@@ -6,7 +6,7 @@
    row's padding centres one line in 44px (11.5px above and below a 20.9px line) and the circle's margin centres it on that line */
 .choice { display: flex; align-items: flex-start; gap: 10px; box-sizing: border-box; min-height: 44px; padding: 11.5px 0; cursor: pointer; font-size: 15.5px; line-height: 1.35; }
 .choice input { flex: none; width: 18px; height: 18px; margin: 1.5px 0 0; accent-color: var(--ink); }
-.choice input:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 2px; }
+.choice input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .prints-hint { font-size: 14px; color: var(--muted); max-width: 34rem; text-wrap: pretty; }
 .print-button {
   justify-self: start; min-height: 44px; padding: 0 16px; cursor: pointer;

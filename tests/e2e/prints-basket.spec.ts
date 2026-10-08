@@ -62,3 +62,38 @@ test("a basket of nothing valid carries nothing, and the page is still never cac
   await expect(page.locator(".basket-link")).toHaveCount(0);
   await expect(page.locator('form#prints input[name="items"]')).toHaveCount(0);
 });
+
+test("later batches of a carried basket's gallery keep it on their frames", async ({ page }) => {
+  await page.goto("/photos?items=fixture-b-01:medium:oak");
+  await expect(page.locator("ol.entries > li.entry")).toHaveCount(2);
+  // The End key, so the script sees a visitor's scroll even where the fixture's short page can't move
+  await page.keyboard.press("End");
+  await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+  const links = await page.locator("a.frame-link").evaluateAll((all) => all.map((link) => link.getAttribute("href")));
+  expect(links.length).toBeGreaterThan(2);
+  for (const href of links) expect(href).toMatch(/^\/photos\/[\w-]+\?items=fixture-b-01:medium:oak$/);
+});
+
+// The prints-closed server (4335): a closed site ignores ?items= altogether (spec 16.5), so these are the plain, cached,
+// indexable pages, with nothing about prints on them and no basket read
+test("with prints closed an items parameter changes nothing: the plain cached gallery and photo pages", async ({ page }) => {
+  const items = "?items=fixture-b-01:medium:oak";
+  const gallery = await page.goto(`${GALLERY}/photos${items}`);
+  expect(gallery?.headers()["cache-control"]).toBe("no-cache");
+  expect(gallery?.headers()["cache-tag"]).toContain("photos");
+  await expect(page.locator('meta[name="robots"]')).toHaveCount(0);
+  await expect(page.locator('a[href^="/basket"]')).toHaveCount(0);
+  await expect(page.locator(".where")).toHaveText("back to the logbook");
+  await expect(page.locator("ol.entries")).not.toHaveAttribute("data-items", /.*/);
+  expect(await page.locator('a[href*="items="]').count()).toBe(0);
+  const photo = await page.goto(`${GALLERY}/photos/fixture-b-01${items}`);
+  expect(photo?.headers()["cache-control"]).toBe("no-cache");
+  expect(photo?.headers()["cache-tag"]).toContain("photos");
+  await expect(page.locator('meta[name="robots"]')).toHaveCount(0);
+  await expect(page.locator(".basket-link")).toHaveCount(0);
+  await expect(page.locator("form#prints")).toHaveCount(0);
+  expect(await page.locator('a[href*="items="]').count()).toBe(0);
+  // Junk is no different
+  const junk = await page.goto(`${GALLERY}/photos/fixture-b-01?items=garbage`);
+  expect(junk?.headers()["cache-control"]).toBe("no-cache");
+});
