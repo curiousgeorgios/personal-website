@@ -88,6 +88,7 @@ describe("photos:prepare's posts and places", () => {
     const places = { "postA-01-original.jpg": BRONTE, "postA-02-original.jpg": BRONTE, "postA-03-original.jpg": BONDI, "postA-04-original.jpg": BRONTE, "postA-05-original.jpg": BONDI };
     const { stdout } = await workspace.prepare(places);
     const manifest = JSON.parse(await readFile(join(workspace.output, "manifest.json"), "utf8"));
+    expect(manifest.schemaVersion).toBe(2);
     expect(manifest.posts).toEqual([
       { collection: "postA", publishedAt: "2025-02-02T20:27:48+11:00", place: "bondi beach, sydney" },
       { collection: "postB", publishedAt: "2025-02-03T00:30:00+11:00", place: null },

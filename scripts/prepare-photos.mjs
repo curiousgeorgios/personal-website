@@ -211,6 +211,6 @@ if (missing.size > 0) {
 for (const line of review) console.log(`no place for ${line}`);
 for (const post of posts) console.log(`${post.publishedAt.slice(0, 10)} ${post.collection} ${post.place ?? "(no place)"}`);
 
-const manifest = { schemaVersion: 1, preparedAt: new Date().toISOString(), posts, photos: results, exclusions: selection.counts };
+const manifest = { schemaVersion: 2, preparedAt: new Date().toISOString(), posts, photos: results, exclusions: selection.counts };
 await writePrivateJson(join(output, "manifest.json"), manifest);
 console.log(`Prepared ${results.length} photos in ${posts.length} posts as unpublished candidates. ${results.filter((r) => r.needsRawReview).length} need RAW colour/crop review.`);

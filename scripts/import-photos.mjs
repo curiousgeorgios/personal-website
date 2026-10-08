@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve, dirname, sep } from "node:path";
 import sharp from "sharp";
-import { checkPhotoRecord } from "./photo-manifest.mjs";
+import { checkPhotoRecord, checkPosts } from "./photo-manifest.mjs";
+import { upsertPhoto, upsertPosts } from "./photo-import-db.mjs";
 import { photoPlatform } from "./photo-platform.mjs";
 
 const args = process.argv.slice(2);
@@ -18,7 +19,7 @@ const selection = JSON.parse(await readFile(resolve(arg("--selection")), "utf8")
 if (selection.schema_version !== 1 || !Array.isArray(selection.included)) throw new Error("Unsupported selection");
 const allowed = new Set(selection.included.map((p) => p.id));
 if (allowed.size !== selection.included.length) throw new Error("Duplicate photo in selection");
-if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.photos)) throw new Error("Unsupported prepared manifest");
+if (manifest.schemaVersion !== 2 || !Array.isArray(manifest.photos)) throw new Error("Unsupported prepared manifest: run photos:prepare again");
 if (manifest.photos.length !== allowed.size) throw new Error("Prepared manifest must contain the complete selected catalogue");
 const ids = new Set();
 const positions = new Set();
@@ -39,9 +40,12 @@ for (const photo of manifest.photos) {
     if (asset === photo.print && (!metadata.icc || metadata.space !== "srgb")) throw new Error("Print file has no sRGB colour profile");
   }
 }
-// Validate the whole import before changing storage. Each row is saved only after its objects are present.
+checkPosts(manifest);
+// Validate the whole import before changing storage. Posts go first (every public query joins a photograph to its post),
+// then each photograph's row only after its objects are present.
 const platform = await photoPlatform({ remote: args.includes("--remote"), persistTo: arg("--persist-to") ?? ".wrangler/state" });
 try {
+  await upsertPosts(platform.env.DB, manifest.posts);
   for (const photo of manifest.photos) {
     for (const asset of [photo.print, ...photo.previews]) {
       const bucket = asset === photo.print ? platform.env.PHOTO_PRINTS : platform.env.MEDIA;
@@ -53,15 +57,8 @@ try {
       const stored = await bucket.head(asset.key);
       if (stored?.size !== asset.bytes || stored.httpMetadata?.contentType !== type) throw new Error("Upload validation failed");
     }
-    const previews = photo.previews.map(({ key, width, height, format }) => ({ key, width, height, format }));
-    await platform.env.DB.prepare(`INSERT INTO photos (id, collection, position, title, previews, print_key, print_width, print_height, print_bytes, print_sha256)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET collection=excluded.collection, position=excluded.position, title=excluded.title,
-      previews=excluded.previews, print_key=excluded.print_key, print_width=excluded.print_width, print_height=excluded.print_height,
-      print_bytes=excluded.print_bytes, print_sha256=excluded.print_sha256,
-      published=CASE WHEN photos.print_sha256=excluded.print_sha256 THEN photos.published ELSE 0 END`)
-      .bind(photo.id, photo.collection, photo.position, photo.title, JSON.stringify(previews), photo.print.key, photo.print.width, photo.print.height, photo.print.bytes, photo.print.sha256).run();
+    await upsertPhoto(platform.env.DB, photo);
     console.log(`Imported ${photo.id} (${args.includes("--remote") ? "remote" : "local"})`);
   }
 } finally { await platform.dispose(); }
-console.log(`Imported ${manifest.photos.length} photos. New or changed masters remain unpublished.`);
+console.log(`Imported ${manifest.posts.length} posts and ${manifest.photos.length} photos. New or changed masters remain unpublished; titles and edited places were kept.`);
