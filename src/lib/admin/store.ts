@@ -46,12 +46,31 @@ export interface AdminRecord {
   active: boolean;
 }
 
+/** One photograph in the photographs section (spec 6.2) */
+export interface AdminPhoto {
+  id: string;
+  title: string;
+  published: boolean;
+  rawReview: boolean;
+  /** Its 240 WebP preview, or null if it has none */
+  thumb: { url: string; width: number; height: number } | null;
+}
+
+/** One Instagram post and every photograph in it, published or not */
+export interface AdminPost {
+  collection: string;
+  date: string;
+  place: string | null;
+  photos: AdminPhoto[];
+}
+
 export interface AdminData {
   now: AdminItem[];
   before: AdminItem[];
   log: AdminLogEntry[];
   facts: { shelf: AdminFact | null; kettle: AdminFact | null };
   records: AdminRecord[];
+  photographs: AdminPost[];
 }
 
 interface ItemRow {
@@ -80,6 +99,33 @@ interface RecordRow {
   cover_key: string;
   position: number;
   active: number;
+}
+
+interface PhotographRow {
+  collection: string;
+  published_on: string;
+  place: string | null;
+  id: string;
+  title: string;
+  published: number;
+  raw_review: number;
+  previews: string;
+}
+
+const PHOTOGRAPHS =
+  "SELECT photo_posts.collection, photo_posts.published_on, photo_posts.place, photos.id, photos.title, photos.published, photos.raw_review, photos.previews FROM photo_posts JOIN photos ON photos.collection = photo_posts.collection ORDER BY photo_posts.published_at DESC, photos.position";
+
+/** Rows in post order, newest post first, grouped into posts */
+function toPosts(rows: PhotographRow[]): AdminPost[] {
+  const posts: AdminPost[] = [];
+  for (const row of rows) {
+    const last = posts.at(-1);
+    const post = last && last.collection === row.collection ? last : { collection: row.collection, date: row.published_on, place: row.place, photos: [] as AdminPhoto[] };
+    if (post !== last) posts.push(post);
+    const thumb = (JSON.parse(row.previews) as { key: string; width: number; height: number }[]).find((preview) => preview.key.endsWith("/240.webp"));
+    post.photos.push({ id: row.id, title: row.title, published: row.published === 1, rawReview: row.raw_review === 1, thumb: thumb ? { url: `/media/${thumb.key}`, width: thumb.width, height: thumb.height } : null });
+  }
+  return posts;
 }
 
 type Placed = { id: number; position: number };
@@ -115,13 +161,14 @@ const toRecord = (row: RecordRow): AdminRecord => ({
   active: row.active === 1,
 });
 
-/** Everything the admin page shows, in one batch: unlike the logbook, every log entry and every record, active or not */
+/** Everything the admin page shows, in one batch: unlike the logbook, every log entry, every record and every photograph */
 export async function loadAdmin(db: D1Database): Promise<AdminData> {
-  const [items, log, facts, records] = await db.batch([
+  const [items, log, facts, records, photographs] = await db.batch([
     db.prepare(`SELECT ${ITEM_COLUMNS} FROM items ORDER BY section, position`),
     db.prepare("SELECT id, date, precision, text FROM log_entries ORDER BY date DESC, created_at DESC, id DESC"),
     db.prepare("SELECT key, title, subtitle FROM facts"),
     db.prepare(`SELECT ${RECORD_COLUMNS} FROM records ORDER BY active DESC, position`),
+    db.prepare(PHOTOGRAPHS),
   ]);
   const all = (items.results as unknown as ItemRow[]).map(toItem);
   const factRows = facts.results as unknown as { key: string; title: string; subtitle: string | null }[];
@@ -135,6 +182,7 @@ export async function loadAdmin(db: D1Database): Promise<AdminData> {
     log: (log.results as unknown as AdminLogEntry[]).map(({ id, date, precision, text }) => ({ id, date, precision, text })),
     facts: { shelf: fact("shelf"), kettle: fact("kettle") },
     records: (records.results as unknown as RecordRow[]).map(toRecord),
+    photographs: toPosts(photographs.results as unknown as PhotographRow[]),
   };
 }
 
@@ -355,4 +403,28 @@ export async function moveRecord(db: D1Database, id: number, direction: "up" | "
 
 export async function removeRecord(db: D1Database, id: number): Promise<boolean> {
   return (await db.prepare("DELETE FROM records WHERE id = ?").bind(id).run()).meta.changes > 0;
+}
+
+// Photographs
+
+/** A post's photographs in post order, or null when the post doesn't exist */
+export async function postPhotoIds(db: D1Database, collection: string): Promise<string[] | null> {
+  const [post, photos] = await db.batch([
+    db.prepare("SELECT collection FROM photo_posts WHERE collection = ?").bind(collection),
+    db.prepare("SELECT id FROM photos WHERE collection = ? ORDER BY position").bind(collection),
+  ]);
+  if (post.results.length === 0) return null;
+  return (photos.results as unknown as { id: string }[]).map((row) => row.id);
+}
+
+/** Sets a post's place and marks it edited, so a later import keeps it (spec 6.2); false when the post doesn't exist */
+export async function savePostPlace(db: D1Database, collection: string, place: string | null): Promise<boolean> {
+  const result = await db.prepare("UPDATE photo_posts SET place = ?, place_edited = 1 WHERE collection = ?").bind(place, collection).run();
+  return result.meta.changes > 0;
+}
+
+/** False when the photograph doesn't exist */
+export async function savePhotoTitle(db: D1Database, id: string, title: string): Promise<boolean> {
+  const result = await db.prepare("UPDATE photos SET title = ? WHERE id = ?").bind(title, id).run();
+  return result.meta.changes > 0;
 }

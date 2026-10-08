@@ -6,7 +6,7 @@ test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "needs the local test build's Acces
 // Read-only, so it runs in every project, the phone included, while the other admin specs write
 test("the admin page fits a phone: the logbook's order, no sideways scrolling and fields that don't zoom", async ({ page }) => {
   await page.goto(`${ADMIN}/admin/`);
-  await expect(page.locator(".row > .label")).toHaveText(["admin", "now", "lately", "log", "records", "before", "snapshots"]);
+  await expect(page.locator(".row > .label")).toHaveText(["admin", "now", "lately", "log", "records", "before", "snapshots", "photographs"]);
   // Open every form, so their fields are measured too
   await page.locator("details").evaluateAll((all) => all.forEach((details) => ((details as HTMLDetailsElement).open = true)));
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);

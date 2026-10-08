@@ -1,4 +1,7 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
+import { checkPlace } from "../photos/place";
+import { publishRefusal, setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
+import { PHOTO_ID } from "../photos/tokens";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
@@ -7,16 +10,19 @@ import {
   checkItem,
   checkLogEntry,
   checkRecordMeta,
+  checkTitle,
   checkUpload,
   FACT_FIELDS,
   ITEM_FIELDS,
   LOG_FIELDS,
+  PLACE_FIELDS,
   readFields,
   RECORD_FIELDS,
+  TITLE_FIELDS,
   type Fields,
 } from "./validate";
 
-export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots";
+export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs";
 
 /** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
 export interface SnapshotsService {
@@ -31,6 +37,8 @@ export interface ActionDeps {
   keys?: () => MediaKeys;
   /** The snapshots Worker, through the SNAPSHOTS service binding (spec 9) */
   snapshots?: SnapshotsService;
+  /** PHOTO_PRINTS, the private masters a publish verifies (spec 6.2) */
+  prints?: R2Bucket;
 }
 
 export interface ActionFailure {
@@ -46,7 +54,7 @@ export interface ActionFailure {
 export type ActionResult = { ok: true; section: AdminSection } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
-const gone = (what: "line" | "entry" | "record") => fail(null, "", { form: `that ${what} no longer exists` });
+const gone = (what: "line" | "entry" | "record" | "post" | "photo") => fail(null, "", { form: `that ${what} no longer exists` });
 const CONFIRM = { confirm: "tick the box to remove it" };
 
 function idOf(form: FormData): number | null {
@@ -90,6 +98,18 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return removeRecord(form, deps);
     case "snapshot.reshoot":
       return reshoot(form, deps);
+    case "post.place":
+      return savePlace(form, deps);
+    case "post.publish":
+      return publishPost(form, deps, true);
+    case "post.hide":
+      return publishPost(form, deps, false);
+    case "photo.title":
+      return saveTitle(form, deps);
+    case "photo.publish":
+      return publishPhoto(form, deps, true);
+    case "photo.hide":
+      return publishPhoto(form, deps, false);
     default:
       return fail(null, "", { form: "that action isn't recognised" });
   }
@@ -338,4 +358,58 @@ async function reshoot(form: FormData, { db, snapshots }: ActionDeps): Promise<A
     return fail("snapshots", formId, { form: "the line changed while it was being captured. try again." });
   }
   return fail("snapshots", formId, { form: `couldn't capture it: ${snapshotReason(outcome)}` });
+}
+
+// Photographs (spec 6.2)
+
+const COLLECTION = /^[A-Za-z0-9_-]{1,64}$/;
+const postForm = (collection: string) => `post-${collection}`;
+const photoForm = (id: string) => `photo-${id}`;
+const unchecked = (ids: string[]) => `${ids.length} ${ids.length === 1 ? "photo" : "photos"} couldn't be checked: ${ids.join(", ")}. publish the others one at a time.`;
+
+function publishDeps({ db, media, prints }: ActionDeps): PublishDeps {
+  if (!prints) throw new Error("no PHOTO_PRINTS binding");
+  return { db, media, prints };
+}
+
+/** Why a publish was refused: a photo with no post says so (publishRefusal's words), then the ones whose files didn't check out */
+function refusal(outcome: Extract<PublishOutcome, { postless: string[] }>, unverified: string): string {
+  const postless = outcome.postless.length > 0 ? publishRefusal({ postless: outcome.postless, unverified: [], ok: false }) : "";
+  return [postless, outcome.unverified.length > 0 ? unverified : ""].filter(Boolean).join(" ");
+}
+
+async function savePlace(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, PLACE_FIELDS);
+  if (!COLLECTION.test(fields.collection)) return gone("post");
+  const checked = checkPlace(fields.place);
+  if (!checked.ok) return fail("photographs", postForm(fields.collection), { place: checked.error }, fields);
+  return (await store.savePostPlace(db, fields.collection, checked.place)) ? { ok: true, section: "photographs" } : gone("post");
+}
+
+/** Publishes or hides every photograph in a post: all of them or none, after checking each (spec 6.2) */
+async function publishPost(form: FormData, deps: ActionDeps, published: boolean): Promise<ActionResult> {
+  const collection = String(form.get("collection") ?? "");
+  const ids = COLLECTION.test(collection) ? await store.postPhotoIds(deps.db, collection) : null;
+  if (!ids || ids.length === 0) return gone("post");
+  const outcome = await setPublished(publishDeps(deps), ids, published);
+  if (outcome.ok) return { ok: true, section: "photographs" };
+  if ("missing" in outcome) return gone("post");
+  return fail("photographs", postForm(collection), { form: refusal(outcome, unchecked(outcome.unverified.map(({ id }) => id))) });
+}
+
+async function saveTitle(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, TITLE_FIELDS);
+  if (!PHOTO_ID.test(fields.id)) return gone("photo");
+  const checked = checkTitle(fields);
+  if (!checked.ok) return fail("photographs", photoForm(fields.id), checked.errors, fields);
+  return (await store.savePhotoTitle(db, fields.id, checked.value)) ? { ok: true, section: "photographs" } : gone("photo");
+}
+
+async function publishPhoto(form: FormData, deps: ActionDeps, published: boolean): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!PHOTO_ID.test(id)) return gone("photo");
+  const outcome = await setPublished(publishDeps(deps), [id], published);
+  if (outcome.ok) return { ok: true, section: "photographs" };
+  if ("missing" in outcome) return gone("photo");
+  return fail("photographs", photoForm(id), { form: refusal(outcome, "that photo couldn't be checked, so it stays hidden. run the import for it again.") });
 }

@@ -1,0 +1,83 @@
+---
+import Field from "./Field.astro";
+import { formState } from "../../lib/admin/form-state";
+import type { ActionFailure } from "../../lib/admin/actions";
+import type { AdminPost } from "../../lib/admin/store";
+import { formatLogDate } from "../../lib/text";
+
+interface Props {
+  posts: AdminPost[];
+  failure: ActionFailure | null;
+}
+
+const { posts, failure } = Astro.props;
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const heading = (post: AdminPost) => (post.place ? `${formatLogDate(post.date, "day")} · ${post.place}` : formatLogDate(post.date, "day"));
+---
+{posts.length === 0 ? (
+  <p class="empty">no photos imported yet. run photos:import from the mac.</p>
+) : (
+  <ol class="posts-admin">
+    {posts.map((post) => {
+      const id = `post-${post.collection}`;
+      const place = formState(failure, id, { collection: post.collection, place: post.place ?? "" });
+      // A failed form anywhere in the post opens it: the post's own, or one of its photographs'
+      const open = place.open || post.photos.some((photo) => failure?.form === `photo-${photo.id}`);
+      const published = post.photos.filter((photo) => photo.published).length;
+      const raw = post.photos.filter((photo) => photo.rawReview).length;
+      return (
+        <li class="post-admin">
+          <details id={id} open={open}>
+            <summary><span class="what">{heading(post)} · {count(post.photos.length, "photo", "photos")}, {published} published</span>{raw > 0 && <span class="tagged">{raw} raw</span>}</summary>
+            {place.errors.form && <p class="error" role="alert">{place.errors.form}</p>}
+            <form method="post" action={`/admin/#${id}`} class="admin-form">
+              <input type="hidden" name="intent" value="post.place" />
+              <input type="hidden" name="collection" value={post.collection} />
+              <Field form={id} name="place" label="place" value={place.values.place} error={place.errors.place} maxlength={60} hint="area, city. leave it empty to show no place." />
+              <button type="submit" class="button">save</button>
+            </form>
+            <div class="controls">
+              <form method="post" action={`/admin/#${id}`} class="move">
+                <input type="hidden" name="intent" value="post.publish" />
+                <input type="hidden" name="collection" value={post.collection} />
+                <button type="submit" class="button quiet">publish all {post.photos.length}</button>
+              </form>
+              <form method="post" action={`/admin/#${id}`} class="move">
+                <input type="hidden" name="intent" value="post.hide" />
+                <input type="hidden" name="collection" value={post.collection} />
+                <button type="submit" class="button quiet">hide all</button>
+              </form>
+            </div>
+            <ol class="photos-admin">
+              {post.photos.map((photo) => {
+                const formId = `photo-${photo.id}`;
+                const state = formState(failure, formId, { id: photo.id, title: photo.title });
+                const toggle = photo.published ? "hide" : "publish";
+                return (
+                  <li class="photo-admin" id={formId}>
+                    {photo.thumb ? <img src={photo.thumb.url} width={photo.thumb.width} height={photo.thumb.height} alt="" loading="lazy" decoding="async" /> : <span class="no-thumb"></span>}
+                    <div class="photo-admin-body">
+                      <p class="photo-id"><span class="mono">{photo.id}</span> · {photo.published ? "published" : "hidden"}{photo.rawReview && <span class="tagged">raw</span>}</p>
+                      {state.errors.form && <p class="error" role="alert">{state.errors.form}</p>}
+                      <form method="post" action={`/admin/#${formId}`} class="admin-form">
+                        <input type="hidden" name="intent" value="photo.title" />
+                        <input type="hidden" name="id" value={photo.id} />
+                        <Field form={formId} name="title" label="title" value={state.values.title} error={state.errors.title} maxlength={80} hint="plain text. leave it empty for no title." />
+                        <button type="submit" class="button">save</button>
+                      </form>
+                      <form method="post" action={`/admin/#${formId}`} class="move">
+                        <input type="hidden" name="intent" value={`photo.${toggle}`} />
+                        <input type="hidden" name="id" value={photo.id} />
+                        <button type="submit" class="button quiet" aria-label={`${toggle} ${photo.id}`}>{toggle}</button>
+                      </form>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </details>
+        </li>
+      );
+    })}
+  </ol>
+)}

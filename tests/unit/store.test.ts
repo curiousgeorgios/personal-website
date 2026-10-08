@@ -52,6 +52,7 @@ describe("loadAdmin", () => {
       ["light it up", true],
     ]);
     expect(data.now[0]).toMatchObject({ labelStatus: "live", labelKind: "decision", snapshotStatus: null });
+    expect(data.photographs).toEqual([]);
   });
 });
 
@@ -267,5 +268,23 @@ describe("records", () => {
     await expect(
       db.prepare("INSERT INTO items (slug, section, position, text) VALUES ('clash', 'now', 1, 'x')").run(),
     ).rejects.toThrow();
+  });
+});
+
+describe("photographs", () => {
+  test("loadAdmin groups every photograph, published or not, by post, newest post first", async () => {
+    const add = (sql: string) => db.prepare(sql).run();
+    await add("INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES ('old', 100, '1970-01-01', NULL), ('new', 200, '1970-01-02', 'bondi, sydney')");
+    const previews = JSON.stringify([{ key: "photos/previews/new-01/s/240.webp", width: 160, height: 240, format: "webp" }]);
+    await db.prepare("INSERT INTO photos (id, collection, position, title, published, raw_review, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES ('new-02', 'new', 2, '', 0, 1, '[]', 'k', 1, 1, 1, 's'), ('old-01', 'old', 0, 't', 1, 0, '[]', 'k', 1, 1, 1, 's'), ('new-01', 'new', 1, '', 1, 0, ?, 'k', 1, 1, 1, 's')").bind(previews).run();
+    const { photographs } = await store.loadAdmin(db);
+    expect(photographs.map((post) => [post.collection, post.date, post.place, post.photos.map((p) => p.id)])).toEqual([
+      ["new", "1970-01-02", "bondi, sydney", ["new-01", "new-02"]],
+      ["old", "1970-01-01", null, ["old-01"]],
+    ]);
+    expect(photographs[0].photos).toEqual([
+      { id: "new-01", title: "", published: true, rawReview: false, thumb: { url: "/media/photos/previews/new-01/s/240.webp", width: 160, height: 240 } },
+      { id: "new-02", title: "", published: false, rawReview: true, thumb: null },
+    ]);
   });
 });

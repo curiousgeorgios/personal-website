@@ -110,4 +110,12 @@ describe("submitForm", () => {
     await submitForm(formOf(SHELF), { ...deps(), db: broken }, cache(), waitUntil);
     await expect(promises[0]).resolves.toMatchObject({ status: 500 });
   });
+
+  test("a photographs save purges the gallery and the home page, and redirects to its section", async () => {
+    await db.prepare("INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES ('post', 1738488468, '2025-02-02', NULL)").run();
+    const purge = cache();
+    const outcome = await submitForm(formOf({ intent: "post.place", collection: "post", place: "bondi, sydney" }), deps(), purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=photographs#photographs" });
+    expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook"] });
+  });
 });

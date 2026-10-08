@@ -201,3 +201,18 @@ export async function checkUpload(value: FormDataEntryValue | null, kind: "audio
   if (audio) return sniffAudio(head) ? null : "that file isn't an mp3";
   return sniffImage(head) ? null : "covers can be JPEG, PNG or WebP";
 }
+
+// Photographs (spec 6.2)
+
+export const PLACE_FIELDS = ["collection", "place"] as const;
+export const TITLE_FIELDS = ["id", "title"] as const;
+/** A tab, a newline or another control character: titles and notes are one line of plain text */
+export const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** A photograph's title: at most 80 characters of plain text, empty allowed. It is shown as text, never as markup */
+export function checkTitle(fields: Fields): Checked<string> {
+  const errors: Fields = {};
+  if (CONTROL.test(fields.title)) errors.title = "one line of plain text";
+  tooLong(errors, fields, "title", 80);
+  return finish(errors, () => fields.title);
+}
