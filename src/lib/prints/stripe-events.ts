@@ -1,9 +1,9 @@
-import { photoMaster, revokeOrderGrants } from "../photos/store";
+import { photoMaster, revokeOrderGrantsStatement } from "../photos/store";
 import { REFUND_REASON } from "./artelo-status";
 import { isFrame, isTier, offerFor, printsFor } from "./catalogue";
 import type { PrintDeps } from "./config";
-import { sendAdminNote, sendDueMail } from "./mail";
-import { placeOrder } from "./place";
+import { sendAdminNote } from "./mail";
+import { mailNow, placeOrder } from "./place";
 import { getOrder, loadPrices, markExpired, type OrderRow } from "./store";
 import { expireSession, getSession, type StripeSession } from "./stripe";
 
@@ -28,7 +28,25 @@ export function readEvent(value: unknown): StripeEvent | null {
 export const MISMATCH_REASON = "the amount paid differs from the quote";
 export const MODE_REASON = "stripe's test and live modes don't match this order; check it before it's placed.";
 export const MISSING_REASON = "the order row was missing; check it before it's placed.";
-export type PaidOutcome = "paid" | "attention" | "unchanged" | "recreated" | "unpaid";
+export type PaidOutcome = "paid" | "attention" | "unchanged" | "recreated" | "unpaid" | "foreign";
+
+/**
+ * The print order a session was made for, or null when it isn't one of this site's checkouts. Checkout sets both
+ * fields; a Payment Link or another integration on the account can carry a client_reference_id (a buyer may even type
+ * one into a link's URL), but metadata is set only by whoever creates the session. Never logged: on a session that
+ * isn't ours, client_reference_id is anybody's text
+ */
+export function printOrderOf(session: Pick<StripeSession, "client_reference_id" | "metadata">): string | null {
+  const id = session.client_reference_id;
+  return typeof id === "string" && id !== "" && session.metadata?.order_id === id ? id : null;
+}
+
+/** An order a session may move: still waiting for payment, and holding no session or this one (its `?` is the session id) */
+const PAYABLE = "status IN ('checkout', 'expired') AND (stripe_session_id IS NULL OR stripe_session_id = ?)";
+
+/** The first placement attempt, after the answer; a throw is logged by order id, and the cron tries again */
+const placeLater = (deps: PrintDeps, id: string) =>
+  placeOrder(deps, id).catch((error: unknown) => console.error("prints: the first attempt at order", id, "threw", error instanceof Error ? error.name : typeof error));
 
 /** Why a paid session can't go straight to placing, or null. Adaptive Pricing is off, so any conversion is a mismatch */
 function mismatch(order: OrderRow, session: StripeSession): string | null {
@@ -73,51 +91,69 @@ async function recreate(deps: PrintDeps, session: StripeSession, orderId: string
 /**
  * The paid transition (spec 18.1), shared by the webhook (with its ledger row first in `before`) and the reconciliation
  * (with none: the status condition is the guard). The batch commits the order change with the ledger row, or neither.
+ * Only this site's own session for the order may pay it: one that isn't a print checkout, or names an order holding
+ * another session, is "foreign" and writes nothing, `before` included, so its payment intent (where placement reads
+ * the address it ships to) never replaces the order's
  */
 export async function applyPaid(deps: PrintDeps, session: StripeSession, before: D1PreparedStatement[], livemode = session.livemode === true): Promise<PaidOutcome> {
   if (session.payment_status !== "paid") return "unpaid";
   const { db } = deps;
-  const orderId = session.client_reference_id;
-  if (!orderId) throw new Error("a paid session without an order id");
+  const orderId = printOrderOf(session);
+  if (!orderId) return "foreign";
   const order = await getOrder(db, orderId);
   if (!order) {
     await db.batch([...before, ...(await recreate(deps, session, orderId, livemode))]);
-    deps.waitUntil(sendDueMail(deps));
+    deps.waitUntil(mailNow(deps));
     return "recreated";
   }
+  if (order.stripe_session_id !== null && order.stripe_session_id !== session.id) return "foreign";
   const now = deps.now();
   const reason = mismatch(order, session);
   const results = await db.batch([
     ...before,
-    db.prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, paid_at = ?, stripe_session_id = ?, stripe_payment_intent = ?, attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, status_checked_at = NULL, updated_at = ? WHERE id = ? AND status IN ('checkout', 'expired')")
-      .bind(reason ? "needs_attention" : "paid", reason, now, session.id, session.payment_intent, now + deps.config.retryWindow, now, now, order.id),
+    // The session condition again in the statement, so a read that went stale can't let another session through
+    db.prepare(`UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, paid_at = ?, stripe_session_id = ?, stripe_payment_intent = ?, attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, status_checked_at = NULL, updated_at = ? WHERE id = ? AND ${PAYABLE}`)
+      .bind(reason ? "needs_attention" : "paid", reason, now, session.id, session.payment_intent, now + deps.config.retryWindow, now, now, order.id, session.id),
   ]);
   if (results.at(-1)!.meta.changes === 0) return "unchanged";
   // The first placement attempt runs after the answer (spec 18.1)
-  deps.waitUntil(reason ? sendDueMail(deps) : placeOrder(deps, order.id));
+  deps.waitUntil(reason ? mailNow(deps) : placeLater(deps, order.id));
   return reason ? "attention" : "paid";
 }
+
+/** The refund's money: never lowered by an event that arrives late, and never 0 over an amount already recorded */
+const REFUNDED_AMOUNT = "MAX(COALESCE(refunded_amount, 0), ?)";
 
 /** 200 once the event is applied or was already; 500 when it can't be, so Stripe delivers it again (it retries for 3 days) */
 export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Promise<200 | 500> {
   const { db } = deps;
-  if (await db.prepare("SELECT 1 AS seen FROM stripe_events WHERE id = ?").bind(event.id).first()) return 200;
   const record = db.prepare("INSERT INTO stripe_events (id, type, received_at) VALUES (?, ?, ?)").bind(event.id, event.type, deps.now());
   const object = event.data.object;
+  // A checkout that isn't this order's own is recorded and answered 200: no retry will ever make it ours
+  const ignore = async () => {
+    await record.run();
+    console.log("prints: stripe event", event.id, event.type, "isn't for one of this site's print checkouts; recorded and ignored");
+    return 200 as const;
+  };
   try {
+    if (await db.prepare("SELECT 1 AS seen FROM stripe_events WHERE id = ?").bind(event.id).first()) return 200;
     if (event.type === "checkout.session.completed") {
       const session = object as unknown as StripeSession;
       if (session.payment_status !== "paid") {
         console.log("prints: stripe event", event.id, "is for an unpaid session; nothing recorded");
         return 200;
       }
-      await applyPaid(deps, session, [record], event.livemode);
+      if ((await applyPaid(deps, session, [record], event.livemode)) === "foreign") return await ignore();
       return 200;
     }
     if (event.type === "checkout.session.expired") {
-      const id = typeof object.client_reference_id === "string" ? object.client_reference_id : null;
-      if (!id || !(await getOrder(db, id))) throw new Error("no order for this session");
-      await db.batch([record, db.prepare("UPDATE print_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'checkout'").bind(deps.now(), id)]);
+      const session = object as unknown as StripeSession;
+      const id = printOrderOf(session);
+      if (!id) return await ignore();
+      const order = await getOrder(db, id);
+      if (!order) throw new Error("no order for this session");
+      if (order.stripe_session_id !== null && order.stripe_session_id !== session.id) return await ignore();
+      await db.batch([record, db.prepare("UPDATE print_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'checkout' AND (stripe_session_id IS NULL OR stripe_session_id = ?)").bind(deps.now(), id, session.id)]);
       return 200;
     }
     if (event.type === "charge.refunded") {
@@ -126,20 +162,22 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
       if (!order) throw new Error("no order for this payment");
       const now = deps.now();
       const refunded = cents(object.amount_refunded);
-      const statements = [record, db.prepare("UPDATE print_orders SET refunded_at = ?, refunded_amount = ?, updated_at = ? WHERE id = ?").bind(now, refunded, now, order.id)];
+      const statements = [record, db.prepare(`UPDATE print_orders SET refunded_at = ?, refunded_amount = ${REFUNDED_AMOUNT}, updated_at = ? WHERE id = ?`).bind(now, refunded, now, order.id)];
       if (object.refunded === true) {
         statements.push(
           // Not yet placed: nothing to make, so the retries stop. Any lease stays: a refunded order holding one with no
           // Artelo id is the marker that a create may be in flight, which Task 14's daily job looks up at Artelo
           db.prepare("UPDATE print_orders SET status = 'refunded', updated_at = ? WHERE id = ? AND status IN ('paid', 'needs_attention') AND artelo_order_id IS NULL").bind(now, order.id),
-          // Already with Artelo: George cancels it there
-          db.prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status IN ('placed', 'in_production')").bind(REFUND_REASON, now, order.id),
+          // Already with Artelo, placed or held there needing something: George cancels it there. Its email goes once,
+          // so a redelivery under another event id (a second refund event, say) doesn't send it again
+          db.prepare("UPDATE print_orders SET status = 'needs_attention', attention_reason = ?, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND (status IN ('placed', 'in_production') OR (status = 'needs_attention' AND artelo_order_id IS NOT NULL AND attention_reason IS NOT ?))").bind(REFUND_REASON, now, order.id, REFUND_REASON),
+          // Refunded before Artelo had it: nothing will be made, so its master links go, in the same write as the event,
+          // judged by the order's state as the batch runs (Artelo's statuses revoke the rest)
+          revokeOrderGrantsStatement(db, order.id, now, "print_orders.status = 'refunded' AND print_orders.artelo_order_id IS NULL"),
         );
       }
       await db.batch(statements);
-      // Refunded before Artelo had it: nothing will be made, so its master links go now (Artelo's statuses revoke the rest)
-      if (object.refunded === true && order.artelo_order_id === null) await revokeOrderGrants(db, order.id, now);
-      deps.waitUntil(sendDueMail(deps));
+      deps.waitUntil(mailNow(deps));
       return 200;
     }
     // Only the three events are subscribed; anything else is recorded and ignored
@@ -162,10 +200,12 @@ export const UNKNOWN_SESSION_AFTER = 25 * 3600;
  */
 export async function reconcileCheckouts(deps: PrintDeps): Promise<void> {
   const { results } = await deps.db
-    .prepare("SELECT id, stripe_session_id, created_at FROM print_orders WHERE status = 'checkout' AND created_at < ? ORDER BY COALESCE(status_checked_at, created_at), created_at LIMIT 20")
+    .prepare("SELECT id, stripe_session_id, created_at, status_checked_at FROM print_orders WHERE status = 'checkout' AND created_at < ? ORDER BY COALESCE(status_checked_at, created_at), created_at LIMIT 20")
     .bind(deps.now() - RECONCILE_AFTER)
     .all();
-  for (const row of results as unknown as { id: string; stripe_session_id: string | null; created_at: number }[]) {
+  for (const row of results as unknown as { id: string; stripe_session_id: string | null; created_at: number; status_checked_at: number | null }[]) {
+    // What stays true run after run is logged on the order's first read only, not every five minutes
+    const firstRead = row.status_checked_at === null;
     // Stripe never answered, so the buyer never saw a payment page
     if (!row.stripe_session_id) {
       await markExpired(deps.db, row.id, deps.now());
@@ -178,14 +218,21 @@ export async function reconcileCheckouts(deps: PrintDeps): Promise<void> {
       if (result.status === 404 && row.created_at < now - UNKNOWN_SESSION_AFTER) {
         await markExpired(deps.db, row.id, now);
         console.error(`prints: order ${row.id}'s session is unknown to stripe; expired`);
-      } else console.error("prints: couldn't read the session of order", row.id, result.status ?? "no answer");
+      } else if (result.status !== 404) console.error("prints: couldn't read the session of order", row.id, result.status ?? "no answer");
+      else if (firstRead) console.error("prints: order", row.id, "has a session stripe doesn't know yet; it expires a day after the order if that stays so");
       continue;
     }
     const session = result.body as unknown as StripeSession;
+    // The session the order holds must be this order's own checkout; anything else is never applied to it, or to another
+    if (printOrderOf(session) !== row.id || session.id !== row.stripe_session_id) {
+      if (firstRead) console.error("prints: order", row.id, "holds a session that isn't its own checkout; left as it is");
+      continue;
+    }
     if (session.status === "complete" && session.payment_status === "paid") {
-      // George's email is made due in the transition's own batch, under the same status condition, so a paid order never
-      // commits without it; it is claimed and released like the others and retried by the cron (spec 18.4)
-      const due = deps.db.prepare("UPDATE print_orders SET admin_notified_at = 0 WHERE id = ? AND status IN ('checkout', 'expired')").bind(row.id);
+      // George's email is made due in the transition's own batch, under the transition's own conditions, so a paid order
+      // never commits without it and an order paid meanwhile by the webhook never gets it; it is claimed and released like
+      // the others and retried by the cron (spec 18.4)
+      const due = deps.db.prepare(`UPDATE print_orders SET admin_notified_at = 0 WHERE id = ? AND ${PAYABLE}`).bind(row.id, session.id);
       const outcome = await applyPaid(deps, session, [due]);
       if (outcome === "paid" || outcome === "attention") await sendAdminNote(deps, row.id);
     } else if (session.status === "expired") {

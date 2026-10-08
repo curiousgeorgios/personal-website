@@ -158,7 +158,7 @@ function refusal(result: Extract<ArteloResult, { ok: false }>, address: Address)
 }
 
 /** Sends whatever just became due. A failure here leaves it to the cron's unsent emails step and never changes the outcome */
-async function mailNow(deps: PrintDeps): Promise<void> {
+export async function mailNow(deps: PrintDeps): Promise<void> {
   try {
     await sendDueMail(deps);
   } catch (error) {

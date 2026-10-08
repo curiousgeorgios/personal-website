@@ -83,7 +83,7 @@ describe("the guard", () => {
   test("an event whose order can't be found isn't recorded and answers 500, so stripe sends it again", async () => {
     captureLogs();
     const { db, deps } = await setup();
-    expect(await handleStripeEvent(deps, event("checkout.session.expired", session({ id: "cs_none", client_reference_id: "01k6x0000000000000000000zz" })))).toBe(500);
+    expect(await handleStripeEvent(deps, event("checkout.session.expired", session({ id: "cs_none", client_reference_id: "01k6x0000000000000000000zz", metadata: { order_id: "01k6x0000000000000000000zz" } })))).toBe(500);
     expect(await handleStripeEvent(deps, event("charge.refunded", { payment_intent: "pi_none", amount: 100, amount_refunded: 100, refunded: true }, "evt_2"))).toBe(500);
     expect(await events(db)).toEqual([]);
   });
@@ -142,6 +142,111 @@ describe("the guard", () => {
   });
 });
 
+describe("only this site's own checkout", () => {
+  const unchanged = async (db: D1Database, status: string, sessionId: string | null) =>
+    expect(await getOrder(db, ORDER)).toMatchObject({ status, stripe_session_id: sessionId, stripe_payment_intent: null, paid_at: null });
+
+  test("a signed event for another session can't pay an expired order, or replace its session or payment intent", async () => {
+    for (const metadata of [{}, { ...session().metadata }]) {
+      const logs = captureLogs();
+      const db = await printDb();
+      const deps = testDeps(db);
+      await checkout(db, { status: "expired" });
+      expect(await handleStripeEvent(deps, event("checkout.session.completed", session({ id: "cs_other_link", payment_intent: "pi_attacker", metadata })))).toBe(200);
+      await unchanged(db, "expired", "cs_test_1");
+      expect(deps.waited).toHaveLength(0);
+      expect(await events(db)).toEqual([{ id: "evt_1" }]);
+      expect(logs()).toContain("prints: stripe event evt_1 checkout.session.completed isn't for one of this site's print checkouts; recorded and ignored");
+      vi.restoreAllMocks();
+    }
+  });
+
+  test("a session stored by the order meanwhile is never overwritten: the statement checks it again", async () => {
+    const { db, deps } = await setup();
+    await checkout(db, { stripe_session_id: null });
+    // Another session is recorded for the order between the handler's read and its batch
+    const racing = {
+      ...db,
+      prepare: db.prepare.bind(db),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await db.prepare("UPDATE print_orders SET stripe_session_id = 'cs_test_stored' WHERE id = ?").bind(ORDER).run();
+        return db.batch(statements);
+      },
+    } as unknown as D1Database;
+    expect(await handleStripeEvent({ ...deps, db: racing }, event("checkout.session.completed", session()))).toBe(200);
+    await unchanged(db, "checkout", "cs_test_stored");
+    expect(deps.waited).toHaveLength(0);
+  });
+
+  test("a payment link's session, with only a client_reference_id, changes nothing and is answered 200, whatever order it names", async () => {
+    for (const metadata of [null, {}]) {
+      const { db, deps } = await setup();
+      await checkout(db, { stripe_session_id: null });
+      expect(await handleStripeEvent(deps, event("checkout.session.completed", session({ id: "cs_link", metadata })))).toBe(200);
+      await unchanged(db, "checkout", null);
+      // Naming no order here: nothing is recreated either
+      expect(await handleStripeEvent(deps, event("checkout.session.completed", session({ id: "cs_link_2", client_reference_id: "01k6x0000000000000000000zz", metadata }), "evt_2"))).toBe(200);
+      expect(await getOrder(db, "01k6x0000000000000000000zz")).toBeNull();
+      expect(await handleStripeEvent(deps, event("checkout.session.completed", session({ id: "cs_link_3", client_reference_id: null, metadata }), "evt_3"))).toBe(200);
+      expect(await events(db)).toEqual([{ id: "evt_1" }, { id: "evt_2" }, { id: "evt_3" }]);
+      expect(deps.waited).toHaveLength(0);
+    }
+  });
+
+  test("a session whose metadata names another order is answered 200 and changes nothing", async () => {
+    const { db, deps } = await setup();
+    await checkout(db);
+    expect(await handleStripeEvent(deps, event("checkout.session.completed", session({ metadata: { ...session().metadata, order_id: "01k6x0000000000000000000zz" } })))).toBe(200);
+    await unchanged(db, "checkout", "cs_test_1");
+    expect(await getOrder(db, "01k6x0000000000000000000zz")).toBeNull();
+  });
+
+  test("an expired session that isn't the order's own is recorded and answered 200, and its order keeps waiting", async () => {
+    for (const over of [{ metadata: {} }, { id: "cs_other" }, { client_reference_id: null }]) {
+      const { db, deps } = await setup();
+      await checkout(db);
+      const logs = captureLogs();
+      expect(await handleStripeEvent(deps, event("checkout.session.expired", session({ status: "expired", payment_status: "unpaid", ...over })))).toBe(200);
+      await unchanged(db, "checkout", "cs_test_1");
+      expect(await events(db)).toEqual([{ id: "evt_1" }]);
+      expect(logs()).toContain("recorded and ignored");
+      vi.restoreAllMocks();
+    }
+  });
+
+  test("an expiry never lands on an order that took another session meanwhile", async () => {
+    const { db, deps } = await setup();
+    await checkout(db, { stripe_session_id: null });
+    const racing = {
+      ...db,
+      prepare: db.prepare.bind(db),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await db.prepare("UPDATE print_orders SET stripe_session_id = 'cs_test_stored' WHERE id = ?").bind(ORDER).run();
+        return db.batch(statements);
+      },
+    } as unknown as D1Database;
+    expect(await handleStripeEvent({ ...deps, db: racing }, event("checkout.session.expired", session({ status: "expired", payment_status: "unpaid" })))).toBe(200);
+    await unchanged(db, "checkout", "cs_test_stored");
+  });
+
+  test("a session that isn't ours is logged by its event alone, never by the order id it carries", async () => {
+    const logs = captureLogs();
+    const db = await printDb();
+    const deps = testDeps(db);
+    await handleStripeEvent(deps, event("checkout.session.completed", session({ client_reference_id: "someone@example.com", metadata: null })));
+    expect(logs()).toContain("evt_1");
+    expect(logs()).not.toContain("someone@example.com");
+  });
+
+  test("the ledger's own read failing is the handler's one-line 500, so stripe sends it again", async () => {
+    const logs = captureLogs();
+    const db = await printDb();
+    const broken = { ...db, prepare: (sql: string) => (sql.startsWith("SELECT 1") ? { bind: () => ({ first: async () => { throw new Error("D1 is down"); } }) } : db.prepare(sql)) } as unknown as D1Database;
+    expect(await handleStripeEvent(testDeps(broken), event("checkout.session.completed", session()))).toBe(500);
+    expect(logs()).toContain("prints: stripe event evt_1 checkout.session.completed wasn't applied: D1 is down");
+  });
+});
+
 describe("refunds", () => {
   const refund = (amount_refunded: number, refunded: boolean, id = "evt_r") => event("charge.refunded", { payment_intent: `pi_test_${ORDER}`, amount: 28700, amount_refunded, refunded }, id);
 
@@ -171,13 +276,78 @@ describe("refunds", () => {
     expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", lease_until: NOW + 120, artelo_order_id: null, refunded_amount: 28700 });
   });
 
-  test("a full refund of an order that needs attention but artelo already has stays with george, its artelo id and links kept", async () => {
-    const { db, deps } = await setup();
-    await insertOrder(db, { id: ORDER, status: "needs_attention", attention_reason: "artelo needs something before it can print: open the order in artelo.", artelo_order_id: "artelo-1" });
+  test("a full refund of an order that needs attention but artelo already has takes the refund reason and emails george again, its artelo id and links kept", async () => {
+    captureLogs();
+    const mail = vi.fn(async () => ({ messageId: "m" }));
+    const db = await printDb();
+    const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
+    await insertOrder(db, { id: ORDER, status: "needs_attention", attention_reason: "artelo needs something before it can print: open the order in artelo.", attention_notified_at: NOW - 600, artelo_order_id: "artelo-1" });
     await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
     await handleStripeEvent(deps, refund(28700, true));
-    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", artelo_order_id: "artelo-1", refunded_amount: 28700 });
+    await Promise.all(deps.waited);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", attention_notified_at: NOW, artelo_order_id: "artelo-1", refunded_amount: 28700 });
+    expect(mail).toHaveBeenCalledTimes(1);
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER} needs attention`, text: expect.stringContaining("refunded in stripe: cancel it in artelo") }));
     expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(1);
+    // Its email sent, a second full-refund event (another id) doesn't make it due again
+    await handleStripeEvent(deps, refund(28700, true, "evt_r2"));
+    await Promise.all(deps.waited);
+    expect((await getOrder(db, ORDER))?.attention_notified_at).toBe(NOW);
+    expect(mail).toHaveBeenCalledTimes(1);
+  });
+
+  test("the links are revoked in the event's own write: when that write fails, neither the event nor the revoke happens, and the redelivery does both", async () => {
+    const { db, deps } = await setup();
+    await insertOrder(db, { id: ORDER });
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+    const live = () => db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n");
+    // The revoke itself fails (a D1 hiccup at that statement)
+    await db.prepare("CREATE TRIGGER revoke_fails BEFORE UPDATE OF revoked_at ON photo_download_grants BEGIN SELECT RAISE(ABORT, 'revoke failed'); END").run();
+    expect(await handleStripeEvent(deps, refund(28700, true))).toBe(500);
+    expect(await events(db)).toEqual([]);
+    expect(await live()).toBe(1);
+    expect((await getOrder(db, ORDER))?.status).toBe("paid");
+    await db.prepare("DROP TRIGGER revoke_fails").run();
+    expect(await handleStripeEvent(deps, refund(28700, true))).toBe(200);
+    expect(await events(db)).toEqual([{ id: "evt_r" }]);
+    expect(await live()).toBe(0);
+    expect((await getOrder(db, ORDER))?.status).toBe("refunded");
+  });
+
+  test("the revoke follows the order's state as the write runs, not an earlier read: an order artelo took meanwhile keeps its links", async () => {
+    const { db, deps } = await setup();
+    await insertOrder(db, { id: ORDER });
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+    // Placement records Artelo's id between the handler's read of the order and its batch
+    const racing = {
+      ...db,
+      prepare: db.prepare.bind(db),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await db.prepare("UPDATE print_orders SET status = 'placed', artelo_order_id = 'artelo-1' WHERE id = ?").bind(ORDER).run();
+        return db.batch(statements);
+      },
+    } as unknown as D1Database;
+    expect(await handleStripeEvent({ ...deps, db: racing }, refund(28700, true))).toBe(200);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", artelo_order_id: "artelo-1" });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(1);
+  });
+
+  test("a refunded order artelo has keeps its links when a full refund arrives", async () => {
+    const { db, deps } = await setup();
+    await insertOrder(db, { id: ORDER, status: "refunded", artelo_order_id: "artelo-1" });
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+    expect(await handleStripeEvent(deps, refund(28700, true))).toBe(200);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(1);
+  });
+
+  test("refund amounts only grow: a late event with a smaller amount, or none, never lowers what is recorded", async () => {
+    const { db, deps } = await setup();
+    await insertOrder(db, { id: ORDER, status: "placed", artelo_order_id: "artelo-1" });
+    await handleStripeEvent(deps, refund(9800, false, "evt_r1"));
+    await handleStripeEvent(deps, refund(4900, false, "evt_r2"));
+    expect((await getOrder(db, ORDER))?.refunded_amount).toBe(9800);
+    await handleStripeEvent(deps, event("charge.refunded", { payment_intent: `pi_test_${ORDER}`, refunded: false }, "evt_r3"));
+    expect((await getOrder(db, ORDER))?.refunded_amount).toBe(9800);
   });
 
   test("a refund in fractions of a cent is written in whole cents, so the store never refuses it", async () => {
@@ -217,8 +387,8 @@ describe("the buyer's details", () => {
     await handleStripeEvent(deps, event("checkout.session.completed", session(buyer), "evt_paid"));
     await handleStripeEvent(deps, event("charge.refunded", charge({ payment_intent: "pi_test_1" }), "evt_refund"));
     const other = await insertOrder(db, { status: "checkout", stripe_session_id: "cs_test_2", stripe_payment_intent: null, paid_at: null });
-    await handleStripeEvent(deps, event("checkout.session.completed", session({ ...buyer, id: "cs_test_2", client_reference_id: other, payment_intent: "pi_test_2", amount_total: 1 }), "evt_mismatch"));
-    await handleStripeEvent(deps, event("checkout.session.completed", session({ ...buyer, id: "cs_test_3", client_reference_id: "01k6x0000000000000000000zz", payment_intent: "pi_test_3" }), "evt_recreated"));
+    await handleStripeEvent(deps, event("checkout.session.completed", session({ ...buyer, id: "cs_test_2", client_reference_id: other, metadata: { ...session().metadata, order_id: other }, payment_intent: "pi_test_2", amount_total: 1 }), "evt_mismatch"));
+    await handleStripeEvent(deps, event("checkout.session.completed", session({ ...buyer, id: "cs_test_3", client_reference_id: "01k6x0000000000000000000zz", metadata: { ...session().metadata, order_id: "01k6x0000000000000000000zz" }, payment_intent: "pi_test_3" }), "evt_recreated"));
     await handleStripeEvent(deps, event("checkout.session.completed", session({ ...buyer, payment_status: "unpaid" }), "evt_unpaid"));
     await handleStripeEvent(deps, event("checkout.session.expired", session({ ...buyer, status: "expired", payment_status: "unpaid" }), "evt_expired"));
     await handleStripeEvent(deps, event("checkout.session.completed", session({ ...buyer, client_reference_id: null }), "evt_no_order"));
@@ -259,10 +429,33 @@ describe("Stripe's signature", () => {
     for (const header of [null, "", `v1=${good}`, `t=abc,v1=${good}`, `t=${NOW}`, `t=${NOW},v1=xyz`]) expect(await verifyStripeSignature(SECRET, header, body, NOW)).toBe(false);
     expect(await verifyStripeSignature("", `t=${NOW},v1=${good}`, body, NOW)).toBe(false);
   });
+
+  test("a timestamp more than five minutes ahead is refused too", async () => {
+    const body = '{"id":"evt_1"}';
+    expect(await verifyStripeSignature(SECRET, `t=${NOW + 301},v1=${await sign(body, NOW + 301)}`, body, NOW)).toBe(false);
+    expect(await verifyStripeSignature(SECRET, `t=${NOW + 300},v1=${await sign(body, NOW + 300)}`, body, NOW)).toBe(true);
+  });
+
+  test("a header over 1KB or with more than five v1 values is refused unread; parts with no = are skipped", async () => {
+    const body = '{"id":"evt_1"}';
+    const good = await sign(body, NOW);
+    const wrong = "0".repeat(64);
+    expect(await verifyStripeSignature(SECRET, `t=${NOW},${`v1=${wrong},`.repeat(4)}v1=${good}`, body, NOW)).toBe(true);
+    expect(await verifyStripeSignature(SECRET, `t=${NOW},${`v1=${wrong},`.repeat(5)}v1=${good}`, body, NOW)).toBe(false);
+    const padded = `t=${NOW},v1=${good},v0=${"a".repeat(1024)}`;
+    expect(await verifyStripeSignature(SECRET, padded.slice(0, 1024), body, NOW)).toBe(true);
+    expect(await verifyStripeSignature(SECRET, padded.slice(0, 1025), body, NOW)).toBe(false);
+    expect(await verifyStripeSignature(SECRET, `garbage,t=${NOW},v1=${good}`, body, NOW)).toBe(true);
+    expect(await verifyStripeSignature(SECRET, `t=${NOW},v1=${good},v1=${wrong}`, body, NOW)).toBe(true);
+    // A prefix of the right HMAC is not the HMAC
+    expect(await verifyStripeSignature(SECRET, `t=${NOW},v1=${good.slice(0, 2)}`, body, NOW)).toBe(false);
+    expect(await verifyStripeSignature(SECRET, `tt=${NOW},v1=${good}`, body, NOW)).toBe(false);
+  });
 });
 
 describe("reconciliation", () => {
   const OLD = NOW - 3901;
+  const OTHER_ORDER = "01k6x0000000000000000000zz";
   const SESSION = "GET https://stripe.test/v1/checkout/sessions/cs_test_1";
   const EXPIRE = "POST https://stripe.test/v1/checkout/sessions/cs_test_1/expire";
 
@@ -343,6 +536,46 @@ describe("reconciliation", () => {
       await reconcileCheckouts(deps);
       expect((await getOrder(db, ORDER))?.status).toBe("checkout");
     }
+  });
+
+  test("a session that isn't the order's own checkout is never applied, to it or to the order it names", async () => {
+    for (const over of [{ client_reference_id: OTHER_ORDER, metadata: { ...session().metadata, order_id: OTHER_ORDER } }, { metadata: {} }, { id: "cs_test_other" }]) {
+      captureLogs();
+      const db = await printDb();
+      await checkout(db, { created_at: OLD });
+      await insertOrder(db, { id: OTHER_ORDER, status: "checkout", stripe_session_id: null, stripe_payment_intent: null, paid_at: null, created_at: NOW });
+      const deps = testDeps(db, { fetch: fakeFetch({ [SESSION]: () => json(session(over)) }).fetch });
+      await reconcileCheckouts(deps);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "checkout", stripe_session_id: "cs_test_1", stripe_payment_intent: null, admin_notified_at: null });
+      expect(await getOrder(db, OTHER_ORDER)).toMatchObject({ status: "checkout", stripe_session_id: null, admin_notified_at: null });
+      expect(deps.waited).toHaveLength(0);
+    }
+  });
+
+  test("an order the webhook pays while stripe is asked keeps no missed-webhook email", async () => {
+    captureLogs();
+    const mail = vi.fn(async () => ({ messageId: "m" }));
+    const db = await printDb();
+    // The webhook lands during the reconciliation's read of the session
+    const paying = async () => {
+      await db.prepare("UPDATE print_orders SET status = 'paid', paid_at = ?, stripe_payment_intent = 'pi_test_1' WHERE id = ?").bind(NOW, ORDER).run();
+      return json(session());
+    };
+    const deps = testDeps(db, { fetch: fakeFetch({ [SESSION]: paying }).fetch, email: { send: mail } as unknown as SendEmail });
+    await checkout(db, { created_at: OLD });
+    await reconcileCheckouts(deps);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", admin_notified_at: null });
+    expect(mail).not.toHaveBeenCalled();
+  });
+
+  test("a young order's session stripe doesn't know is logged on its first read only", async () => {
+    const logs = captureLogs();
+    const db = await printDb();
+    await checkout(db, { created_at: OLD });
+    const fetch = fakeFetch({ [SESSION]: () => json({ error: {} }, 404) }).fetch;
+    await reconcileCheckouts(testDeps(db, { fetch }));
+    await reconcileCheckouts(testDeps(db, { fetch, now: () => NOW + 300 }));
+    expect(logs().match(/session stripe doesn't know/g)).toHaveLength(1);
   });
 
   test("applyPaid with no event row needs no ledger: the status condition guards it", async () => {

@@ -219,10 +219,19 @@ export async function issueOrderGrant(db: D1Database, secret: string, orderId: s
   return url.href;
 }
 
+/**
+ * The statement that switches off every working grant of one order, for a caller's batch. With `whileOrder` (constant
+ * SQL about the order's print_orders row, never built from input), only while the row still matches it when the
+ * statement runs, so a batch revokes by the order's state then, not by an earlier read
+ */
+export function revokeOrderGrantsStatement(db: D1Database, orderId: string, now: number, whileOrder?: string): D1PreparedStatement {
+  const condition = whileOrder ? ` AND EXISTS (SELECT 1 FROM print_orders WHERE print_orders.id = photo_download_grants.order_id AND ${whileOrder})` : "";
+  return db.prepare(`UPDATE photo_download_grants SET revoked_at = ? WHERE order_id = ? AND revoked_at IS NULL${condition}`).bind(now, orderId);
+}
+
 /** Switches off every working grant of one order, once its prints are in production (spec 18.3); returns how many */
 export async function revokeOrderGrants(db: D1Database, orderId: string, now: number): Promise<number> {
-  const result = await db.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE order_id = ? AND revoked_at IS NULL").bind(now, orderId).run();
-  return result.meta.changes;
+  return (await revokeOrderGrantsStatement(db, orderId, now).run()).meta.changes;
 }
 
 /**

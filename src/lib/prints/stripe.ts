@@ -60,24 +60,42 @@ export const livemodeOf = (key: string): 0 | 1 => (LIVE_STRIPE_KEY.test(key) ? 1
 
 /** Stripe's signed timestamp may be at most five minutes from now (spec 18.1) */
 export const SIGNATURE_TOLERANCE = 300;
+/** Stripe's header is about 150 bytes with one v1 (two while a secret is rolled): anything far larger is refused unread */
+export const SIGNATURE_HEADER_LIMIT = 1024;
+export const SIGNATURE_VALUES_LIMIT = 5;
 
 export function fromHex(text: string): Uint8Array<ArrayBuffer> | null {
   if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return null;
   return Uint8Array.from(text.match(/../g)!, (byte) => Number.parseInt(byte, 16));
 }
 
-/** Stripe-Signature: t=<seconds>,v1=<hex>[,v1=…], an HMAC-SHA256 of "<t>.<raw body>", compared in constant time by Web Crypto */
+/** Equal bytes, in time that depends only on the length (crypto.subtle.timingSafeEqual is Workers-only) */
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) return false;
+  let difference = 0;
+  for (let i = 0; i < a.byteLength; i++) difference |= a[i] ^ b[i];
+  return difference === 0;
+}
+
+/**
+ * Stripe-Signature: t=<seconds>,v1=<hex>[,v1=…], an HMAC-SHA256 of "<t>.<raw body>". The header is bounded (1KB, five
+ * v1 values), the HMAC computed once and compared in constant time with each v1, as Stripe's own libraries do
+ */
 export async function verifyStripeSignature(secret: string, header: string | null, body: string, now: number): Promise<boolean> {
-  if (!secret || !header) return false;
-  const pairs = header.split(",").map((part) => {
+  if (!secret || !header || header.length > SIGNATURE_HEADER_LIMIT) return false;
+  const pairs = header.split(",").flatMap((part) => {
     const at = part.indexOf("=");
-    return [part.slice(0, at).trim(), part.slice(at + 1).trim()] as const;
+    return at === -1 ? [] : [[part.slice(0, at).trim(), part.slice(at + 1).trim()] as const];
   });
   const t = pairs.find(([name]) => name === "t")?.[1];
-  const signatures = pairs.filter(([name]) => name === "v1").map(([, value]) => fromHex(value)).filter((value): value is Uint8Array<ArrayBuffer> => value !== null);
+  const values = pairs.filter(([name]) => name === "v1");
+  if (values.length > SIGNATURE_VALUES_LIMIT) return false;
+  const signatures = values.map(([, value]) => fromHex(value)).filter((value): value is Uint8Array<ArrayBuffer> => value !== null);
   if (!t || !/^\d{1,12}$/.test(t) || Math.abs(now - Number(t)) > SIGNATURE_TOLERANCE || signatures.length === 0) return false;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  const data = new TextEncoder().encode(`${t}.${body}`);
-  for (const signature of signatures) if (await crypto.subtle.verify("HMAC", key, signature, data)) return true;
-  return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const expected = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${t}.${body}`)));
+  let matched = false;
+  // Every value is compared, so the time taken doesn't say which one matched
+  for (const signature of signatures) matched = sameBytes(expected, signature) || matched;
+  return matched;
 }

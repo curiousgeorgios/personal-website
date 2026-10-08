@@ -10,16 +10,19 @@ export const unique = () => `${Date.now().toString(36)}${Math.floor(Math.random(
 
 /**
  * SQL on a prints server's own local store: reading a row, or setting test data (spec 11.2's rule). Two of these at once
- * on one store can fail with wrangler's "internal error" (parallel specs poll it), so a failure is tried again after a
- * short random wait. Writes must therefore be idempotent: set a value, never add to one
+ * on one store can fail with wrangler's "internal error" (parallel specs poll it). That failure, and no other, is tried
+ * again after a short random wait, and only for a SELECT or a write the caller marks idempotent (one that sets a value,
+ * never adds to one): a write that committed before wrangler failed must not apply twice
  */
-export function printsD1<T = Record<string, unknown>>(sql: string, store = ".wrangler/prints"): T[] {
+export function printsD1<T = Record<string, unknown>>(sql: string, store = ".wrangler/prints", { idempotent = false } = {}): T[] {
+  const retryable = idempotent || /^\s*select\b/i.test(sql);
   for (let attempt = 1; ; attempt++) {
     try {
       const output = execFileSync("bunx", ["wrangler", "d1", "execute", "curiousgeorge-logbook", "--local", "--persist-to", store, "--json", "--command", sql], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
       return (JSON.parse(output) as { results: T[] }[])[0]?.results ?? [];
     } catch (error) {
-      if (attempt >= 6) throw error;
+      const { stdout = "", stderr = "" } = error as { stdout?: string; stderr?: string };
+      if (!retryable || attempt >= 6 || !/internal error/i.test(`${stdout}${stderr}`)) throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200 + Math.floor(Math.random() * 600));
     }
   }

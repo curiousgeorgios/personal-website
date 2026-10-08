@@ -54,7 +54,7 @@ test("a paid order whose webhook never arrives is found by the cron and placed; 
   const { orderId, sessionId } = await checkoutOrder(page, `Ada ${unique()}`);
   await payAtStandIn(sessionId);
   // Older than the hour a session lasts, plus five minutes
-  printsD1(`UPDATE print_orders SET created_at = unixepoch() - 4000 WHERE id = '${orderId}'`);
+  printsD1(`UPDATE print_orders SET created_at = unixepoch() - 4000 WHERE id = '${orderId}'`, undefined, { idempotent: true });
   await runCron();
   await waitForStatus(orderId, "placed");
   expect(await arteloOrdersFor(orderId)).toHaveLength(1);

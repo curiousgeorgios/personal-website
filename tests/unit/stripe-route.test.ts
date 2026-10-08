@@ -45,7 +45,7 @@ test("a body past 256KB is a 413", async () => {
 test("a signed body that isn't an event is a 400; a signed event is applied and answered 200", async () => {
   expect((await call("[]", await sign("[]"))).status).toBe(400);
   await insertOrder(env.DB, { id: ORDER, status: "checkout", stripe_session_id: "cs_test_1", stripe_payment_intent: null, paid_at: null });
-  const body = JSON.stringify({ id: "evt_route", type: "checkout.session.expired", livemode: false, data: { object: { id: "cs_test_1", client_reference_id: ORDER, status: "expired", payment_status: "unpaid" } } });
+  const body = JSON.stringify({ id: "evt_route", type: "checkout.session.expired", livemode: false, data: { object: { id: "cs_test_1", client_reference_id: ORDER, metadata: { order_id: ORDER }, status: "expired", payment_status: "unpaid" } } });
   const response = await call(body, await sign(body));
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ received: true });
