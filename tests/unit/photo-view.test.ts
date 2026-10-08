@@ -28,7 +28,7 @@ describe("PhotoView", () => {
     expect(["alt", "width", "height", "loading", "fetchpriority", "src"].map((name) => img.getAttribute(name))).toEqual([
       "photo 2 of 14 from 2 february 2025, bondi, sydney", "1067", "1600", "eager", "high", "/media/photos/previews/DFkL1xrsnOH-02/s/960.webp",
     ]);
-    expect(img.getAttribute("sizes")).toBe("(max-width: 679px) min(calc(100vw - 48px), calc(82svh * 0.6667)), min(710px, calc(82svh * 0.6667))");
+    expect(img.getAttribute("sizes")).toBe("(max-width: 680px) min(calc(100vw - 67px), calc(82svh * 0.6667)), min(710px, calc(82svh * 0.6667))");
     expect(img.getAttribute("srcset")).toBe("/media/photos/previews/DFkL1xrsnOH-02/s/960.webp 640w, /media/photos/previews/DFkL1xrsnOH-02/s/1600.webp 1067w");
     expect(doc.querySelector(".photo source")!.getAttribute("type")).toBe("image/avif");
   });

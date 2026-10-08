@@ -15,8 +15,8 @@
 }
 .photos a.more { text-decoration: none; }
 .down { margin-top: 18px; color: var(--muted); }
-/* One photograph (spec 4): the box is known before the image loads, and a tall portrait fits the viewport, letterboxed on paper */
-.photo-page .photo img { display: block; width: 100%; height: auto; max-height: 82svh; object-fit: contain; }
+/* One photograph (spec 4): the box is known before the image loads, and a tall portrait fits the viewport, letterboxed on paper and aligned with the heading */
+.photo-page .photo img { display: block; width: 100%; height: auto; max-height: 82svh; object-fit: contain; object-position: left; }
 .photo-page h1 { margin-top: 20px; }
 .photo-page .where { margin-top: 8px; }
 .photo-nav { margin-top: 14px; font: 12.5px/1.55 var(--mono); color: var(--muted); }

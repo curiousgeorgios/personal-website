@@ -86,11 +86,12 @@ export const EAGER_FRAMES = 8;
 
 /**
  * The photo page's sizes (spec 4). The picture is capped at 82svh, which narrows a portrait, so its width follows its
- * ratio: a 2:3 portrait on a 900px-tall laptop is about 492px wide and fetches the 960, not the 1600.
+ * ratio: a 2:3 portrait on a 900px-tall laptop is about 492px wide and fetches the 960, not the 1600. On a phone the
+ * column is the viewport less 67px (24px padding each side, the 18px gap and the 1px rule), and the breakpoint is the notebook's.
  */
 export function photoSizes(width: number, height: number): string {
   const ratio = Number((width / height).toFixed(4));
-  return `(max-width: 679px) min(calc(100vw - 48px), calc(82svh * ${ratio})), min(710px, calc(82svh * ${ratio}))`;
+  return `${PHONE_MEDIA} min(calc(100vw - 67px), calc(82svh * ${ratio})), min(710px, calc(82svh * ${ratio}))`;
 }
 
 /** How one photograph is named in a line of text (spec 4; plan B's checkout, order page and emails): its title in quotes, or photo 2 of 14 from 02.02.25 */

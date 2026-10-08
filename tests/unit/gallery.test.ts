@@ -63,8 +63,8 @@ describe("frames", () => {
 
 describe("the photo page", () => {
   test("sizes follow the photograph's ratio under the 82svh cap", () => {
-    expect(photoSizes(4000, 6000)).toBe("(max-width: 679px) min(calc(100vw - 48px), calc(82svh * 0.6667)), min(710px, calc(82svh * 0.6667))");
-    expect(photoSizes(6000, 4000)).toBe("(max-width: 679px) min(calc(100vw - 48px), calc(82svh * 1.5)), min(710px, calc(82svh * 1.5))");
+    expect(photoSizes(4000, 6000)).toBe("(max-width: 680px) min(calc(100vw - 67px), calc(82svh * 0.6667)), min(710px, calc(82svh * 0.6667))");
+    expect(photoSizes(6000, 4000)).toBe("(max-width: 680px) min(calc(100vw - 67px), calc(82svh * 1.5)), min(710px, calc(82svh * 1.5))");
   });
 
   test("a photograph's name is its title in quotes, or which photo of the post it is", () => {
