@@ -70,7 +70,7 @@ export function fromHex(text: string): Uint8Array<ArrayBuffer> | null {
 }
 
 /** Equal bytes, in time that depends only on the length (crypto.subtle.timingSafeEqual is Workers-only) */
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.byteLength !== b.byteLength) return false;
   let difference = 0;
   for (let i = 0; i < a.byteLength; i++) difference |= a[i] ^ b[i];

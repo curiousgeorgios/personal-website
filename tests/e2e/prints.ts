@@ -165,3 +165,17 @@ export async function runCron(site = PRINTS) {
   const answer = (await response.json().catch(() => null)) as { success?: boolean } | null;
   if (!response.ok || !answer?.success) throw new Error(`the cron answered ${response.status}`);
 }
+
+/** An order taken all the way to placed through the stand-ins: checkout, payment, Stripe's event, Artelo's order */
+export async function placedOrder(page: Page, name: string, site = PRINTS, store = ".wrangler/prints"): Promise<string> {
+  const { orderId, sessionId } = await checkoutOrder(page, name, TWO_PRINTS, site);
+  const { event } = await payAtStandIn(sessionId);
+  if ((await deliverStripe(site, event)) !== 200) throw new Error("stripe's event wasn't taken");
+  await waitForStatus(orderId, "placed", store);
+  return orderId;
+}
+
+/** Artelo's signed OrderStatusChange for this order, delivered to the site; the site's answer */
+export async function ship(site: string, orderId: string, status = "Shipped", wrap = false): Promise<number> {
+  return (await standIn<{ answered: number }>("/__ship", { method: "POST", body: JSON.stringify({ site, order: orderId, status, wrap }) })).answered;
+}

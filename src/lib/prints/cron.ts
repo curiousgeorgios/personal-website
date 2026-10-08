@@ -1,3 +1,4 @@
+import { pollStatuses } from "./artelo-updates";
 import type { PrintDeps } from "./config";
 import { refreshRate } from "./fx";
 import { sendDueMail } from "./mail";
@@ -39,6 +40,7 @@ export function cronSteps(deps: PrintDeps): CronStep[] {
     ["placing due orders", () => placeDue(deps)],
     ["reconciling checkouts", () => reconcileCheckouts(deps)],
     ["unsent emails", () => sendDueMail(deps)],
+    ["artelo statuses", () => pollStatuses(deps)],
     ["exchange rate", () => daily(deps, "fx", async () => (await refreshRate(deps)) !== "failed")],
   ];
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, printsD1, refundAtStandIn, runCron, setMode, unique, waitForStatus } from "./prints";
-import { PRINTS } from "./prints-site";
+import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, placedOrder, printsD1, refundAtStandIn, runCron, setMode, ship, unique, waitForStatus } from "./prints";
+import { PRINTS, STAND_IN } from "./prints-site";
 
 // Whole orders through the stand-ins on 4337: checkout, a paid session, Stripe's event, Artelo's order (spec 23.2)
 test.use({ baseURL: PRINTS });
@@ -97,4 +97,29 @@ test("a full refund of a placed order needs attention to cancel it at artelo; a 
 test("an unsigned or wrongly signed event is refused before anything is read", async () => {
   expect((await fetch(`${PRINTS}/api/prints/stripe`, { method: "POST", body: "{}" })).status).toBe(400);
   expect(await deliverStripe(PRINTS, { id: "evt_forged", type: "checkout.session.completed", data: { object: {} } }, "whsec_wrong")).toBe(400);
+});
+
+test("artelo's signed shipped status stores the tracking, revokes the master links and emails the buyer once", async ({ page }) => {
+  await asTestClient(page);
+  const orderId = await placedOrder(page, `Ada ${unique()}`);
+  expect(printsD1(`SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = '${orderId}' AND revoked_at IS NULL`)).toEqual([{ n: 2 }]);
+  expect(await ship(PRINTS, orderId, "Shipped", true)).toBe(200);
+  await waitForStatus(orderId, "shipped");
+  expect(printsD1<{ shipments: string }>(`SELECT shipments FROM print_orders WHERE id = '${orderId}'`)[0].shipments).toBe(JSON.stringify([{ carrier: "ups", number: "1Z999AA10123456784", url: "https://www.ups.com/track?tracknum=1Z999AA10123456784" }]));
+  expect(printsD1(`SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = '${orderId}' AND revoked_at IS NULL`)).toEqual([{ n: 0 }]);
+  // A replay of the same body changes nothing
+  expect(await ship(PRINTS, orderId, "Shipped")).toBe(200);
+  await expect.poll(async () => (await mailFor(orderId)).filter((mail) => mail.subject === "your prints are on their way").length).toBe(1);
+  const [mail] = (await mailFor(orderId)).filter((entry) => entry.subject === "your prints are on their way");
+  expect(mail.to).toBe("buyer@example.com");
+  expect(mail.text).toContain("tracking: ups 1Z999AA10123456784 https://www.ups.com/track?tracknum=1Z999AA10123456784");
+});
+
+test("a status artelo's webhook never delivered is caught by the twelve-hourly poll", async ({ page }) => {
+  await asTestClient(page);
+  const orderId = await placedOrder(page, `Ada ${unique()}`);
+  await fetch(`${STAND_IN}/__status`, { method: "POST", body: JSON.stringify({ order: orderId, status: "InProduction" }) });
+  printsD1(`UPDATE print_orders SET placed_at = placed_at - 50000 WHERE id = '${orderId}'`);
+  await runCron();
+  await waitForStatus(orderId, "in_production");
 });

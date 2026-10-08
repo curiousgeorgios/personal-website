@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { issueOrderGrant } from "../../src/lib/photos/store";
 import { verifyPhotoToken } from "../../src/lib/photos/tokens";
 import { LEASE_SECONDS, nextDelay, placeDue, placeOrder, scrub, type PlaceOutcome } from "../../src/lib/prints/place";
 import { getOrder } from "../../src/lib/prints/store";
@@ -757,5 +758,74 @@ describe("the money path's further guards", () => {
       expect(logs()).toContain("prints: ignored an artelo order's costs: a charge this site doesn't know: surprise");
       expect(logs()).not.toContain("price check");
     });
+  });
+});
+
+describe("an adopted order goes through artelo's status rules (task 11)", () => {
+  const adopting = (status: string, extra: Record<string, unknown> = {}) => ({ [LOOKUP]: () => json([{ id: "artelo-7", orderId: ORDER, status, ...extra }]) });
+  const activeGrants = (db: D1Database) => db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n");
+
+  test("adopting a cancelled order makes george's email due and revokes the grants, unless the buyer is refunded in full", async () => {
+    captureLogs();
+    const mail = vi.fn(async () => ({ messageId: "m" }));
+    const { db, fake, deps } = await setup(adopting("Canceled"), {}, { email: { send: mail } as unknown as SendEmail });
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+    expect(await placeOrder(deps, ORDER)).toBe("adopted");
+    expect(creates(fake)).toHaveLength(0);
+    expect(await activeGrants(db)).toBe(0);
+    // Made due (0) and claimed at once; once the send settles it holds the time it went
+    expect(deps.waited).toHaveLength(1);
+    await Promise.all(deps.waited);
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER} was cancelled by artelo` }));
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "cancelled", artelo_order_id: "artelo-7", artelo_status: "Canceled", lease_until: null, admin_notified_at: NOW });
+  });
+
+  test("adopting an order in production revokes the grants", async () => {
+    captureLogs();
+    const { db, deps } = await setup(adopting("InProduction"));
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+    expect(await placeOrder(deps, ORDER)).toBe("adopted");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "in_production", artelo_order_id: "artelo-7", placed_at: NOW, lease_until: null });
+    expect(await activeGrants(db)).toBe(0);
+  });
+
+  test("adopting a shipped or delivered order stores its cleaned tracking and makes the buyer's email due", async () => {
+    captureLogs();
+    const shipments = [{ carrierCode: "U P S\n Ground", trackingNumber: "1Z 999\r\nAA", trackingUrl: "http://www.ups.com/track" }];
+    for (const status of ["Shipped", "Delivered"]) {
+      const { db, deps } = await setup(adopting(status, { shipments }));
+      await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+      expect(await placeOrder(deps, ORDER)).toBe("adopted");
+      expect(await activeGrants(db)).toBe(0);
+      // The buyer's email was due and claimed at once; with no session to read here the claim is given back, still due
+      expect(deps.waited).toHaveLength(1);
+      await Promise.all(deps.waited);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: status.toLowerCase(), shipped_at: NOW, shipped_email_at: null, shipments: JSON.stringify([{ carrier: "u p s ground", number: "1Z 999 AA", url: "" }]) });
+    }
+  });
+
+  test("adopting an order refunded in full while it was placed, which artelo cancelled, tells no one and ends it cancelled", async () => {
+    captureLogs();
+    const holder: { db?: D1Database } = {};
+    const { db, deps } = await setup({
+      [LOOKUP]: async () => {
+        await holder.db!.prepare("UPDATE print_orders SET status = 'refunded', refunded_amount = 28700 WHERE id = ?").bind(ORDER).run();
+        return json([{ id: "artelo-7", orderId: ORDER, status: "Canceled" }]);
+      },
+    });
+    holder.db = db;
+    await placeOrder(deps, ORDER);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "cancelled", artelo_order_id: "artelo-7", attention_reason: null, admin_notified_at: null });
+  });
+
+  test("an adopted status that is only placed, or one this site doesn't map, leaves the order placed, with no empty tracking stored", async () => {
+    captureLogs();
+    for (const status of ["Received", "OnHold"]) {
+      const { db, deps } = await setup(adopting(status, { shipments: [] }));
+      await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+      expect(await placeOrder(deps, ORDER)).toBe("adopted");
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_status: status, shipments: null });
+      expect(await activeGrants(db)).toBe(1);
+    }
   });
 });

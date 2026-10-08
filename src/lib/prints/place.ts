@@ -1,7 +1,8 @@
 import { issueOrderGrant, photoMaster, revokeOrderGrants } from "../photos/store";
 import { verifyPhotoToken } from "../photos/tokens";
 import type { Address } from "./address";
-import { artelo, arteloAddress, ordersList, productInfo, readArteloOrder, SHOWN_MESSAGE, type ArteloOrder, type ArteloResult } from "./artelo";
+import { artelo, arteloAddress, ordersList, productInfo, readArteloOrder, shipmentsColumn, SHOWN_MESSAGE, type ArteloOrder, type ArteloResult } from "./artelo";
+import { applyArteloUpdate, statusWord } from "./artelo-updates";
 import { mapStatus, PENDING_REASON, REFUND_REASON } from "./artelo-status";
 import { parseSize, type Frame, type Orientation } from "./catalogue";
 import type { PrintConfig, PrintDeps } from "./config";
@@ -166,15 +167,34 @@ export async function mailNow(deps: PrintDeps): Promise<void> {
   }
 }
 
+/** Statuses past placed: an order adopted in one of these moves on through Artelo's status rules (spec 18.3) */
+const MOVED_ON: ReadonlySet<string> = new Set(["in_production", "shipped", "delivered", "cancelled"]);
+
+/**
+ * An adopted order Artelo has already moved on gets the same rules as the webhook: its grants revoked, its tracking
+ * stored, the buyer's or George's email made due. The order is recorded first, so a failure here only leaves the status
+ * for the webhook or the poll; it never undoes the placement or reaches the attempt's failure handling
+ */
+async function applyAdopted(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Promise<void> {
+  if (!found.status || !MOVED_ON.has(mapStatus(found.status) ?? "")) return;
+  try {
+    await applyArteloUpdate(deps, { orderId: found.id, status: found.status, shipments: found.shipments });
+  } catch (error) {
+    console.error("prints: order", order.id, "was recorded as artelo's but its status wasn't applied; the poll will", error instanceof Error ? error.name : typeof error);
+  }
+}
+
 /** The order is Artelo's now: its id, status, cost and the time, the lease let go (spec 18.2 step 6) */
 async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Promise<void> {
   const now = deps.now();
-  const status = mapStatus(found.status) ?? "placed";
+  const mapped = mapStatus(found.status) ?? "placed";
+  // Recorded as placed (or held by Artelo); a status past that is applied afterwards by the status rules
+  const status = mapped === "needs_attention" ? "needs_attention" : "placed";
   // Whole US cents: artelo_cost holds only an integer, and a write it refused would leave a placed order looking unplaced
   const cost = found.costCents === null ? null : Math.round(found.costCents);
   const result = await deps.db
     .prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, shipments = COALESCE(?, shipments), placed_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'paid'")
-    .bind(status, status === "needs_attention" ? PENDING_REASON : null, found.id, found.status, cost, found.shipments ? JSON.stringify(found.shipments) : null, now, now, order.id)
+    .bind(status, status === "needs_attention" ? PENDING_REASON : null, found.id, statusWord(found.status), cost, shipmentsColumn(found.shipments), now, now, order.id)
     .run();
   if (result.meta.changes === 0) {
     // The order left paid while this attempt held the lease: a full refund landed. Artelo has it all the same, so it
@@ -185,7 +205,7 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
     try {
       const kept = await deps.db
         .prepare("UPDATE print_orders SET artelo_order_id = COALESCE(artelo_order_id, ?), artelo_status = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_status END, artelo_cost = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_cost END, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ? RETURNING artelo_order_id")
-        .bind(found.id, found.id, found.status, found.id, cost, REFUND_REASON, now, order.id)
+        .bind(found.id, found.id, statusWord(found.status), found.id, cost, REFUND_REASON, now, order.id)
         .first<{ artelo_order_id: string | null }>();
       recorded = kept?.artelo_order_id ?? null;
     } catch (error) {
@@ -193,10 +213,13 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
     }
     if (recorded && recorded !== found.id) console.error("prints: order", order.id, "has two artelo orders,", recorded, "and", `${found.id}: cancel one in artelo`);
     else console.error("prints: order", order.id, "reached artelo after it left paid: artelo's id is kept, and a refunded order is flagged for george");
+    // The order holds this Artelo id: its status still counts (a cancellation ends the refund's needs_attention, say)
+    if (recorded === found.id) await applyAdopted(deps, order, found);
     await mailNow(deps);
     return;
   }
   if (status === "needs_attention") await mailNow(deps);
+  await applyAdopted(deps, order, found);
 }
 
 /** What a failure may touch: the lease this attempt holds now (the claim's, then the fence's), and whether a create went */

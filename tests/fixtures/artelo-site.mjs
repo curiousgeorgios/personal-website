@@ -186,5 +186,36 @@ route("POST", "/__mode", ({ body }) => {
 });
 route("GET", "/__orders", () => [200, artelo.orders]);
 
+// Statuses: Get Order by Id for the poll, /__ship to sign and deliver an OrderStatusChange as Artelo would (wrap puts it
+// in a data object), and /__status to change an order quietly, as a webhook Artelo never delivered would
+const shippedTracking = [{ carrierCode: "UPS", trackingNumber: "1Z999AA10123456784", trackingUrl: "https://www.ups.com/track?tracknum=1Z999AA10123456784" }];
+function setStatus(found, status) {
+  found.status = status;
+  if (status === "Shipped") found.shipments = shippedTracking;
+}
+route("GET", "/orders/get-by-id", ({ url, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  const found = artelo.orders.find((entry) => entry.id === url.searchParams.get("orderId"));
+  return found ? [200, { id: found.id, orderId: found.orderId, status: found.status, shipments: found.shipments }] : [404, { message: "no such order" }];
+});
+route("POST", "/__ship", async ({ body }) => {
+  const { site, order, status = "Shipped", wrap = false } = JSON.parse(body);
+  const found = artelo.orders.find((entry) => entry.orderId === order);
+  if (!found) return [404, { message: "no such order" }];
+  setStatus(found, status);
+  const payload = { orderId: found.id, status, shipments: found.shipments };
+  const text = JSON.stringify(wrap ? { data: payload } : payload);
+  const response = await fetch(`${site}/api/prints/artelo`, { method: "POST", body: text, headers: { "content-type": "application/json", "x-artelo-signature": sign(FIXTURE_SECRETS.ARTELO_WEBHOOK_SECRET, text) } });
+  received.webhooks.push({ order, status, answered: response.status });
+  return [200, { answered: response.status }];
+});
+route("POST", "/__status", ({ body }) => {
+  const { order, status } = JSON.parse(body);
+  const found = artelo.orders.find((entry) => entry.orderId === order);
+  if (!found) return [404, { message: "no such order" }];
+  setStatus(found, status);
+  return [204, ""];
+});
+
 // Routes added by later tasks go above this line
 start();

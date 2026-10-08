@@ -155,19 +155,48 @@ export function unwrap(value: unknown): Record<string, unknown> | null {
   return record.data && typeof record.data === "object" && !Array.isArray(record.data) ? (record.data as Record<string, unknown>) : record;
 }
 
-/** A parcel's tracking; a tracking URL counts only as https, because it becomes a link */
+/** Bounds on Artelo's tracking, which is text from outside: the carrier and number are cut, a longer link is dropped */
+export const TRACKING_LIMITS = { carrier: 40, number: 64, url: 500, shipments: 10 } as const;
+
+/** One line: any run of whitespace or control characters (newlines included) becomes one space */
+const oneLine = (text: string, limit: number) => text.replace(/[\s\p{Cc}]+/gu, " ").trim().slice(0, limit);
+const textOf = (value: unknown) => (typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "");
+
+/**
+ * A parcel's tracking as it may be stored and shown: the carrier (lowercase) and number on one line each and capped, and
+ * the link only when it is a whole https URL, because it becomes a link (the rule mail.ts's shippedText applies again at
+ * send time). Null when neither a number nor a link is left
+ */
+export function cleanShipment(carrier: unknown, number: unknown, url: unknown): Shipment | null {
+  const link = textOf(url).trim();
+  const shipment = {
+    carrier: oneLine(textOf(carrier), TRACKING_LIMITS.carrier).toLowerCase(),
+    number: oneLine(textOf(number), TRACKING_LIMITS.number),
+    url: /^https:\/\/\S+$/i.test(link) && !/\p{Cc}/u.test(link) && link.length <= TRACKING_LIMITS.url ? link : "",
+  };
+  return shipment.number || shipment.url ? shipment : null;
+}
+
+/** Artelo's shipments (carrierCode, trackingNumber, trackingUrl), each cleaned, at most ten */
 export function readShipments(value: unknown): Shipment[] | null {
   if (!Array.isArray(value)) return null;
-  return value.flatMap((entry): Shipment[] => {
-    if (!entry || typeof entry !== "object") return [];
-    const { carrierCode, trackingNumber, trackingUrl } = entry as Record<string, unknown>;
-    const shipment = {
-      carrier: typeof carrierCode === "string" ? carrierCode.toLowerCase() : "",
-      number: typeof trackingNumber === "string" ? trackingNumber : "",
-      url: typeof trackingUrl === "string" && trackingUrl.startsWith("https://") ? trackingUrl : "",
-    };
-    return shipment.number || shipment.url ? [shipment] : [];
+  return value
+    .flatMap((entry): Shipment[] => {
+      if (!entry || typeof entry !== "object") return [];
+      const { carrierCode, trackingNumber, trackingUrl } = entry as Record<string, unknown>;
+      const shipment = cleanShipment(carrierCode, trackingNumber, trackingUrl);
+      return shipment ? [shipment] : [];
+    })
+    .slice(0, TRACKING_LIMITS.shipments);
+}
+
+/** The shipments column's value, cleaned again where it is written whatever the caller passed; null when none are left */
+export function shipmentsColumn(shipments: readonly Shipment[] | null): string | null {
+  const clean = (shipments ?? []).flatMap((shipment): Shipment[] => {
+    const cleaned = shipment && typeof shipment === "object" ? cleanShipment(shipment.carrier, shipment.number, shipment.url) : null;
+    return cleaned ? [cleaned] : [];
   });
+  return clean.length > 0 ? JSON.stringify(clean.slice(0, TRACKING_LIMITS.shipments)) : null;
 }
 
 export function readArteloOrder(value: unknown): ArteloOrder | null {
