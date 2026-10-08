@@ -1,13 +1,14 @@
 import { checkAddress, EMPTY_ADDRESS, readAddress, type Address, type AddressErrors } from "./address";
 import { priceCheck } from "./artelo";
 import { basketHref, CAP_NOTE, changeLines, droppedNotes, itemsValue, parseItems, readOp } from "./basket";
+import { startCheckout } from "./checkout";
 import type { PrintDeps } from "./config";
 import { freshRate } from "./fx";
 import { arteloKey, clientKey, underLimit, type PrintLimits } from "./limits";
 import { gstSentence } from "./money";
 import { canOpen } from "./open";
 import { breakdown, deliveryAmount, deliveryLabel } from "./quote";
-import { QUOTE_SECONDS, sealQuote, type QuotePayload } from "./seal";
+import { openQuote, QUOTE_SECONDS, sameQuote, sealQuote, type QuotePayload } from "./seal";
 import { loadBasket, type PrintSettings, type ResolvedBasket } from "./store";
 
 // /basket (spec 15.2 to 16.3): the basket from its query string, the address form and the quote. A POST render can't be
@@ -39,6 +40,7 @@ export interface BasketView {
 export type BasketOutcome = { redirect: string } | { status: number; view: BasketView; beacon: boolean };
 
 export const FORM_UNREADABLE = "that form couldn't be read. try again.";
+export const QUOTE_CHANGED = "that quote has changed or run out. quote delivery again.";
 /** No rate, or one over a week old: nothing can be quoted until the daily job stores a fresh one (ADR-0021 as amended) */
 export const RATE_DOWN = "delivery prices can't be checked right now. try again later.";
 
@@ -74,13 +76,14 @@ export async function quoteView(secret: string, payload: QuotePayload): Promise<
   return { printTotal: payload.printTotal, deliveryAmount: payload.deliveryAmount, label: deliveryLabel(payload.taxes), breakdown: breakdown(payload), token: await sealQuote(secret, payload) };
 }
 
-/** intent=quote (spec 16.1); Task 7 adds intent=checkout. A POST render carries no beacon */
+/** intent=quote (spec 16.1) or intent=checkout (spec 17.2), both posted by the one address form. A POST render carries no beacon */
 export async function basketPost(deps: PrintDeps, request: Request, url: URL, limits: PrintLimits): Promise<BasketOutcome> {
   const form = await request.formData().catch(() => null);
   const { basket, settings } = await loadBasket(deps.db, parseItems(url.searchParams.get("items")));
   const address = form ? readAddress(form) : { ...EMPTY_ADDRESS };
   const render = (status: number, over: Partial<BasketView> = {}): BasketOutcome => ({ status, beacon: false, view: viewOf(deps, basket, settings, { address, ...over }) });
   const intent = form?.get("intent");
+  if (intent === "checkout") return checkout(deps, request, form?.get("quote"), basket, address, limits, render);
   if (intent !== "quote") return render(422, { errors: { form: FORM_UNREADABLE } });
 
   // What can be refused without any work counts against no limit: a closed basket (the page's 404), an empty one, and no
@@ -107,4 +110,25 @@ export async function basketPost(deps: PrintDeps, request: Request, url: URL, li
     freightCents: result.costs.freightCents, taxes: result.costs.taxes, buffer: settings.buffer, rate, expires: deps.now() + QUOTE_SECONDS,
   };
   return render(200, { address: checked.address, quote: await quoteView(deps.config.secrets.PRINT_VIEW_SECRET, payload) });
+}
+
+type Render = (status: number, over?: Partial<BasketView>) => BasketOutcome;
+
+/**
+ * intent=checkout (spec 17.2): the visible address fields, as posted, against the sealed quote, exactly, or nothing is
+ * created and nothing is charged. Once sameQuote holds, the seal's address is the posted one, so Stripe gets payload.address
+ */
+async function checkout(deps: PrintDeps, request: Request, token: FormDataEntryValue | null | undefined, basket: ResolvedBasket, address: Address, limits: PrintLimits, render: Render): Promise<BasketOutcome> {
+  // A closed basket (the page's 404) or an empty one creates nothing and counts against no limit
+  if (!canOpen(deps.config) || basket.count === 0) return render(200);
+  if (!(await underLimit(limits.checkout, clientKey(request, deps.config.testClients)))) return render(429, { errors: { form: "too many tries - wait a minute and try again." } });
+  // Every photo still published and every size still offered (15.2); a dropped entry shows its line
+  if (basket.unavailable > 0 || basket.overCap > 0) return render(422);
+  const payload = typeof token === "string" ? await openQuote(deps.config.secrets.PRINT_VIEW_SECRET, token, deps.now()) : null;
+  // An edited address, an edited basket, a quote past its 30 minutes or a price list changed since: quote again
+  if (!payload || !sameQuote(payload, basket.items, address) || payload.printTotal !== basket.printTotal) return render(422, { errors: { form: QUOTE_CHANGED } });
+  const outcome = await startCheckout(deps, basket, payload);
+  if ("url" in outcome) return { redirect: outcome.url };
+  if (outcome.failure === "long") return render(422, { errors: { form: "that address is too long for the payment page. shorten it and quote again." } });
+  return render(503, { errors: { form: "couldn't reach the payment page. nothing was charged - try again in a minute." } });
 }

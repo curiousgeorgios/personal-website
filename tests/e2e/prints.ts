@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { Page } from "@playwright/test";
-import { STAND_IN } from "./prints-site";
+import { PRINTS, STAND_IN } from "./prints-site";
 
 // Helpers for the print specs. They write only to the prints servers' own stores and read the stand-in.
 
@@ -59,4 +59,27 @@ export async function quoteDelivery(page: Page, address: TestAddress) {
 export async function priceChecksFor(name: string) {
   const { priceChecks } = await standIn<{ priceChecks: { customerAddress: Record<string, string>; items: { quantity: number; productInfo: Record<string, unknown> }[] }[] }>("/__requests");
   return priceChecks.filter((check) => check.customerAddress.name === name);
+}
+
+/**
+ * Continue to payment, posted as the browser would but without following the 303: the CSP rightly blocks a redirect to
+ * the stand-in. The fields are read, never written: the one address form's visible fields, the sealed quote and the
+ * button's intent=checkout, exactly the set the browser builds for #pay
+ */
+export async function postPayForm(page: Page, site = PRINTS) {
+  const form = page.locator("form#deliver");
+  const action = new URL((await form.getAttribute("action"))!, site);
+  action.hash = "";
+  const fields = await form.evaluate((element) => [...new FormData(element as HTMLFormElement, document.querySelector<HTMLButtonElement>("#pay"))].map(([name, value]) => [name, String(value)]));
+  return page.request.post(action.href, { form: Object.fromEntries(fields), headers: { Origin: site }, maxRedirects: 0 });
+}
+
+export interface StandInSession {
+  session: { id: string; client_reference_id: string; status: string; payment_intent: string | null; amount_total: number };
+  form: Record<string, string>;
+}
+
+/** The stand-in's Checkout Sessions made for this shipping name */
+export async function sessionsFor(name: string): Promise<StandInSession[]> {
+  return (await standIn<StandInSession[]>("/__stripe/sessions")).filter((entry) => entry.form["payment_intent_data[shipping][name]"] === name);
 }

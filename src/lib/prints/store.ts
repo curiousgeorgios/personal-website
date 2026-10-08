@@ -243,3 +243,34 @@ export async function loadPrintContext(db: D1Database): Promise<{ prices: PriceL
     settings: toSettings(settings.results as unknown as { key: string; value: string }[]),
   };
 }
+
+export interface NewOrder {
+  id: string;
+  country: string;
+  printTotal: number;
+  deliveryAmount: number;
+  deliveryTaxed: 0 | 1;
+  livemode: 0 | 1;
+  now: number;
+}
+
+/** The order and its lines in one batch, before any Checkout Session exists (spec 17.2 step 3). The address is not written */
+export async function createOrder(db: D1Database, order: NewOrder, lines: readonly PricedLine[]): Promise<void> {
+  await db.batch([
+    db.prepare("INSERT INTO print_orders (id, country, print_total, delivery_amount, delivery_taxed, status, livemode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'checkout', ?, ?, ?)")
+      .bind(order.id, order.country, order.printTotal, order.deliveryAmount, order.deliveryTaxed, order.livemode, order.now, order.now),
+    ...lines.map((line) =>
+      db.prepare("INSERT INTO print_order_items (order_id, line, photo_id, tier, size, frame, quantity, unit_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(order.id, line.line, line.photoId, line.tier, line.size.size, line.frame, line.quantity, line.unitAmount),
+    ),
+  ]);
+}
+
+export async function setSession(db: D1Database, id: string, sessionId: string, now: number): Promise<void> {
+  await db.prepare("UPDATE print_orders SET stripe_session_id = ?, updated_at = ? WHERE id = ?").bind(sessionId, now, id).run();
+}
+
+/** checkout becomes expired; any other status is left alone. True when it changed */
+export async function markExpired(db: D1Database, id: string, now: number): Promise<boolean> {
+  return (await db.prepare("UPDATE print_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'checkout'").bind(now, id).run()).meta.changes > 0;
+}

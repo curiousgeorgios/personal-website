@@ -41,7 +41,9 @@ export default defineConfig({
         "media-src 'self' blob:",
         "connect-src 'self'",
         "base-uri 'self'",
-        "form-action 'self'",
+        // Chrome applies form-action to the redirect after a form post, and checkout is a post answered with a 303 to
+        // Stripe's hosted page (spec 13.3)
+        "form-action 'self' https://checkout.stripe.com",
         "frame-ancestors 'none'",
       ],
       // Astro hashes the scripts it bundles but not inline ones, so the night poster's script is hashed here, from the

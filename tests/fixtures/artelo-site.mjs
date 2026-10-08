@@ -64,5 +64,61 @@ route("POST", "/orders/price-check", ({ body, headers }) => {
   return [200, { orderCosts: { productionCost: 40 * prints, arteloShipping: 30, usSalesTax: tax, gst: 0, hst: 0, pst: 0, total: 40 * prints + 30 + tax } }];
 });
 
+// Stripe's three endpoints (spec 23.3, "Decisions"): sessions are kept with the form that made them, so the specs can
+// read what the site sent. /__stripe/pay completes one as Checkout would and answers its checkout.session.completed
+// event, which the spec signs and delivers itself
+const stripe = { sessions: new Map(), intents: new Map(), keys: new Map(), count: 0 };
+const stripeAuth = (headers) => keyed(headers, FIXTURE_STRIPE_KEY) && headers["stripe-version"] === "2025-09-30.clover";
+route("POST", "/stripe/v1/checkout/sessions", ({ body, headers }) => {
+  if (!stripeAuth(headers)) return [401, { error: { message: "invalid api key or version" } }];
+  const idempotency = headers["idempotency-key"];
+  if (idempotency && stripe.keys.has(idempotency)) return [200, stripe.sessions.get(stripe.keys.get(idempotency)).session];
+  const form = Object.fromEntries(new URLSearchParams(body));
+  const id = `cs_test_standin_${++stripe.count}`;
+  let total = 0;
+  for (let i = 0; form[`line_items[${i}][quantity]`] !== undefined; i++) total += Number(form[`line_items[${i}][price_data][unit_amount]`]) * Number(form[`line_items[${i}][quantity]`]);
+  const metadata = Object.fromEntries(Object.entries(form).flatMap(([name, value]) => (/^metadata\[(.+)\]$/.test(name) ? [[/^metadata\[(.+)\]$/.exec(name)[1], value]] : [])));
+  const session = {
+    id, object: "checkout.session", url: `${STAND_IN}/stripe/pay/${id}`, status: "open", payment_status: "unpaid", client_reference_id: form.client_reference_id,
+    livemode: false, currency: "aud", amount_total: total, payment_intent: null, metadata, customer_details: null,
+  };
+  stripe.sessions.set(id, { session, form });
+  if (idempotency) stripe.keys.set(idempotency, id);
+  return [200, session];
+});
+route("GET", /^\/stripe\/v1\/checkout\/sessions\/([^/]+)$/, ({ headers, match }) => {
+  if (!stripeAuth(headers)) return [401, { error: { message: "invalid api key or version" } }];
+  const found = stripe.sessions.get(match[1]);
+  return found ? [200, found.session] : [404, { error: { message: "no such session" } }];
+});
+route("POST", /^\/stripe\/v1\/checkout\/sessions\/([^/]+)\/expire$/, ({ headers, match }) => {
+  if (!stripeAuth(headers)) return [401, { error: { message: "invalid api key or version" } }];
+  const found = stripe.sessions.get(match[1]);
+  if (!found || found.session.status !== "open") return [400, { error: { message: "only an open session can be expired" } }];
+  found.session.status = "expired";
+  return [200, found.session];
+});
+route("GET", /^\/stripe\/v1\/payment_intents\/([^/]+)$/, ({ headers, match }) => {
+  if (!stripeAuth(headers)) return [401, { error: { message: "invalid api key or version" } }];
+  const intent = stripe.intents.get(match[1]);
+  return intent ? [200, intent] : [404, { error: { message: "no such payment intent" } }];
+});
+// Completes a session as Checkout would: { session, email?, amount?, conversion? } (amount and conversion make a mismatch)
+route("POST", "/__stripe/pay", ({ body }) => {
+  const { session: id, email = "buyer@example.com", amount, conversion = false } = JSON.parse(body);
+  const found = stripe.sessions.get(id);
+  if (!found) return [404, { message: "no such session" }];
+  const { session, form } = found;
+  const intent = `pi_test_standin_${stripe.count}_${id.split("_").at(-1)}`;
+  const field = (name) => form[`payment_intent_data[shipping]${name}`] ?? null;
+  stripe.intents.set(intent, {
+    id: intent, object: "payment_intent",
+    shipping: { name: field("[name]"), phone: field("[phone]"), address: { line1: field("[address][line1]"), line2: field("[address][line2]"), city: field("[address][city]"), state: field("[address][state]"), postal_code: field("[address][postal_code]"), country: field("[address][country]") } },
+  });
+  Object.assign(session, { status: "complete", payment_status: "paid", payment_intent: intent, customer_details: { email }, ...(amount === undefined ? {} : { amount_total: amount }), ...(conversion ? { currency_conversion: { amount_total: 12345, source_currency: "usd" } } : {}) });
+  return [200, { event: { id: `evt_test_standin_${id.split("_").at(-1)}`, object: "event", type: "checkout.session.completed", livemode: false, created: Math.floor(Date.now() / 1000), data: { object: session } } }];
+});
+route("GET", "/__stripe/sessions", () => [200, [...stripe.sessions.values()]]);
+
 // Routes added by later tasks go above this line
 start();
