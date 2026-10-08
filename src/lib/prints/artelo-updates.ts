@@ -101,10 +101,12 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
   const { db } = deps;
   const now = deps.now();
   const target = mapStatus(status);
-  // A status the rules don't act on is recorded as Artelo's, unless it says nothing new: a late or replayed one writes
-  // nothing, so it can neither show an older status in /admin nor push the poll back
+  // A status the rules don't act on is recorded as Artelo's, unless it says nothing new: the same word again, or one below
+  // where the order and Artelo's last status already stand (a late arrival), writes nothing, so it can neither show an
+  // older status in /admin nor push the poll back. A different word at the same rank (Received after
+  // PendingFulfillmentAction, once George has sorted it at Artelo) is recorded, so /admin shows what Artelo now says
   const ignore = async (): Promise<Applied> => {
-    if (status === order.artelo_status || (target && standing(target) <= Math.max(standing(order.status), standing(mapStatus(order.artelo_status))))) return "stale";
+    if (status === order.artelo_status || (target && standing(target) < Math.max(standing(order.status), standing(mapStatus(order.artelo_status))))) return "stale";
     // As read, like a move, so a status that has just moved the order isn't followed by an older one recorded over it
     const recorded = await db.prepare("UPDATE print_orders SET artelo_status = ?, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = ? AND artelo_status IS ?").bind(status, now, now, order.id, order.status, order.artelo_status).run();
     return recorded.meta.changes === 0 ? "raced" : "recorded";
@@ -115,7 +117,11 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
   }
   // Still being placed (an answer lost, say): only recorded, so placement's next lookup adopts the order properly rather
   // than leaving it placed with no Artelo id, where neither placement nor the poll would ever look at it again
-  if (FINAL.has(order.status) || NOT_YET_ARTELOS.has(order.status)) return ignore();
+  if (FINAL.has(order.status) || NOT_YET_ARTELOS.has(order.status)) {
+    // Cancelled stays final, but Artelo shipping what it cancelled is an anomaly worth seeing in the logs
+    if (order.status === "cancelled" && (target === "shipped" || target === "delivered")) console.error("prints: artelo says order", order.id, "is", status, "but it was cancelled; it stays cancelled");
+    return ignore();
+  }
   // A needs_attention this site set (a refund to cancel at Artelo, say) isn't Artelo's to clear: only needs_attention set
   // by Artelo ranks with placed (spec 18.3). A cancellation still ends it
   if (order.status === "needs_attention" && order.attention_reason !== PENDING_REASON && target !== "cancelled") return ignore();

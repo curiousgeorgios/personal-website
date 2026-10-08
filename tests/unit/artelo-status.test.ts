@@ -431,6 +431,40 @@ describe("fix round 1", () => {
     expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", artelo_status: "InProduction", status_checked_at: NOW });
   });
 
+  test("a different word at the same rank is recorded so /admin shows it; the same word again writes nothing (fix round 2, minor a)", async () => {
+    const PENDING = "artelo needs something before it can print: open the order in artelo.";
+    let { db, deps } = await setup({ status: "needs_attention", attention_reason: PENDING, artelo_status: "PendingFulfillmentAction", status_checked_at: NOW - 999 });
+    expect(await applyArteloUpdate(deps, update("Received"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: PENDING, artelo_status: "Received", status_checked_at: NOW });
+    expect(deps.waited).toHaveLength(0);
+    // The same word again, later: nothing written
+    expect(await applyArteloUpdate({ ...deps, now: () => NOW + 60 }, update("Received"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ artelo_status: "Received", status_checked_at: NOW, updated_at: NOW });
+    // A placed order: ImagesProcessing then Received, and a first status onto none
+    ({ db, deps } = await setup({ artelo_status: "ImagesProcessing" }));
+    expect(await applyArteloUpdate(deps, update("Received"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_status: "Received" });
+    ({ db, deps } = await setup({ artelo_status: null }));
+    expect(await applyArteloUpdate(deps, update("Ignored"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_status: "Ignored" });
+  });
+
+  test("a shipment reaching a cancelled order leaves it cancelled and logs the order and status, nothing personal (fix round 2, minor b)", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const status of ["Shipped", "Delivered"]) {
+      error.mockClear();
+      const { db, deps } = await setup({ status: "cancelled", artelo_status: "Canceled" });
+      expect(await applyArteloUpdate(deps, update(status, TRACKING))).toBe("ignored");
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "cancelled", artelo_status: "Canceled", shipments: null });
+      expect(error.mock.calls.map((args) => args.join(" "))).toEqual([`prints: artelo says order ${ORDER} is ${status} but it was cancelled; it stays cancelled`]);
+    }
+    // Any other status reaching a cancelled order, or a shipment reaching another final one, isn't an anomaly
+    error.mockClear();
+    await applyArteloUpdate((await setup({ status: "cancelled", artelo_status: "Canceled" })).deps, update("InProduction"));
+    await applyArteloUpdate((await setup({ status: "refunded" })).deps, update("Shipped", TRACKING));
+    expect(error).not.toHaveBeenCalled();
+  });
+
   test("a status recorded meanwhile isn't overwritten by an older one decided from a stale read", async () => {
     const REFUND = "refunded in stripe: cancel it in artelo if it hasn't printed.";
     const { db, deps } = await setup({ status: "needs_attention", attention_reason: REFUND, artelo_status: "Received" });
