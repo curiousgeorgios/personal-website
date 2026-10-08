@@ -45,6 +45,16 @@ Launch steps for the gallery, all George's, in this order:
 
 Details, and what is still open: the guide's launch steps and [the plan 6 follow-ups](docs/superpowers/plans/2026-10-08-plan-6-followups.md).
 
+The gallery merges together with prints (plan 7), so George follows the combined launch checklist in the [prints guide](docs/prints.md#launch-checklist), which holds these steps too.
+
+## Prints
+
+Print ordering (plan 7) is built and stays closed until George has worked through the launch checklist; `PRINTS_OPEN` is `"false"` in `wrangler.jsonc` until its last step. A photograph's page gets a `prints` row, the basket lives in the URL, Artelo's Price Check quotes delivery exactly for the buyer's address, Stripe's hosted checkout takes the payment, each paid basket becomes one Artelo order and the buyer gets a private order page and a shipped email; George runs it from the `orders` section of `/admin`. How it works, the launch checklist and how to run it: [prints guide](docs/prints.md). What is left: [the plan 7 follow-ups](docs/superpowers/plans/2026-10-08-plan-7-followups.md).
+
+The e2e suite stands in for Stripe, Artelo, the exchange rate and the mail binding (`tests/fixtures/artelo-site.mjs`, port 4401) on the prints servers (4337, and 4339 with no exchange rate). Set `STRIPE_TEST_SECRET_KEY` to a Stripe test key in your shell to also run the one full order through Stripe's test mode (4338); without it that spec is skipped.
+
+Decisions: [ADR-0021](docs/adr/0021-prints-sold-on-site-through-artelo.md) (amended; prints sold on the site through Artelo), [ADR-0025](docs/adr/0025-print-emails-fail-towards-a-duplicate.md) (emails fail towards a duplicate), [ADR-0026](docs/adr/0026-a-print-order-is-fenced-not-keyed.md) (one Artelo order through a fence and a lookup) and [ADR-0027](docs/adr/0027-a-stripe-event-acts-only-when-provably-ours.md) (a Stripe event acts only when provably ours).
+
 ## Snapshots and analytics
 
 The snapshots Worker lives in `workers/snapshots/`. `bun run dev:snapshots` runs it on its own, with its own store (`.wrangler/snapshots-dev`, migrated first) and its own dev registry, so the site's servers never reach it; its nightly run, started with `curl http://localhost:8790/__scheduled`, captures the lines' real pages into that store. The end-to-end suite runs it beside the site on port 4334, with local Browser Rendering (wrangler downloads Chrome on first use) capturing a fixture site on port 4400. Run scripts under Node 24 (`mise exec node@24 --` outside your home directory): wrangler's Chrome download has hung under Node 26.

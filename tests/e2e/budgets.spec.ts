@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { SLOW } from "./deck";
 import { GALLERY } from "./gallery-site";
 import { withGpc } from "./gpc";
+import { PRINTS } from "./prints-site";
 
 /** What a page loads before any interaction: scripts, styles and HTML gzipped, fonts as they are, inline ones counted */
 async function weigh(page: Page, path: string) {
@@ -137,4 +138,30 @@ test("no layout shift while the page settles", async ({ page, browserName }) => 
       }),
   );
   expect(cls).toBeLessThan(0.01);
+});
+
+// Prints spec 23.1, on the prints server: the print row and the basket add no script, so the beacon is all there is
+for (const path of ["/photos/fixture-b-01", "/basket?items=fixture-b-01:medium:oak,fixture-b-02:small:unframed"]) {
+  test(`${path} with prints open stays inside the page budgets`, async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "measured once, in Chromium");
+    test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local prints server");
+    const sizes = await weigh(page, `${PRINTS}${path}`);
+    console.log(`budgets for ${path} (bytes)`, sizes);
+    expect(sizes.js).toBeGreaterThan(0);
+    expect(sizes.js).toBeLessThan(10 * 1024);
+    expect(sizes.css).toBeLessThan(15 * 1024);
+    expect(sizes.html).toBeLessThan(30 * 1024);
+    expect(sizes.fonts).toBe(2);
+    await expect(page.locator("script[src]")).toHaveCount(0);
+  });
+}
+
+test("the basket's previews load eagerly, at most ten", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "measured once, in Chromium");
+  test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local prints server");
+  const ten = ["fixture-b-01:small:oak", "fixture-b-02:small:oak", "fixture-01:small:oak", "fixture-02:small:oak", "fixture-b-01:medium:oak", "fixture-b-02:medium:oak", "fixture-b-01:large:oak", "fixture-b-02:large:oak", "fixture-b-01:small:unframed", "fixture-b-02:small:unframed"].join(",");
+  await page.goto(`${PRINTS}/basket?items=${ten}`);
+  const loading = await page.locator(".basket-line img").evaluateAll((images) => images.map((image) => image.getAttribute("loading")));
+  expect(loading).toHaveLength(10);
+  expect(loading.every((value) => value === "eager")).toBe(true);
 });

@@ -43,6 +43,9 @@ jobs:
           key: wrangler-chrome-${{ hashFiles('bun.lock') }}
           restore-keys: wrangler-chrome-
       - run: bun run test:e2e
+        env:
+          # Stripe's test mode, for the one full order through checkout.stripe.com; the spec skips without it
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
       # A run that died mid-download leaves a partial Chrome, and an exact-key hit would then serve it until bun.lock changes.
       # Miniflare writes a marker into a version's directory once it is fully extracted, so save only when every one has it
       - id: chrome-complete

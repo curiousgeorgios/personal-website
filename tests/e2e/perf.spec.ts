@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { contextOptions } from "../../src/deck/webgl";
 import { hasWebGL, settled, SLOW } from "./deck";
 import { GALLERY } from "./gallery-site";
+import { PRINTS } from "./prints-site";
 
 // Spec 11 on every run: interaction to next paint under 200ms at 4× CPU and layout shift under 0.01 at phone width.
 // INP comes from the Event Timing API (an interaction's latency is its longest event entry), because Lighthouse's
@@ -168,5 +169,17 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
     const cls = await shifted(page);
     test.info().annotations.push({ type: "cls", description: `layout shift on a photo's page at ${width}px: ${cls}` });
     expect(cls).toBeLessThan(0.01);
+  });
+
+  test(`nothing shifts on a photo's page with its print row, or on a basket, at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await watchShifts(page);
+    for (const path of ["/photos/fixture-b-01", "/basket?items=fixture-b-01:medium:oak,fixture-b-02:small:unframed"]) {
+      await page.goto(`${PRINTS}${path}`, { waitUntil: "networkidle" });
+      await page.waitForTimeout(800);
+      const cls = await shifted(page);
+      test.info().annotations.push({ type: "cls", description: `layout shift on ${path} at ${width}px: ${cls}` });
+      expect(cls).toBeLessThan(0.01);
+    }
   });
 }

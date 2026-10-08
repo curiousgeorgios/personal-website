@@ -4,6 +4,8 @@ import { SLOW } from "./deck";
 import { GALLERY } from "./gallery-site";
 import { withGpc } from "./gpc";
 import { catalogueLink } from "./photo-store";
+import { auAddress, quoteDelivery } from "./prints";
+import { PRINTS } from "./prints-site";
 
 /** Records, from here on, every cookie a response sets and every request to another origin */
 function watch(page: Page, origin: string) {
@@ -100,4 +102,23 @@ test("the analytics proxy answers without a cookie", async ({ request, baseURL }
   });
   expect(response.status()).toBe(400);
   expect(response.headers()["set-cookie"]).toBeUndefined();
+});
+
+test("the print row and a basket quoted for an address set nothing, stay first party and keep the address out of every url", async ({ page }) => {
+  test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "needs the local prints server");
+  await page.context().setExtraHTTPHeaders({ "X-Test-Client": `privacy-${Date.now()}` });
+  const seen = watch(page, PRINTS);
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    sent.push(request.url());
+    const referer = request.headers()["referer"];
+    if (referer) sent.push(referer);
+  });
+  await page.goto(`${PRINTS}/photos/fixture-b-01`, { waitUntil: "networkidle" });
+  await expect(page.locator("form#prints")).toBeVisible();
+  await page.goto(`${PRINTS}/basket?items=fixture-b-01:medium:oak,fixture-b-02:small:unframed`, { waitUntil: "networkidle" });
+  await quoteDelivery(page, auAddress("Privacy Tester"));
+  await expect(page.locator(".quote-line")).toHaveText("prints $238 + delivery $49 = $287");
+  await expectPrivate(page, seen);
+  expect(sent.filter((url) => /Privacy|Tester|Example Street|Bondi/.test(decodeURIComponent(url)))).toEqual([]);
 });

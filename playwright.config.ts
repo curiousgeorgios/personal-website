@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { FIXTURE_STRIPE_KEY, PRINTS, PRINTS_NO_RATE, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
+import { FIXTURE_STRIPE_KEY, PRINTS, PRINTS_NO_RATE, PRINTS_STRIPE, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
 
 // Set PLAYWRIGHT_BASE_URL to run specs against a deployed site (CI runs the privacy spec after deploy)
 const remote = process.env.PLAYWRIGHT_BASE_URL;
@@ -89,5 +89,18 @@ export default defineConfig({
           reuseExistingServer: false,
           timeout: 120_000,
         },
+        // An eighth, only when STRIPE_TEST_SECRET_KEY is set (George's GitHub secret; locally, your own test key): the
+        // full test order through Stripe's hosted page in test mode (spec 23.2). The key reaches wrangler through the
+        // shell, never this file, though it shows on the process's command line in ps while the server runs, which is
+        // acceptable for a test key; a test build refuses a live key (spec 21.4). Stripe's base and the retry window are
+        // pinned too, so nothing in .dev.vars can change them (ADR-0024's reasoning). Its own store and dev registry
+        ...(process.env.STRIPE_TEST_SECRET_KEY
+          ? [{
+              command: `${printStore(".wrangler/stripe")} && WRANGLER_REGISTRY_PATH=.wrangler/stripe/registry wrangler dev -c dist/server/wrangler.json --port 4338 --persist-to .wrangler/stripe ${PHOTO_KEY_VAR} ${printVars(PRINTS_STRIPE)} --var STRIPE_SECRET_KEY:$STRIPE_TEST_SECRET_KEY --var STRIPE_API_BASE:https://api.stripe.com --var PRINT_RETRY_WINDOW:86400`,
+              url: PRINTS_STRIPE,
+              reuseExistingServer: false,
+              timeout: 120_000,
+            }]
+          : []),
       ],
 });
