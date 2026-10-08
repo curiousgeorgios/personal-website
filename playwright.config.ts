@@ -55,5 +55,15 @@ export default defineConfig({
           reuseExistingServer: false,
           timeout: 180_000,
         },
+        // A fifth server with the photo fixture alone (spec 11.3), for the read-only gallery, photo-page, budget,
+        // layout-shift and privacy specs: deleted, migrated (with the logbook seed) and seeded afresh on every run, so
+        // George's own import in .wrangler/state is never read or changed
+        {
+          command:
+            "rm -rf .wrangler/gallery && wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/gallery && node scripts/seed-photo-test.mjs --persist-to .wrangler/gallery && wrangler dev -c dist/server/wrangler.json --port 4335 --persist-to .wrangler/gallery",
+          url: "http://localhost:4335",
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
       ],
 });

@@ -1,4 +1,4 @@
-import { CATALOGUE_LIMIT, MAX_CATALOGUE_LIMIT } from "./store";
+import { CATALOGUE_LIMIT, ENTRY_LIMIT, MAX_CATALOGUE_LIMIT, MAX_ENTRY_LIMIT } from "./store";
 
 export const PRIVATE_HEADERS = {
   "Cache-Control": "private, no-store",
@@ -26,6 +26,17 @@ export function pageOptions(url: URL): { after: number; limit: number; collectio
   if (Number(limit) < 1 || Number(limit) > MAX_CATALOGUE_LIMIT) return null;
   if (collection !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(collection)) return null;
   return { after: Number(after), limit: Number(limit), collection };
+}
+
+/** The entry mode's query (spec 3.6): by=entry, an optional before (seconds) and a limit from 1 to 12; anything else is null */
+export function entryOptions(url: URL): { before: number | null; limit: number } | null {
+  if ([...url.searchParams.keys()].some((key) => !["by", "before", "limit"].includes(key))) return null;
+  if (url.searchParams.getAll("by").join(",") !== "entry") return null;
+  const before = url.searchParams.get("before");
+  const limit = url.searchParams.get("limit") ?? String(ENTRY_LIMIT);
+  if ((before !== null && !/^\d{1,10}$/.test(before)) || !/^\d{1,2}$/.test(limit)) return null;
+  if (Number(limit) < 1 || Number(limit) > MAX_ENTRY_LIMIT) return null;
+  return { before: before === null ? null : Number(before), limit: Number(limit) };
 }
 
 export function requestToken(request: Request): string {

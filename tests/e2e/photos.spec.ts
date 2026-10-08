@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN } from "./admin";
+import { GALLERY } from "./gallery-site";
 
 test.skip(({ browserName }) => browserName !== "chromium", "HTTP backend behaviour, checked once");
 test.describe.configure({ mode: "serial" });
@@ -18,6 +19,7 @@ test("public API returns responsive previews without drafts or private object ke
   expect(preview.headers()["content-type"]).toBe("image/webp");
   expect(preview.headers()["cache-control"]).toContain("immutable");
   expect((await request.get(`${ADMIN}/api/photos/fixture-03`)).status()).toBe(404);
+  expect(await (await request.get(`${ADMIN}/api/photos/fixture-01`)).json()).toMatchObject({ id: "fixture-01", date: "2026-09-27", place: "bondi, sydney" });
   expect((await request.get(`${ADMIN}/api/photos?token=secret`)).status()).toBe(400);
 });
 
@@ -54,7 +56,11 @@ test("catalogue grants expose protected links and stop working after revocation"
   const page = await request.get(link.url);
   expect(page.headers()).toMatchObject(PRIVATE);
   const catalogue = await page.json();
-  expect(catalogue.photos.map((p: { id: string }) => p.id)).toEqual(["fixture-01", "fixture-02"]);
+  const ids = catalogue.photos.map((p: { id: string }) => p.id);
+  // The admin specs publish and hide their own posts meanwhile, so only photographs no spec changes are pinned
+  expect(ids).toEqual(expect.arrayContaining(["fixture-01", "fixture-02"]));
+  expect(ids).not.toContain("fixture-03");
+  expect(catalogue.photos[0]).toMatchObject({ id: "fixture-01", date: "2026-09-27", place: "bondi, sydney" });
   expect((await request.get(`${ADMIN}${catalogue.photos[1].downloadUrl}`)).status()).toBe(200);
   await request.delete(`${ADMIN}/admin/photos/links?grantId=${link.grantId}`, { headers: { Origin: ADMIN } });
   expect((await request.get(link.url)).status()).toBe(403);
@@ -74,11 +80,33 @@ test("missing tokens, public bucket bypasses and cross-origin issuance are refus
 });
 
 test("publishing requires verified assets and refreshes the catalogue", async ({ request }) => {
-  const path = `${ADMIN}/admin/photos/fixture-03`;
+  // fixture-d-01, which no other spec changes (the admin server's store is shared by every spec on 4333)
+  const path = `${ADMIN}/admin/photos/fixture-d-01`;
+  const hidden = await request.patch(path, { headers: { Origin: ADMIN }, data: { published: false } });
+  expect(hidden.status()).toBe(200);
+  expect((await request.get(`${ADMIN}/api/photos/fixture-d-01`)).status()).toBe(404);
   const published = await request.patch(path, { headers: { Origin: ADMIN }, data: { published: true } });
   expect(published.status()).toBe(200);
-  expect((await request.get(`${ADMIN}/api/photos/fixture-03?`)).status()).toBe(200);
-  const unpublished = await request.patch(path, { headers: { Origin: ADMIN }, data: { published: false } });
-  expect(unpublished.status()).toBe(200);
-  expect((await request.get(`${ADMIN}/api/photos/fixture-03`)).status()).toBe(404);
+  expect((await request.get(`${ADMIN}/api/photos/fixture-d-01?`)).status()).toBe(200);
+});
+
+// On the gallery server (4335), whose photo fixture no spec changes
+test("the entry mode pages posts newest first, with only the gallery's previews", async ({ request }) => {
+  const response = await request.get(`${GALLERY}/api/photos?by=entry&limit=4`);
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("public, max-age=60, stale-while-revalidate=300");
+  const page = await response.json();
+  expect(page.entries.map((entry: { collection: string }) => entry.collection)).toEqual(["fixture", "fixture-b", "fixture-c", "fixture-d"]);
+  expect(page.next).toBe(1766610000);
+  expect(page.entries[0]).toMatchObject({ collection: "fixture", date: "2026-09-27", place: "bondi, sydney" });
+  expect(page.entries[0]).not.toHaveProperty("publishedAt");
+  expect(page.entries[1].place).toBeNull();
+  expect(page.entries[0].photos.map((photo: { id: string }) => photo.id)).toEqual(["fixture-01", "fixture-02"]);
+  expect(page.entries[0].photos[0].previews.map((preview: { url: string }) => preview.url.split("/").at(-1))).toEqual(["480.webp", "480.avif"]);
+  const rest = await (await request.get(`${GALLERY}/api/photos?by=entry&before=${page.next}`)).json();
+  expect(rest.entries.map((entry: { collection: string }) => entry.collection)).toEqual(["fixture-e", "fixture-f"]);
+  expect(rest.next).toBeNull();
+  for (const query of ["by=entry&limit=13", "by=entry&before=abc", "by=entry&after=1", "by=post"]) {
+    expect((await request.get(`${GALLERY}/api/photos?${query}`)).status()).toBe(400);
+  }
 });
