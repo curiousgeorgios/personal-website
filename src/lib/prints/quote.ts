@@ -38,15 +38,15 @@ export const cents = (dollars: number) => Math.round(dollars * 100);
 /**
  * Reads Price Check's orderCosts (or an order's details). Null, unavailable, when it can't be trusted: no usable
  * arteloShipping, a negative or non-numeric amount, a charge field this site doesn't know, or parts that don't add up to
- * Artelo's total. The reason is logged, by field name, never with anything about the buyer.
+ * Artelo's total. The reason is logged, by field name and the source it came from, never with anything about the buyer.
  */
-export function readOrderCosts(value: unknown): OrderCosts | null {
+export function readOrderCosts(value: unknown, source = "price check"): OrderCosts | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const costs = value as Record<string, unknown>;
   const freight = costs.arteloShipping;
   if (typeof freight !== "number" || !Number.isFinite(freight) || freight < 0) return null;
   const refuse = (reason: string) => {
-    console.error("prints: ignored an artelo price check:", reason);
+    console.error(`prints: ignored an artelo ${source}:`, reason);
     return null;
   };
   const amounts = new Map<string, number>();

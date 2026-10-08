@@ -1,6 +1,7 @@
 import { issueOrderGrant, photoMaster, revokeOrderGrants } from "../photos/store";
+import { verifyPhotoToken } from "../photos/tokens";
 import type { Address } from "./address";
-import { artelo, arteloAddress, ordersList, productInfo, readArteloOrder, unwrap, type ArteloOrder, type ArteloResult } from "./artelo";
+import { artelo, arteloAddress, ordersList, productInfo, readArteloOrder, SHOWN_MESSAGE, type ArteloOrder, type ArteloResult } from "./artelo";
 import { mapStatus, PENDING_REASON, REFUND_REASON } from "./artelo-status";
 import { parseSize, type Frame, type Orientation } from "./catalogue";
 import type { PrintConfig, PrintDeps } from "./config";
@@ -24,6 +25,8 @@ export type PlaceOutcome = "placed" | "adopted" | "not-due" | "retry" | "attenti
 class Retryable extends Error {}
 /** Needs George: its message is the order's attention reason */
 class Permanent extends Error {}
+/** Artelo has the order but recording that failed: nothing may be cleared, so it propagates and the lease is left to lapse */
+class Unrecorded extends Error {}
 
 interface Item {
   line: number;
@@ -41,7 +44,11 @@ const NOT_IN_A_WORD = { before: "(?<![\\p{L}\\p{N}])", after: "(?![\\p{L}\\p{N}]
  * Each address field, wherever Artelo's message repeats it, becomes [address]: a reason is stored, and an address never
  * is. So does each word of a field (three characters or more, four for a number) standing on its own, because Artelo may
  * quote part of one ("Lovelace", "Bondi"), and the phone written as bare digits. One pass, longest first, so a field
- * inside another, or inside "[address]", is never half replaced
+ * inside another, or inside "[address]", is never half replaced. It runs on Artelo's whole message, before the cut.
+ *
+ * Its limits: it matches what the buyer typed, so a value Artelo rewrites slips through. A phone reformatted to another
+ * national form ("0400 000 000" for "+61 400 000 000"), a name or street with its diacritics folded ("Zoe" for "Zoë"),
+ * an abbreviation ("St" for "Street") and a number under four digits standing alone (a house number) all stay as written
  */
 export function scrub(message: string, address: Address | null): string {
   if (!address) return message;
@@ -59,13 +66,14 @@ async function lookUp(deps: PrintDeps, orderId: string): Promise<ArteloOrder | n
   if (!result.ok) throw new Retryable(`the lookup at artelo failed (${result.status ?? "no answer"})`);
   const list = ordersList(result.body);
   if (!list) throw new Retryable("the lookup at artelo answered something unreadable");
+  // Only an empty list means Artelo hasn't got it. A search for our id that finds something we can't match (another
+  // field name, no id to adopt by) is almost certainly ours: creating could make it twice, so the lookup counts as failed
+  if (list.length === 0) return null;
   for (const entry of list) {
     const found = readArteloOrder(entry);
     if (found && found.orderId === orderId) return found;
-    // Ours, but without an id to adopt it by: creating now could make it twice, so this lookup counts as failed
-    if (!found && unwrap(entry)?.orderId === orderId) throw new Retryable("the lookup at artelo found the order without its id");
   }
-  return null;
+  throw new Retryable("the lookup at artelo answered orders it couldn't match to this one");
 }
 
 /** The address the delivery was quoted against, from the payment Stripe holds it on; in memory only (spec 18.2 step 3) */
@@ -85,21 +93,40 @@ async function quotedAddress(deps: PrintDeps, order: OrderRow): Promise<Address>
   };
 }
 
-/** A 72-hour order grant for each photograph's master, after checking the master is there (spec 18.2 step 4) */
-async function masterLinks(deps: PrintDeps, orderId: string, items: readonly Item[]): Promise<Map<string, { url: string; orientation: Orientation }>> {
+interface MasterLinks {
+  links: Map<string, { url: string; orientation: Orientation }>;
+  /** The grants this attempt issued, so the others can be revoked once the create is fenced, or these if it isn't */
+  grantIds: string[];
+}
+
+/**
+ * A 72-hour order grant for each photograph's master, after checking the master is there (spec 18.2 step 4). Earlier
+ * attempts' links are revoked only once the fence holds: until then another run may own the order and its links
+ */
+async function masterLinks(deps: PrintDeps, orderId: string, items: readonly Item[]): Promise<MasterLinks> {
   const secret = deps.config.secrets.PHOTO_LINK_SECRET;
   if (!secret) throw new Permanent("PHOTO_LINK_SECRET isn't set.");
-  // The last attempt's links go first: this runs only after the lookup found nothing at Artelo, so nothing needs them
-  await revokeOrderGrants(deps.db, orderId, deps.now());
   const links = new Map<string, { url: string; orientation: Orientation }>();
+  const grantIds: string[] = [];
   for (const photoId of new Set(items.map((item) => item.photo_id))) {
     const photo = await photoMaster(deps.db, photoId);
     const object = photo ? await deps.photoPrints.head(photo.print_key) : null;
     if (!photo || !object) throw new Permanent(`the print file for ${photoId} is missing. import it again, then retry.`);
     const url = await issueOrderGrant(deps.db, secret, orderId, photoId, LINK_SECONDS, deps.config.siteOrigin, deps.now());
+    const grant = await verifyPhotoToken(secret, new URL(url).searchParams.get("token") ?? "", deps.now());
+    if (!grant) throw new Error("an order link didn't verify");
+    grantIds.push(grant.grantId);
     links.set(photoId, { url, orientation: photo.print_width > photo.print_height ? "Horizontal" : "Vertical" });
   }
-  return links;
+  return { links, grantIds };
+}
+
+/** Revokes the order's working links: only `ids`, or (with `except`) every one but them */
+async function revokeLinks(deps: PrintDeps, orderId: string, ids: readonly string[], except: boolean): Promise<void> {
+  await deps.db
+    .prepare(`UPDATE photo_download_grants SET revoked_at = ? WHERE order_id = ? AND revoked_at IS NULL AND id ${except ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`)
+    .bind(deps.now(), orderId, JSON.stringify(ids))
+    .run();
 }
 
 function createBody(order: OrderRow, items: readonly Item[], links: Map<string, { url: string; orientation: Orientation }>, address: Address, config: PrintConfig) {
@@ -126,7 +153,8 @@ function createBody(order: OrderRow, items: readonly Item[], links: Map<string, 
 function refusal(result: Extract<ArteloResult, { ok: false }>, address: Address): Error {
   const { status, message } = result;
   if (status === null || status === 408 || status === 429 || status >= 500) return new Retryable(status === null ? "couldn't reach artelo" : `artelo answered ${status}`);
-  return new Permanent(message ? `artelo refused the order: ${scrub(message, address)}` : `artelo refused the order (${status}).`);
+  // Scrubbed whole, then cut: cutting first could leave half a name or street that no longer matches the address
+  return new Permanent(message ? `artelo refused the order: ${scrub(message, address).slice(0, SHOWN_MESSAGE)}` : `artelo refused the order (${status}).`);
 }
 
 /** Sends whatever just became due. A failure here leaves it to the cron's unsent emails step and never changes the outcome */
@@ -150,23 +178,38 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
     .run();
   if (result.meta.changes === 0) {
     // The order left paid while this attempt held the lease: a full refund landed. Artelo has it all the same, so it
-    // keeps Artelo's id and needs George to cancel it there, never silently printed for a refunded buyer
-    await deps.db
-      .prepare("UPDATE print_orders SET artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ?")
-      .bind(found.id, found.status, cost, REFUND_REASON, now, order.id)
-      .run();
-    console.error("prints: order", order.id, "reached artelo after it left paid: artelo's id is kept, and a refunded order is flagged for george");
+    // keeps Artelo's id and needs George to cancel it there, never silently printed for a refunded buyer. An id already
+    // recorded is never replaced: a second Artelo order is logged by both ids, so neither is lost
+    try {
+      await deps.db
+        .prepare("UPDATE print_orders SET artelo_order_id = COALESCE(artelo_order_id, ?), artelo_status = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_status END, artelo_cost = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_cost END, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ?")
+        .bind(found.id, found.id, found.status, found.id, cost, REFUND_REASON, now, order.id)
+        .run();
+    } catch (error) {
+      throw new Unrecorded(error instanceof Error ? error.name : typeof error);
+    }
+    const recorded = (await getOrder(deps.db, order.id))?.artelo_order_id;
+    if (recorded && recorded !== found.id) console.error("prints: order", order.id, "has two artelo orders,", recorded, "and", `${found.id}: cancel one in artelo`);
+    else console.error("prints: order", order.id, "reached artelo after it left paid: artelo's id is kept, and a refunded order is flagged for george");
     await mailNow(deps);
     return;
   }
   if (status === "needs_attention") await mailNow(deps);
 }
 
-/** The order left paid while this attempt held the lease (a refund landed): its status is left as it is, and only the lease goes */
+/**
+ * The order left paid while this attempt held the lease (a refund landed): its status is left as it is and the lease goes.
+ * A refunded order's links go too, as the refund webhook revokes them: this attempt may have issued them after it did
+ */
 async function leftPaid(deps: PrintDeps, id: string): Promise<PlaceOutcome> {
   await deps.db.prepare("UPDATE print_orders SET lease_until = NULL WHERE id = ?").bind(id).run();
+  await revokeIfRefunded(deps, id);
   console.error("prints: order", id, "left paid while it was being placed, so its status was left as it is");
   return "not-due";
+}
+
+async function revokeIfRefunded(deps: PrintDeps, id: string): Promise<void> {
+  if ((await getOrder(deps.db, id))?.status === "refunded") await revokeOrderGrants(deps.db, id, deps.now());
 }
 
 /**
@@ -215,7 +258,23 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
     }
     const address = await quotedAddress(deps, order);
     const items = (await deps.db.prepare("SELECT line, photo_id, size, frame, quantity, unit_amount FROM print_order_items WHERE order_id = ? ORDER BY line").bind(orderId).all()).results as unknown as Item[];
-    const links = await masterLinks(deps, orderId, items);
+    const { links, grantIds } = await masterLinks(deps, orderId, items);
+    // The fence: the create goes only while this attempt's own lease still holds and the order is still paid, and the
+    // lease is renewed to cover it. A run that took over a lapsed lease, or a refund, stops this one creating a second
+    // order. The lease isn't released, because it is no longer this attempt's to release
+    const fenced = await deps.db
+      .prepare("UPDATE print_orders SET lease_until = ? WHERE id = ? AND status = 'paid' AND lease_until = ?")
+      .bind(deps.now() + LEASE_SECONDS, orderId, now + LEASE_SECONDS)
+      .run();
+    if (fenced.meta.changes === 0) {
+      // Only this attempt's own links, which nothing has: the run that took over may be using its own
+      await revokeLinks(deps, orderId, grantIds, false);
+      await revokeIfRefunded(deps, orderId);
+      console.error("prints: order", orderId, "wasn't created: its lease was taken over or it left paid");
+      return "not-due";
+    }
+    // The last attempts' links go: the lookup found nothing at Artelo and the fence holds, so nothing needs them
+    await revokeLinks(deps, orderId, grantIds, true);
     const result = await artelo(deps, "POST", "/orders/create", createBody(order, items, links, address, deps.config));
     if (!result.ok) throw refusal(result, address);
     const created = readArteloOrder(result.body);
@@ -224,6 +283,10 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
     console.log("prints: order", orderId, "placed with artelo");
     return "placed";
   } catch (error) {
+    if (error instanceof Unrecorded) {
+      console.error("prints: order", orderId, "is at artelo but recording that failed, so nothing was cleared and its lease is left to lapse", error.message);
+      throw error;
+    }
     return failed(deps, order, error);
   }
 }

@@ -12,14 +12,19 @@ export const ARTELO_TIMEOUT_MS = 15_000;
 
 export type ArteloResult = { ok: true; status: number; body: unknown } | { ok: false; status: number | null; message: string };
 
-/** Artelo's own message from an error body, at most 200 characters; "" when it has none (a proxy's html page, say) */
+/** Artelo's message on its way to someone: a buyer's refusal line, or a needs_attention reason once scrubbed of the address */
+export const SHOWN_MESSAGE = 200;
+/** A bound for memory only: the order path scrubs the whole message before it cuts it, so no address is cut in half */
+export const MESSAGE_LIMIT = 2_000;
+
+/** Artelo's own message from an error body, whitespace collapsed, at most MESSAGE_LIMIT characters; "" when it has none (a proxy's html page, say) */
 export function messageOf(body: unknown, text: string): string {
   const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
   const first = Array.isArray(record.errors) ? record.errors[0] : undefined;
   const candidates = [record.message, record.error, record.title, first, first && typeof first === "object" ? (first as Record<string, unknown>).message : undefined];
   const found = candidates.find((candidate): candidate is string => typeof candidate === "string" && candidate.trim() !== "");
   const plain = body === null && text && !/<[a-z!/]/i.test(text) ? text : "";
-  return (found ?? plain).replace(/\s+/g, " ").trim().slice(0, 200);
+  return (found ?? plain).replace(/\s+/g, " ").trim().slice(0, MESSAGE_LIMIT);
 }
 
 export async function artelo(deps: PrintDeps, method: "GET" | "POST", path: string, body?: unknown): Promise<ArteloResult> {
@@ -113,7 +118,7 @@ export async function priceCheck(deps: PrintDeps, lines: readonly QuoteLine[], a
   if (!result.ok) {
     if (result.status === 400 || result.status === 422) {
       console.error("prints: artelo refused a price check", result.status);
-      return { ok: false, refused: result.message };
+      return { ok: false, refused: result.message.slice(0, SHOWN_MESSAGE) };
     }
     console.error("prints: artelo's price check is unavailable", result.status ?? "no answer");
     return { ok: false, refused: null };
@@ -170,7 +175,7 @@ export function readArteloOrder(value: unknown): ArteloOrder | null {
   if (!record) return null;
   const id = typeof record.id === "string" || typeof record.id === "number" ? String(record.id) : "";
   if (!id) return null;
-  const costs = readOrderCosts(record.details);
+  const costs = readOrderCosts(record.details, "order's costs");
   return {
     id,
     orderId: typeof record.orderId === "string" ? record.orderId : null,

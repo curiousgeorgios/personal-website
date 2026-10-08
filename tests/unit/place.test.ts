@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { verifyPhotoToken } from "../../src/lib/photos/tokens";
-import { nextDelay, placeDue, placeOrder, scrub } from "../../src/lib/prints/place";
+import { LEASE_SECONDS, nextDelay, placeDue, placeOrder, scrub, type PlaceOutcome } from "../../src/lib/prints/place";
 import { getOrder } from "../../src/lib/prints/store";
 import { ADDRESS, captureLogs, dumpDb, fakeFetch, insertOrder, json, masters, NOW, PHOTO_KEY, printDb, testConfig, testDeps, type Handler } from "./prints-fakes";
 
@@ -332,6 +332,8 @@ describe("the money path's further guards", () => {
       holder.db = db;
       expect(await placeOrder(deps, ORDER)).toBe("not-due");
       expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", attention_reason: null, attention_notified_at: null, lease_until: null, artelo_order_id: null });
+      // The links this attempt issued go, as the refund webhook's would (review minor 3)
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(0);
     }
   });
 
@@ -416,5 +418,141 @@ describe("the money path's further guards", () => {
     const { db, deps } = await setup({ [CREATE]: () => json({ message: "Ada Lovelace, 12 Example Street, Unit 3, Bondi Beach NSW 2026 (+61 400 000 000) can't be delivered to" }, 422) });
     expect(await placeOrder(deps, ORDER)).toBe("attention");
     expect((await getOrder(db, ORDER))?.attention_reason).toBe("artelo refused the order: [address], [address], [address], [address] [address] [address] ([address]) can't be delivered to");
+  });
+
+  describe("fix round 1", () => {
+    test("a lapsed lease taken over while the first attempt is still in flight makes exactly one create (review important 1)", async () => {
+      captureLogs();
+      let intents = 0;
+      const holder: { deps?: ReturnType<typeof testDeps> } = {};
+      const later: PlaceOutcome[] = [];
+      const { db, fake, deps } = await setup({
+        [INTENT]: async () => {
+          // The first attempt stalls here past its lease; a second run claims the order and places it meanwhile
+          if (++intents === 1) later.push(await placeOrder({ ...holder.deps!, now: () => NOW + LEASE_SECONDS + 1 }, ORDER));
+          return json({ id: "pi_test_place", shipping });
+        },
+      });
+      holder.deps = deps;
+      expect(await placeOrder(deps, ORDER)).toBe("not-due");
+      expect(later).toEqual(["placed"]);
+      expect(creates(fake)).toHaveLength(1);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-1", attempts: 2 });
+      // The second run's links are the ones artelo fetches: the stalled attempt revokes only its own, and leaves those working
+      const sent = await Promise.all((JSON.parse(creates(fake)[0].body).items as { productInfo: { designs: { sourceImage: { url: string } }[] } }[]).map(async (item) => (await verifyPhotoToken(PHOTO_KEY, new URL(item.productInfo.designs[0].sourceImage.url).searchParams.get("token")!, NOW + LEASE_SECONDS + 1))!.grantId));
+      const working = (await db.prepare("SELECT id FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).all()).results.map((row) => row.id);
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ?").bind(ORDER).first("n")).toBe(4);
+      expect(working.sort()).toEqual(sent.sort());
+    });
+
+    test("another run's lease on a still-paid order fences the create out, and is left in place", async () => {
+      captureLogs();
+      const holder: { db?: D1Database } = {};
+      const { db, fake, deps } = await setup({
+        [INTENT]: async () => {
+          // A run that took over this attempt's lapsed lease holds the order now, mid-attempt itself
+          await holder.db!.prepare("UPDATE print_orders SET lease_until = ? WHERE id = ?").bind(NOW + 300, ORDER).run();
+          return json({ id: "pi_test_place", shipping });
+        },
+      });
+      holder.db = db;
+      expect(await placeOrder(deps, ORDER)).toBe("not-due");
+      expect(creates(fake)).toHaveLength(0);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", lease_until: NOW + 300, next_attempt_at: NOW });
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(0);
+    });
+
+    test("a refund landing before the fence means no create, and the attempt's links are revoked (review minor 1)", async () => {
+      captureLogs();
+      const holder: { db?: D1Database } = {};
+      const { db, fake, deps } = await setup({
+        [INTENT]: async () => {
+          await holder.db!.prepare("UPDATE print_orders SET status = 'refunded', refunded_amount = 28700 WHERE id = ?").bind(ORDER).run();
+          return json({ id: "pi_test_place", shipping });
+        },
+      });
+      holder.db = db;
+      expect(await placeOrder(deps, ORDER)).toBe("not-due");
+      expect(creates(fake)).toHaveLength(0);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", artelo_order_id: null, attention_reason: null });
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(0);
+    });
+
+    test("the fallback never replaces an artelo id already recorded, and logs both (review important 1b)", async () => {
+      const logs = captureLogs();
+      const holder: { db?: D1Database } = {};
+      const { db, deps } = await setup({
+        [CREATE]: async (request) => {
+          await holder.db!.prepare("UPDATE print_orders SET status = 'placed', artelo_order_id = 'artelo-0', artelo_status = 'Received', artelo_cost = 9000 WHERE id = ?").bind(ORDER).run();
+          return accepted(request);
+        },
+      });
+      holder.db = db;
+      await placeOrder(deps, ORDER);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-0", artelo_status: "Received", artelo_cost: 9000, lease_until: null });
+      expect(logs()).toContain(`prints: order ${ORDER} has two artelo orders, artelo-0 and artelo-1: cancel one in artelo`);
+    });
+
+    test("a fallback write that fails propagates: nothing is cleared and the lease is left to lapse (review minor 4)", async () => {
+      captureLogs();
+      const db = await printDb();
+      await insertOrder(db, { id: ORDER, stripe_payment_intent: "pi_test_place" });
+      const failing = new Proxy(db, {
+        get(target, key) {
+          if (key === "prepare") return (sql: string) => {
+            if (sql.includes("COALESCE(artelo_order_id")) throw new Error("D1 is down");
+            return target.prepare(sql);
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const fake = world({
+        [CREATE]: async (request) => {
+          await db.prepare("UPDATE print_orders SET status = 'refunded' WHERE id = ?").bind(ORDER).run();
+          return accepted(request);
+        },
+      });
+      await expect(placeOrder(testDeps(failing, { fetch: fake.fetch }), ORDER)).rejects.toThrow();
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", lease_until: NOW + LEASE_SECONDS });
+      // Its links stay working: artelo has the order and may still be fetching them
+      expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(2);
+    });
+
+    test("an address field straddling character 200 of artelo's message is scrubbed whole before the cut (review important 2)", async () => {
+      const logs = captureLogs();
+      // Three streets first shrink by 24 characters once scrubbed, so a fragment cut at 200 before the scrub would land
+      // inside the stored 200; "Lovel" sits at characters 195 to 199 and the rest of the surname after 200
+      const head = "12 Example Street / ".repeat(3);
+      const prefix = `${head}${"no. ".repeat(32)}to Ada `;
+      const message = `${prefix}Lovelace, Bondi Beach can't be delivered to ${"z".repeat(300)}`;
+      expect([message.indexOf("Lovelace"), message.indexOf("Lovelace") + "Lovelace".length]).toEqual([195, 203]);
+      const { db, deps } = await setup({ [CREATE]: () => json({ message }, 422) });
+      expect(await placeOrder(deps, ORDER)).toBe("attention");
+      const reason = (await getOrder(db, ORDER))!.attention_reason!;
+      expect(reason).toBe(`artelo refused the order: ${`${"[address] / ".repeat(3)}${"no. ".repeat(32)}to [address], [address] can't be delivered to ${"z".repeat(300)}`.slice(0, 200)}`);
+      expect(reason).not.toMatch(/Lov|Ada|Example|Bondi/);
+      expect(await dumpDb(db)).not.toMatch(/Ada|Lovel|Example|Bondi/);
+      expect(logs()).not.toMatch(/Ada|Lovel|Example|Bondi/);
+    });
+
+    test("a lookup answering an order it can't match by orderId never creates (review important 3)", async () => {
+      captureLogs();
+      for (const answer of [[{ id: "artelo-7", externalOrderId: ORDER, status: "Received" }], { orders: [{ id: "artelo-8", orderId: "someone-else", status: "Received" }] }, [{ orderId: ORDER, status: "Received" }]]) {
+        const { db, fake, deps } = await setup({ [LOOKUP]: () => json(answer) });
+        expect(await placeOrder(deps, ORDER)).toBe("retry");
+        expect(creates(fake)).toHaveLength(0);
+        expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", artelo_order_id: null, next_attempt_at: NOW + 300 });
+      }
+    });
+
+    test("costs artelo's order answer can't be trusted are logged as the order's, not a price check's (review minor 5)", async () => {
+      const logs = captureLogs();
+      const { db, deps } = await setup({ [CREATE]: async (request) => json({ id: "artelo-6", orderId: ((await request.json()) as { orderId: string }).orderId, status: "Received", details: { productionCost: 80, arteloShipping: 30, surprise: 5 } }) });
+      expect(await placeOrder(deps, ORDER)).toBe("placed");
+      expect((await getOrder(db, ORDER))?.artelo_cost).toBeNull();
+      expect(logs()).toContain("prints: ignored an artelo order's costs: a charge this site doesn't know: surprise");
+      expect(logs()).not.toContain("price check");
+    });
   });
 });
