@@ -194,6 +194,18 @@ export async function insertGrant(db: D1Database, token: PhotoToken, extra: { no
   return result.meta.changes > 0;
 }
 
+/**
+ * Revokes a catalogue link only (the admin's links section). A photo grant, which plan B's print orders use, is left
+ * alone: "photo" says the id is one, "already" that it is revoked or doesn't exist (a second revoke still counts as saved).
+ */
+export async function revokeCatalogueLink(db: D1Database, id: string, now = Math.floor(Date.now() / 1000)): Promise<"revoked" | "already" | "photo"> {
+  if (!GRANT_ID.test(id)) return "already";
+  const result = await db.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE id = ? AND photo_id IS NULL AND revoked_at IS NULL").bind(now, id).run();
+  if (result.meta.changes > 0) return "revoked";
+  const row = await db.prepare("SELECT photo_id FROM photo_download_grants WHERE id = ?").bind(id).first<{ photo_id: string | null }>();
+  return row && row.photo_id !== null ? "photo" : "already";
+}
+
 export async function revokeGrant(db: D1Database, id: string, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
   if (!GRANT_ID.test(id)) return false;
   const result = await db.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, id).run();

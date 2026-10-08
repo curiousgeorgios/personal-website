@@ -301,6 +301,8 @@ describe("links", () => {
     await add("a0000000-0000-4000-8000-000000000002", null, 2000, null, "2026-10-02 00:00:00", null);
     await add("a0000000-0000-4000-8000-000000000003", null, 2000, 1500, "2026-10-03 00:00:00", "revoked");
     await add("a0000000-0000-4000-8000-000000000004", null, 900, null, "2026-10-04 00:00:00", "expired");
+    await db.prepare("INSERT INTO photos (id, collection, position, title, published, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES ('fx-01', 'fx', 1, '', 1, '[]', 'k', 1, 1, 1, 's')").run();
+    await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, created_at, note) VALUES ('a0000000-0000-4000-8000-000000000005', 'fx-01', 2000, '2026-10-05 00:00:00', 'an order')").run();
     const { links } = await store.loadAdmin(db, 1000);
     expect(links).toEqual([
       { id: "a0000000-0000-4000-8000-000000000002", createdAt: "2026-10-02 00:00:00", expiresAt: 2000, note: null },

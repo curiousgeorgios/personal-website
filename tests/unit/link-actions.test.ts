@@ -75,6 +75,14 @@ describe("revoking a link", () => {
     expect(await submit({ intent: "link.revoke", id: String(id), confirm: "yes" })).toEqual({ ok: true, section: "links" });
   });
 
+  test("a photo-scoped grant (a print order's) isn't this screen's to revoke", async () => {
+    await db.prepare("INSERT INTO photos (id, collection, position, title, published, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES ('fx-01', 'fx', 1, '', 1, '[]', 'k', 1, 1, 1, 's')").run();
+    const order = "b0000000-0000-4000-8000-000000000001";
+    await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES (?, 'fx-01', 9999999999)").bind(order).run();
+    expect(await submit({ intent: "link.revoke", id: order, confirm: "yes" })).toEqual({ ok: false, section: null, form: "", errors: { form: "that link no longer exists" }, values: {} });
+    expect((await grants()).find((grant) => grant.id === order)!.revoked_at).toBeNull();
+  });
+
   test("a malformed id is a message for the page", async () => {
     expect(await submit({ intent: "link.revoke", id: "nope", confirm: "yes" })).toEqual({ ok: false, section: null, form: "", errors: { form: "that link no longer exists" }, values: {} });
   });

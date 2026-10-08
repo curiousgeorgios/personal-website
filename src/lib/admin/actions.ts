@@ -1,7 +1,7 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
 import { checkPlace } from "../photos/place";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
-import { insertGrant, revokeGrant } from "../photos/store";
+import { insertGrant, revokeCatalogueLink } from "../photos/store";
 import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
@@ -475,7 +475,7 @@ async function revokeLink(form: FormData, { db }: ActionDeps): Promise<ActionRes
   const id = String(form.get("id") ?? "");
   if (!GRANT_ID.test(id)) return gone("link");
   if (!confirmed(form)) return fail("links", `link-${id}`, CONFIRM);
-  // Already revoked counts as saved (ADR-0012)
-  await revokeGrant(db, id);
+  // Only a catalogue link: a photo grant isn't this screen's to switch off. Already revoked counts as saved (ADR-0012)
+  if ((await revokeCatalogueLink(db, id)) === "photo") return gone("link");
   return { ok: true, section: "links" };
 }

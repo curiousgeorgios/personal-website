@@ -20,6 +20,7 @@ describe("LinksAdmin", () => {
     const doc = await render(LinksAdmin, props());
     expect(doc.querySelector("#link-new-days")!.getAttribute("value")).toBe("7");
     expect(text(doc.querySelector("#link-new-note-hint"))).toBe("who it's for, so you know which to revoke");
+    expect(doc.querySelector("#link-new-days")!.getAttribute("inputmode")).toBe("numeric");
   });
 
   test("an issued link is shown once, read-only, with a copy button the script reveals", async () => {
@@ -35,6 +36,7 @@ describe("LinksAdmin", () => {
     const doc = await render(LinksAdmin, props({ issued: { repeat: true } }));
     expect(text(doc.querySelector(".notice"))).toBe("that link was already made. it's in the list below, but it can't be shown again.");
     expect(doc.querySelector("#issued-link")).toBeNull();
+    expect(text(doc.querySelector(".hint"))).toBe("if you didn't copy it, revoke it from the list and issue another.");
   });
 
   test("each active link says when it was made, until when it works and its note, with a revoke form", async () => {

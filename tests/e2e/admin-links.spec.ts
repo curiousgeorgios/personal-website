@@ -59,3 +59,17 @@ test("copy puts the link on the clipboard", async ({ page, context }) => {
   await expect(page.getByRole("button", { name: "copied", exact: true })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
 });
+
+test("when the clipboard is refused the whole link is selected, and leaving the page clears it", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("refused")) }, configurable: true });
+  });
+  const { url } = await issue(page, `e2e ${unique()}`);
+  await page.getByRole("button", { name: "copy", exact: true }).click();
+  await expect(page.getByRole("button", { name: "selected - copy it from there", exact: true })).toBeVisible();
+  expect(await page.locator("#issued-link").evaluate((field: HTMLInputElement) => [field.selectionStart, field.selectionEnd])).toEqual([0, url.length]);
+  // What the back-forward cache sees as the page goes: the link is gone before it is stored
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+  await expect(page.locator("#issued-link")).toHaveCount(0);
+  expect(await page.content()).not.toContain(new URL(url).searchParams.get("token")!);
+});
