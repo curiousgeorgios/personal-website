@@ -26,13 +26,13 @@ Non-goals: buyer accounts, saved addresses or order history beyond the private o
 
 ### 1.2 Delivery in two plans
 
-Delivery is in two plans. Plan A (gallery) ships first and adds no payment code: migration `0006_photo_gallery.sql` (`photo_posts`, `raw_review`, the grant columns), places and dates in prepare and import, `/photos`, `/photos/<id>` without the print row, the downloads page, the admin photographs and links sections and the home line. Plan B (prints) follows: migration `0007_prints.sql` (`print_prices`, `print_settings`, `print_costs`, `print_orders`, `print_order_items`, `stripe_events`, the order grant column), everything in sections 13 to 24, the basket, the order page and the admin orders section. Part 1 of this spec (sections 2 to 12) is plan A; part 2 (sections 13 to 25) is plan B. Part 1 never refers forward to part 2 for anything it needs; section 13.1 lists what part 2 needs from part 1.
+Delivery is in two plans. Plan A (gallery) ships first and adds no payment code: migration `0006_photo_gallery.sql` (`photo_posts`, `raw_review`, the grant columns), places and dates in prepare and import, `/photos`, `/photos/<id>` without the print row, the downloads page, the admin photographs and links sections and the home line. Plan B (prints) follows: migration `0007_prints.sql` (`print_prices`, `print_settings`, `print_orders`, `print_order_items`, `stripe_events`, the order grant column), everything in sections 13 to 24, the basket with its address form and quote, the order page and the admin orders section. Part 1 of this spec (sections 2 to 12) is plan A; part 2 (sections 13 to 25) is plan B. Part 1 never refers forward to part 2 for anything it needs; section 13.1 lists what part 2 needs from part 1.
 
 Recommended task order.
 
 Plan A: (1) migration 0006, the additive `date` and `place` fields and the entry mode of `/api/photos`; (2) the 240 previews in prepare, import and the publish check (3.3); (3) `photo-place.swift`, `photo-cities.json`, prepare's `posts` array and the import's `photo_posts` upsert, with titles that survive re-import; (4) `src/lib/photos/publish.ts` and the admin photographs section; (5) `/photos` and its script, plus the home line; (6) `/photos/<id>`; (7) the downloads page, the catalogue link change, `photo links are internal` and the admin links section with its nonce; (8) middleware, `Notebook.astro` props, ingest and robots changes; (9) end-to-end, privacy and budget specs.
 
-Plan B: (1) the Worker entry probe (cron, `ratelimits` and `send_email` all surviving into `dist/server/wrangler.json`); (2) migration 0007; (3) `catalogue.ts` eligibility and `basket.ts` parsing as pure functions with their unit tests; (4) the exchange-rate job and the Artelo cost client with its D1 cache; (5) the print section on `/photos/<id>` and the basket carried through the gallery; (6) the basket page and its quote; (7) checkout and the CSP change; (8) the Stripe webhook and the checkout reconciliation; (9) `placeOrder`, retries and the cron; (10) the Artelo webhook and poll; (11) emails; (12) the admin orders section; (13) the order page; (14) `prints:check` and `prints:webhook`; (15) the Artelo stand-in and the full order, partial refusal and failure specs.
+Plan B: (1) the Worker entry probe (cron, `ratelimits` and `send_email` all surviving into `dist/server/wrangler.json`); (2) migration 0007; (3) `catalogue.ts` eligibility and `basket.ts` parsing as pure functions with their unit tests; (4) the exchange-rate job and the Artelo Price Check client; (5) the print section on `/photos/<id>` and the basket carried through the gallery; (6) the basket page, its address form, the quote and the signed quote; (7) checkout with the quoted address on the payment, and the CSP change; (8) the Stripe webhook and the checkout reconciliation; (9) `placeOrder`, retries and the cron; (10) the Artelo webhook and poll; (11) emails; (12) the admin orders section; (13) the order page; (14) `prints:check` and `prints:webhook`; (15) the Artelo stand-in and the full order, partial refusal and failure specs.
 
 # Part 1: the gallery
 
@@ -303,8 +303,8 @@ Part 2 starts only after plan A has shipped, and relies on: `photo_posts` with d
 |---|---|---|
 | `/photos/<id>` | Gains the `prints` row (section 15.1) | Unchanged without `items`; `no-store` and `noindex` with `items` (15.3) |
 | `/photos`, `/photos?before=` | Carry the basket when the URL has `items` (15.3) | As above |
-| `/basket?items=…&country=…` GET | The basket, its quote and the way to checkout (section 15.2) | `no-store`, `noindex` |
-| `/basket` POST | `intent=checkout` starts checkout (section 17) | `no-store` |
+| `/basket?items=…` GET | The basket and its address form (section 15.2) | `no-store`, `noindex` |
+| `/basket?items=…` POST | `intent=quote` quotes delivery for the posted address (16.1); `intent=checkout` starts checkout (section 17). The address is in the body only | `no-store`, `noindex` |
 | `/prints/<order id>?key=<view key>` | A buyer's private order page (section 18.5) | Private headers, never cached |
 | `/api/prints/stripe` POST | Stripe's webhook (section 18.1) | `no-store` |
 | `/api/prints/artelo` POST | Artelo's webhook (section 18.3) | `no-store` |
@@ -314,7 +314,7 @@ Part 2 starts only after plan A has shipped, and relies on: `photo_posts` with d
 
 ### 13.3 Code changes
 
-- **Worker entry:** `wrangler.jsonc` `main` becomes `src/worker.ts`, which exports `fetch` (Astro's `handle` from `@astrojs/cloudflare/handler`) and `scheduled` (section 18.6). `wrangler.jsonc` adds `"triggers": { "crons": ["*/5 * * * *"] }`, `"send_email": [{ "name": "EMAIL" }]`, `"ratelimits": [{ "name": "QUOTE_LIMIT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }, { "name": "CHECKOUT_LIMIT", "namespace_id": "1002", "simple": { "limit": 6, "period": 60 } }]` and the vars in 21.4. The first plan B task proves with a probe build that `dist/server/wrangler.json` keeps the cron, both rate-limit bindings and the email binding, and that `wrangler dev --test-scheduled` reaches the handler. If the adapter can't keep a custom entry, the scheduled work moves to a separate Worker, `workers/prints/`, built like the snapshots Worker (R9) with the same bindings and secrets, and nothing else in this spec changes.
+- **Worker entry:** `wrangler.jsonc` `main` becomes `src/worker.ts`, which exports `fetch` (Astro's `handle` from `@astrojs/cloudflare/handler`) and `scheduled` (section 18.6). `wrangler.jsonc` adds `"triggers": { "crons": ["*/5 * * * *"] }`, `"send_email": [{ "name": "EMAIL" }]`, `"ratelimits": [{ "name": "QUOTE_LIMIT", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }, { "name": "CHECKOUT_LIMIT", "namespace_id": "1002", "simple": { "limit": 6, "period": 60 } }, { "name": "ARTELO_LIMIT", "namespace_id": "1003", "simple": { "limit": 30, "period": 10 } }]` and the vars in 21.4. The first plan B task proves with a probe build that `dist/server/wrangler.json` keeps the cron, all three rate-limit bindings and the email binding, and that `wrangler dev --test-scheduled` reaches the handler. If the adapter can't keep a custom entry, the scheduled work moves to a separate Worker, `workers/prints/`, built like the snapshots Worker (R9) with the same bindings and secrets, and nothing else in this spec changes.
 - **Order grants:** `issueOrderGrant(db, secret, orderId, photoId, seconds)` in `src/lib/photos/store.ts` inserts a photo-scoped grant carrying `order_id` (migration 0007) and returns its download URL; only print fulfilment calls it. `downloadPhoto` serves a grant with an `order_id` from its photo's current master whether or not the photo is published; catalogue grants keep requiring publication.
 - **Middleware** (`src/middleware.ts`): the private-response treatment extends to `/prints/`. The Origin check (R7, ADR-0011) exempts exactly two paths, `POST /api/prints/stripe` and `POST /api/prints/artelo`, because providers send no `Origin`; both verify a signature before reading anything else (sections 18.1 and 18.3).
 - **CSP** (`astro.config.mjs`): `form-action 'self' https://checkout.stripe.com`, because Chrome applies `form-action` to the redirect that follows a form post, and checkout is a post answered with a 303 to Stripe (section 17). Nothing else changes.
@@ -359,118 +359,154 @@ Fixed AUD prices, one per tier and frame, the starting list George agreed, store
 | medium (A3) | $79 | $179 |
 | large (A2) | $119 | $259 |
 
-A size's price is its tier's price whatever the exact Artelo size, so a 3:4 large (18 × 24 in) costs the same as a 2:3 large (16 × 24 in); the check script (17.4) proves the margin holds for every real size. George sells as himself and isn't registered for GST, so the prices carry no GST. Wherever prices appear to a buyer (the print row, the basket, Stripe's checkout page, Stripe's receipt and the order page) the same plain sentence says so: `prices include no gst; the seller isn't registered for gst.` There is no invoice (ADR-0021 as amended).
+A size's price is its tier's price whatever the exact Artelo size, so a 3:4 large (18 × 24 in) costs the same as a 2:3 large (16 × 24 in); the check script (17.5) proves the margin holds for every real size. George sells as himself and isn't registered for GST, so the prices carry no GST. Wherever prices appear to a buyer (the print row, the basket, Stripe's checkout page, Stripe's receipt and the order page) the same plain sentence says so: `prices include no gst; the seller isn't registered for gst.` There is no invoice (ADR-0021 as amended).
 
 ## 15. The print row and the basket
 
 ### 15.1 The print row on /photos/<id>
 
-Shown when prints are open (16.4) and the photograph has at least one size (14.1). Margin label `prints`, one `<form method="get" action="/basket" id="prints">`:
+Shown when prints are open (16.5) and the photograph has at least one size (14.1). Margin label `prints`, one `<form method="get" action="/basket" id="prints">`:
 
 - Intro: `a print of this photo, made by artelo on archival matte paper and posted from the us.`
 - `size` radios, one per qualifying tier, the first checked: `small · 8 × 12 in (20 × 30 cm) · $59, or $139 framed`.
 - `frame` radios: `unframed` (checked) and `oak frame`.
 - Hidden `add` (the photo id) and, when the page was reached with a basket, hidden `items` (15.3).
-- Button `add to basket`, and under it `delivery to your country is added in the basket. prices include no gst; the seller isn't registered for gst.`
+- Button `add to basket`, and under it `delivery is quoted for your address in the basket. prices include no gst; the seller isn't registered for gst.`
 
-The form works without JavaScript and has no script. Submitting it lands on `/basket?items=…&add=<id>&size=<tier>&frame=<frame>`, which answers 303 to the canonical basket URL with the print appended (15.2). The total with delivery is shown on the basket page, where the country is chosen.
+The form works without JavaScript and has no script. Submitting it lands on `/basket?items=…&add=<id>&size=<tier>&frame=<frame>`, which answers 303 to the canonical basket URL with the print appended (15.2). Buying a single print is a basket of one reached this way; there is no separate shortcut.
 
 ### 15.2 The basket page, /basket
 
-The basket lives only in the URL's query string, never in cookies, localStorage or sessionStorage, so "cookies none" and the privacy test's empty storage stay true (ADR-0021 as amended). The address bar shows it and anyone can edit it, so the server re-validates every item, tier and price on every request and trusts nothing from the query string. In return, a basket can be bookmarked or shared.
+The basket lives only in the URL's query string, never in cookies, localStorage or sessionStorage, so "cookies none" and the privacy test's empty storage stay true (ADR-0021 as amended). The address bar shows it and anyone can edit it, so the server re-validates every item, tier and price on every request and trusts nothing from the query string. In return, a basket can be bookmarked or shared. The delivery address never goes in the URL (15.4).
 
 **The query string:**
 
 - `items`: comma-separated entries `<photo id>:<tier>:<frame>`, `tier` one of `small`, `medium`, `large`, `frame` one of `unframed`, `oak`. Each entry is one print; identical entries make one line with a quantity. At most **10 prints**.
-- `country`: optional ISO 3166 code, from the list in 16.3.
-- `add`, `size`, `frame` (from the print row) and `remove=<n>` and `more=<n>` (a line number, from the basket's own links): each is applied and answered with 303 to the canonical URL (`items` in the original order with the change applied, then `country`), so the address bar always holds a clean basket.
+- `add`, `size`, `frame` (from the print row) and `remove=<n>` and `more=<n>` (a line number, from the basket's own links): each is applied and answered with 303 to the canonical URL (`items` in the original order with the change applied), so the address bar always holds a clean basket.
 
 **Validation:** an entry naming an unknown or unpublished photograph, a tier the photograph doesn't offer, an unknown tier or frame or anything past the tenth print is dropped, with a line saying so: `1 print was taken out: that photo isn't available as a print any more.` or `a basket holds up to 10 prints.` A malformed `items` is treated as empty. Parsing lives in `src/lib/prints/basket.ts`, as pure functions.
 
-**The page** (`src/pages/basket.astro`, `noindex`, `Cache-Control: no-store`, the beacon's `$pageview` sends the path `/basket` only):
+**The page** (`src/pages/basket.astro`, `noindex`, `Cache-Control: no-store`; a GET render carries the beacon, whose `$pageview` sends the path `/basket` only; a POST render carries no beacon):
 
 | Margin label | Content |
 |---|---|
 | `basket` (head row) | `<h1>your basket</h1>`, then `this basket lives in the address bar: bookmark or share this page to keep it.` and `keep looking` linking to `/photos?items=…` |
-| `prints` | One line per print line: its 240 preview, its name (section 4), `medium · 12 × 18 in · oak frame`, `× 2` when more than one, the line price and links `one more` (left out at 10 prints) and `remove one` |
-| `delivery` | A `<form method="get" action="/basket">` with hidden `items`, the `country` select (first option `choose a country`) and a `see delivery` button. Then the quote line (16.2) |
-| `pay` | When a country is chosen and the quote succeeded, a `<form method="post" action="/basket">` with hidden `items`, `country`, `shown_total` and `intent=checkout`, a `continue to payment` button and under it `payment happens on stripe's own checkout page, which sets its own cookies. this site sets none.` |
+| `prints` | One line per print line: its 240 preview, its name (section 4), `medium · 12 × 18 in · oak frame`, `× 2` when more than one, the line price and links `one more` (left out at 10 prints) and `remove one`; then `prints $238` |
+| `deliver to` | The address form (15.4) |
+| `total` | After a successful quote only: the quote line and the pay form (16.3) |
 
-An empty basket shows `your basket is empty. find a photo you like.` linking to `/photos`. When prints are closed the basket shows its lines and `prints are closed for now.` with no delivery or pay rows. With JavaScript (`src/scripts/basket.ts`, inline), changing the country submits the delivery form, and `see delivery` is hidden.
+An empty basket shows `your basket is empty. find a photo you like.` linking to `/photos`. When prints are closed the basket shows its lines and `prints are closed for now.` with no address, total or pay rows. The basket page has no script.
+
+Changing the basket (`one more`, `remove one`, `keep looking`, adding from a photo page) is a plain link, so it clears any quote and the address form starts empty again; the browser's own address autofill (15.4) refills it. That is the cost of never storing the address.
 
 ### 15.3 Carrying the basket through the gallery
 
 When `/photos`, `/photos?before=` or `/photos/<id>` is requested with a valid `items` parameter, the page renders every link to a gallery page with that `items` appended, adds `basket · 3 prints` (linking to `/basket?items=…`) to its head row, puts `items` in the print row's hidden field, and is not edge-cached: no `Astro.cache.set`, `Cache-Control: no-store` and `noindex`. Without `items` the pages are cached exactly as in part 1, so ordinary browsing never costs a D1 read. The basket's `keep looking` link starts this carry.
 
+### 15.4 The address form
+
+One `<form method="post" action="/basket?items=…" id="deliver">`, with `intent=quote`. The basket's `items` stay in the action's query string, as everywhere else; the address travels only in the form body. Fields, each a labelled `<input>` with the shipping `autocomplete` token so the browser can fill it from its own saved addresses (the browser's store, not the site's):
+
+| Field | `name` and `autocomplete` | Rule (server side) |
+|---|---|---|
+| Full name | `name`, `shipping name` | Required, 1 to 100 characters |
+| Street address | `line1`, `shipping address-line1` | Required, 1 to 100 characters |
+| Apartment, unit or building | `line2`, `shipping address-line2` | Optional, at most 100 characters |
+| City or suburb | `city`, `shipping address-level2` | Required, 1 to 60 characters |
+| State or region | `state`, `shipping address-level1` | Optional, at most 60 characters |
+| Postcode | `postcode`, `shipping postal-code` | Optional, at most 20 characters |
+| Country | `country` (a select), `shipping country` | Required, one of the list in 16.4 |
+| Phone | `phone`, `shipping tel`, `type="tel"` | Required, 6 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`, at least 6 digits; the carrier may need it |
+
+All fields are printable text with no line breaks. Hint under the form: `this address goes to stripe and artelo, to quote and deliver your prints. this site doesn't keep it.` Button: `quote delivery`. A field that fails its rule reopens the form with its values and a message beside it, status 422 (`add the street address.`, `that phone number looks too short.`). The form has no script and needs none.
+
 ## 16. Delivery quotes
 
-### 16.1 Artelo's cost
+### 16.1 Artelo's Price Check
 
-Get Catalog Product Costs (`POST https://www.artelo.com/api/open/catalog/get-costs`, `Authorization: Bearer <ARTELO_API_KEY>`) takes one product (`catalogProductId`, `size`, `frameStyle`, `paperType`, the three booleans, `shippingDestination` and `quantity`) and answers `{ productionCost, shippingCost }`. It doesn't take several different products. Artelo's Price Check does take several items and returns one combined `arteloShipping`, but it needs a full street address, which the site doesn't have (and doesn't want) before Stripe collects it. So the site can't get Artelo's combined freight for a basket before payment, and uses this rule instead:
+`POST /basket` with `intent=quote` checks `QUOTE_LIMIT` and `ARTELO_LIMIT` (21.3), validates the basket and the address, then calls Artelo's Price Check (`POST https://www.artelo.com/api/open/orders/price-check`, `Authorization: Bearer <ARTELO_API_KEY>`, 15-second timeout) with the whole basket and that address:
 
-- **Group** the basket's prints by Artelo size and frame. For each group, ask Get Catalog Product Costs with `catalogProductId: "IndividualArtPrint"`, the size, `frameStyle: "Oak"` or `"Unframed"`, `paperType: "ArchivalMatteFineArt"`, `includeMats`, `includeFramingService` and `includeHangingPins` all `false`, `shippingDestination: <country>` and `quantity: <prints in the group>`, so identical prints are priced together by Artelo itself.
-- **Delivery** is the sum of the groups' `shippingCost`, converted to AUD and with the buffer added, rounded **up** to a whole dollar: `delivery = ceil(Σ shippingCost × usd_aud × (1 + delivery_buffer))` dollars.
-- The basket says so, honestly (16.2): Artelo may pack prints together for less than the sum, and the difference is not refunded.
+- `orderId` `quote-<16 random hex characters>` (never stored), `currency: "USD"`;
+- `customerAddress` mapped exactly as at order time (18.2 step 5): `name`, `street1`, `street2` only when present, `city`, `state` (the city when the state is empty), `zipcode` (the postcode or `""`), `country`, and `phone` when the country isn't `US`;
+- `items`: one per basket line, `orderItemId` `<line>`, `quantity` the line's quantity, `unitPrice` the tier price converted to US dollars at the current rate (informational), and the same `productInfo` as the order (14.1, 18.2: size, `frameColor`, `paperType`, `orientation`, the three booleans `false`), without `designs`.
 
-**The cache:** answers are kept in D1, `print_costs(size, frame, country, quantity, production_cost, shipping_cost, refused, fetched_at)` with the first four as primary key, for 6 hours, including Artelo's refusal for a country it won't ship to (`refused = 1`); network errors and 5xx answers aren't kept. A **refusal** is a 400 or 422 answer to a well-formed request; 401, 403, 408, 429 and 5xx are errors, not refusals. The first `prints:check` run asks for Antarctica (`AQ`, which Stripe accepts) and prints Artelo's exact answer, so the rule can be tightened to Artelo's real status and error code if it differs. The cache is shared by every Cloudflare location, unlike the Workers Cache API, so a spread of quotes doesn't multiply Artelo calls; the per-address rate limits (21.3) are per location, which is accepted.
+Artelo answers `orderCosts` with `productionCost`, `arteloShipping`, its tax fields and `total`. **Delivery is Artelo's exact quoted freight for the whole order:** `delivery = ceil(orderCosts.arteloShipping × usd_aud × (1 + delivery_buffer))` dollars, converted to AUD and rounded **up** to a whole dollar. The print prices are the fixed list (14.2). Nothing from Price Check is cached or stored: every quote is for one address and one basket.
 
-### 16.2 The quote line on the basket
+- A 400 or 422 from Artelo (an address or country it won't ship to, or a product it refuses) shows `artelo couldn't quote delivery to this address: <artelo's message, at most 200 characters>` beside the form, status 422, and no total.
+- A network error, timeout, 401, 403, 408, 429 or 5xx shows `delivery prices aren't loading right now. try again in a minute.` (503).
+- Past either rate limit: `too many quotes - wait a minute and try again.` (429).
 
-Once a country is chosen: `prints $238 + delivery $65 = $303`, then:
+### 16.2 The signed quote
 
-- `in australian dollars. prices include no gst; the seller isn't registered for gst.`
-- `delivery is what artelo charges me to post these to australia, worked out for each size and frame and added up, plus 8% in case the exchange rate moves. artelo may send them together for less.` (the country and the current buffer from `print_settings`)
+A successful quote is sealed so checkout can charge exactly what was shown without asking Artelo again, and so an edited address can't keep an old price. The page carries a hidden `quote` field: `base64url(payload) + "." + base64url(HMAC-SHA256(PRINT_VIEW_SECRET, "print-quote:" + payload))`, where `payload` is JSON of the canonical `items`, every address field exactly as validated, `print_total`, `delivery_amount`, the delivery buffer and rate used and `expires` (now plus 30 minutes). It lives only in the form body and the rendered page, never in a URL, a log or D1.
 
-A country Artelo refuses shows `artelo can't post to <country> yet.` and no pay row. When Artelo or the rate is unavailable: `delivery prices aren't loading right now. try again in a minute.` (status 503). Past the rate limit: `too many tries - wait a minute and try again.` (429).
+### 16.3 The quote line and the pay form
 
-### 16.3 The exchange rate, the buffer and countries
+After a successful quote the basket renders (status 200, `Cache-Control: no-store`, no beacon) with the address form still filled in and, in the `total` row:
+
+- `prints $238 + delivery $49 = $287`
+- `delivery is artelo's price for posting these prints to the address above, plus 8% in case the exchange rate moves. in australian dollars. prices include no gst; the seller isn't registered for gst.` (the current buffer from `print_settings`)
+- A second `<form method="post" action="/basket?items=…">` with `intent=checkout`, the address fields repeated as hidden inputs, the hidden `quote`, a `continue to payment` button and under it `payment happens on stripe's own checkout page, which sets its own cookies. this site sets none. your address is fixed there; to change it, change it here and quote again.`
+
+Editing any address field and pressing `quote delivery` again re-quotes. A POST render can't be redirected without putting the address in a URL or storing it, so these two posts answer 200 instead of the usual post, redirect, get; a reload asks the browser to resend, which re-quotes or re-checks harmlessly.
+
+### 16.4 The exchange rate, the buffer and countries
 
 - **The exchange rate** is the European Central Bank reference rate from Frankfurter (`https://api.frankfurter.dev/v1/latest?base=USD&symbols=AUD`, no key, no visitor data sent), fetched by the daily job (18.6) into `print_settings` (`usd_aud`, `usd_aud_date`). A rate outside 0.8 to 3 is ignored and logged. A rate older than 7 days still quotes, with a warning in `/admin`; no rate at all closes prints.
 - **The buffer** is `print_settings.delivery_buffer`, seeded at `0.08` by migration 0007 and editable in `/admin` (section 20) from 0 to 0.20, so changing it needs no deploy. 8% is enough because Artelo bills George's card, which has no foreign transaction fee, leaving the buffer for rate movement and the card fee on the delivery line.
-- **Countries:** the select lists every ISO 3166 code Stripe accepts in `shipping_address_collection.allowed_countries` (fixed in `src/lib/prints/countries.ts`), named with `Intl.DisplayNames("en-AU", { type: "region" })` and lowercased, sorted by name. The page never guesses the visitor's country.
+- **Countries:** the select lists every ISO 3166 code Stripe accepts as a shipping country (fixed in `src/lib/prints/countries.ts`), named with `Intl.DisplayNames("en-AU", { type: "region" })` and lowercased, sorted by name, first option `choose a country`. The page never guesses the visitor's country.
 
-### 16.4 When prints are open
+### 16.5 When prints are open
 
 Prints are **open** when three things hold: the var `PRINTS_OPEN` is `"true"`, the secrets `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `ARTELO_API_KEY`, `ARTELO_WEBHOOK_SECRET`, `PRINT_VIEW_SECRET` and `PHOTO_LINK_SECRET` are all set and an exchange rate is stored. Otherwise the print row is not rendered, the basket says `prints are closed for now.`, and `/admin` says which condition is missing. While open, part 2 also adds ` some come as prints.` to the home page's photo line (3.7) and to the gallery's intro line (3.1).
 
 ## 17. Checkout
 
-### 17.1 Starting checkout
+### 17.1 How Stripe holds the quoted address
+
+Stripe's hosted Checkout has no documented way to prefill a shipping address and lock it: `shipping_address_collection` always shows an editable form (and an edited address would silently change what Artelo must be paid to deliver), a `customer` prefills the email, name, card and billing address but not a locked shipping address, and `permissions.update_shipping_details` (which keeps shipping details server-only) exists only for embedded and elements sessions, not the hosted page. So:
+
+- `shipping_address_collection` is **off** and `phone_number_collection` is **off**; Checkout asks only for the email and card.
+- The quoted address travels as **`payment_intent_data[shipping]`**: `[name]`, `[phone]`, `[address][line1]`, `[address][line2]`, `[address][city]`, `[address][state]`, `[address][postal_code]` and `[address][country]`. Stripe stores it on the payment (the PaymentIntent and its charge), where the buyer can't change it, and shows it in George's Dashboard.
+- The buyer sees it on Stripe's page, read-only, in `custom_text[submit][message]` (Stripe allows 1,200 characters; the field limits of 15.4 keep the whole message under 800, and the length is still checked before the session is created): `posting to: <name>, <line1>, <line2>, <city> <state> <postcode>, <country name>. to change it, go back and quote again.`, followed by the GST and Artelo sentences (17.2).
+- The address is not put in `metadata`, `client_reference_id`, line item names or any URL.
+
+### 17.2 Starting checkout
 
 `POST /basket` with `intent=checkout`:
 
-1. Checks `CHECKOUT_LIMIT` (21.3) and that prints are open, the basket parses to at least one print with every entry valid (any dropped entry renders the basket again with its line, status 422) and the country is in the list.
-2. Recomputes the quote on the server; the posted numbers are never trusted. If `shown_total` differs, the basket renders again with the new quote and `delivery to <country> is $<n> - this is the new total.` (422, the country's name and the recomputed delivery), and nothing is charged.
-3. Creates the order first, so a payment can never arrive for an order the site doesn't know (section 19): one `print_orders` row (`id` a new lowercase ULID from `src/lib/admin/ulid.ts`, status `checkout`, the country, `print_total`, `delivery_amount`, `livemode` from the key's `sk_live_` or `sk_test_` prefix) and one `print_order_items` row per line (photo, tier, Artelo size, frame, quantity, unit price), in one batch.
-4. **The view key** is `base64url(HMAC-SHA256(PRINT_VIEW_SECRET, "order-view:" + order id))`, recomputed whenever it's needed (the success URL, the shipped email) and never stored. The order page recomputes it and compares in constant time. Rotating `PRINT_VIEW_SECRET` invalidates every order link already sent, which is accepted.
+1. Checks `CHECKOUT_LIMIT` (21.3) and that prints are open.
+2. **Verifies the signed quote** (16.2) in constant time: the signature and expiry, and that the posted address fields and the URL's `items` are exactly the ones sealed in it. Any difference (an edited address, say) or an expired quote renders the basket again with the posted address in the form and `that quote has changed or run out. quote delivery again.` (422); nothing is created and nothing is charged. The amounts charged are the sealed `print_total` and `delivery_amount`, never posted numbers. The basket is also re-validated (every photo still published and every tier still offered, 15.2); a dropped entry renders the basket with its line (422).
+3. Creates the order first, so a payment can never arrive for an order the site doesn't know (section 19): one `print_orders` row (`id` a new lowercase ULID from `src/lib/admin/ulid.ts`, status `checkout`, the country, `print_total`, `delivery_amount`, `livemode` from the key's `sk_live_` or `sk_test_` prefix) and one `print_order_items` row per line (photo, tier, Artelo size, frame, quantity, unit price), in one batch. The address is not written.
+4. **The view key** is `base64url(HMAC-SHA256(PRINT_VIEW_SECRET, "order-view:" + order id))`, recomputed whenever it's needed (the success URL, the shipped email) and never stored. The order page recomputes it and compares in constant time. Rotating `PRINT_VIEW_SECRET` invalidates every order link already sent (and any open quote), which is accepted.
 5. Creates a Stripe Checkout Session with `fetch` (no SDK; form-encoded; `Stripe-Version: 2025-09-30.clover`; `Idempotency-Key: checkout-<order id>`) with these form fields:
    - `mode=payment`, `payment_method_types[0]=card` (cards and the wallets that use them), `submit_type=pay`, `locale=auto`, `expires_at` one hour ahead, `adaptive_pricing[enabled]=false`, so the buyer always pays the AUD total the site showed;
    - for each print line `i`: `line_items[i][price_data][currency]=aud`, `line_items[i][price_data][unit_amount]` the tier price in cents, `line_items[i][price_data][product_data][name]` `print of <name> · medium, 12 × 18 in · oak frame`, `line_items[i][price_data][product_data][description]` `archival matte paper, made and posted by artelo`, `line_items[i][price_data][product_data][images][0]` the photo's 480 WebP preview URL, `line_items[i][quantity]` the line's quantity;
-   - the last line, delivery: `line_items[n][price_data][product_data][name]` `delivery to australia, 3 prints`, its `unit_amount` the delivery amount, `line_items[n][quantity]=1`;
-   - `shipping_address_collection[allowed_countries][0]=<the chosen country>` only, and `phone_number_collection[enabled]=true` (Artelo needs a phone number for international delivery);
-   - `custom_text[shipping_address][message]` `your address goes to stripe and artelo only, to deliver your prints.` and `custom_text[submit][message]` `prints are made and posted by artelo in the us. prices include no gst; the seller isn't registered for gst.`;
+   - the last line, delivery: `line_items[n][price_data][product_data][name]` `delivery to australia, 3 prints`, its `unit_amount` the sealed delivery amount, `line_items[n][quantity]=1`;
+   - `payment_intent_data[shipping][…]` the quoted address and phone (17.1);
+   - `custom_text[submit][message]` `posting to: <address>. to change it, go back and quote again. prints are made and posted by artelo in the us. prices include no gst; the seller isn't registered for gst.`;
    - `payment_intent_data[description]` `print order <order id> · prices include no gst; the seller isn't registered for gst`, which Stripe's free receipt shows;
    - `client_reference_id=<order id>`, `metadata[order_id]`, `metadata[country]`, `metadata[print_total]`, `metadata[delivery_amount]` and `metadata[line_1]` to `metadata[line_10]` (`<photo id>:<tier>:<frame>:<quantity>`, one per line) and `payment_intent_data[metadata][order_id]`;
-   - `success_url=<SITE_ORIGIN>/prints/<order id>?key=<view key>`, `cancel_url=<SITE_ORIGIN>/basket?items=…&country=…`.
-6. Stores `stripe_session_id` and answers **303** to the session's `url`. If Stripe refuses or is unreachable, the order becomes `expired` and the basket shows `couldn't reach the payment page. nothing was charged - try again in a minute.` (503).
+   - `success_url=<SITE_ORIGIN>/prints/<order id>?key=<view key>`, `cancel_url=<SITE_ORIGIN>/basket?items=…` (the basket, with the address form empty).
+6. Stores `stripe_session_id` and answers **303** to the session's `url`. If Stripe refuses or is unreachable, the order becomes `expired` and the basket renders with the posted address and `couldn't reach the payment page. nothing was charged - try again in a minute.` (503).
 
-### 17.2 GST later
+### 17.3 GST later
 
 When `PRINT_GST` is `"inclusive"` (if George registers for GST later), Australian orders add `line_items[i][tax_rates][0]=<STRIPE_GST_TAX_RATE>` (an inclusive 10% rate George creates in Stripe) to every line, other countries add none (exports carry no GST), and the GST sentence becomes `prices include gst for orders posted within australia.` everywhere it appears. No code changes. While `PRINT_GST` is `"none"`, the sentence of 14.2 is used.
 
-### 17.3 The seller on Stripe
+### 17.4 The seller on Stripe
 
 Stripe's Checkout and receipt show the seller as the Stripe account's public business name, which George sets to `george vlachos` (section 24). `PRINT_SELLER_NAME` (`"george vlachos"`) is used for Artelo's shipping label (18.2).
 
-### 17.4 The margin check, bun run prints:check
+### 17.5 The margin check, bun run prints:check
 
 `scripts/print-check.mjs` (`--local` or `--remote` chooses which D1 the prices and buffer are read from; the Artelo key comes from `ARTELO_API_KEY` in the process environment and is never printed):
 
-- For every size in the table in 14.1 and both frames: Get Catalog Product Costs to `AU` and `US`, and Artelo's Price Check (`POST /orders/price-check`) with exactly the `productInfo` the site sends at order time (14.1, 18.2), to public landmark addresses: `AU` Sydney Opera House (Bennelong Point, Sydney NSW 2000) and Parliament House Darwin (State Square, Darwin NT 0800); `US` the White House (1600 Pennsylvania Avenue NW, Washington DC 20500) and Iolani Palace (364 South King Street, Honolulu HI 96813); `GB` 10 Downing Street (London SW1A 2AA). Plus one Price Check of a two-item order (a small unframed and a large oak print) to each address, to show how far Artelo's combined freight sits below the sum rule of 16.1.
+- For every size in the table in 14.1 and both frames: Get Catalog Product Costs to `AU` and `US`, and Artelo's Price Check (`POST /orders/price-check`) with exactly the `productInfo` the site sends at order time (14.1, 18.2), to public landmark addresses: `AU` Sydney Opera House (Bennelong Point, Sydney NSW 2000) and Parliament House Darwin (State Square, Darwin NT 0800); `US` the White House (1600 Pennsylvania Avenue NW, Washington DC 20500) and Iolani Palace (364 South King Street, Honolulu HI 96813); `GB` 10 Downing Street (London SW1A 2AA). Plus one Price Check of a two-item order (a small unframed and a large oak print) to each address, printed beside the two prints' single freight, so George sees how Artelo prices combined delivery.
 - **Fails** (exit 1) when Artelo refuses any combination (the size table, frame or paper is then wrong and must be fixed before prints open), or when any combination's margin is below **15%**.
 - **The lookup check:** creates one Artelo order with `isTestOrder: true` and `orderId: check-<timestamp>`, then calls `GET /orders/get?limit=5&name=<that id>` and fails if the order isn't returned, because the duplicate guard of 18.2 depends on it.
 - Prints a table per size and frame: production in USD and in AUD at `usd_aud × 1.03` (deliberately conservative, although George's card has no foreign transaction fee), the price, the worst-case card fee (3.5% + $0.30, Stripe's international card rate in Australia), the worst-case freight shortfall (the buffer minus the card fee on delivery minus 3% exchange), the margin in dollars and as a share of the price, and delivery to each address. It prints every field Price Check returns.
-- **Warns** (exit 0, a GitHub annotation in CI) when a margin is under the **30% floor**, or when Price Check's total for a real address (every amount it returns, including any tax or duty fields) differs by more than 5% from Get Catalog Product Costs' production plus shipping for the same country. It also prints Artelo's answer for `AQ` (16.1).
+- **Warns** (exit 0, a GitHub annotation in CI) when a margin is under the **30% floor**, or when Price Check's total for a real address (every amount it returns, including any tax or duty fields) differs by more than 5% from Get Catalog Product Costs' production plus shipping for the same country. It also prints Artelo's Price Check answer for an address in Antarctica (`AQ`, which Stripe accepts), so the refusal handling of 16.1 can be checked against Artelo's real status and message.
 - George runs it before opening prints and whenever Artelo's prices or the rate move a lot (ADR-0021); it is not part of CI (it needs the live key).
 
 ## 18. After payment
@@ -493,7 +529,7 @@ Stripe's Checkout and receipt show the seller as the Stripe account's public bus
 
 1. **Claim** the order: `UPDATE print_orders SET lease_until = now + 120, attempts = attempts + 1 WHERE id = ? AND status = 'paid' AND next_attempt_at <= now AND (lease_until IS NULL OR lease_until < now)`. No change means another run holds it or it isn't due; stop.
 2. **Look before creating:** every attempt first asks `GET /orders/get?limit=5&name=<order id>`; an Artelo order whose `orderId` equals ours means an earlier attempt succeeded after its answer was lost (or the order is already at Artelo awaiting action), so the site adopts it (step 6) instead of creating a duplicate. If the lookup itself fails, the attempt stops and counts as retryable; the site never creates an order it couldn't look up first.
-3. **Fetch the address from Stripe**, in memory only: `GET /v1/checkout/sessions/<session id>` with the pinned version; the name and address from `collected_information.shipping_details` and the phone from `customer_details.phone`. Nothing from it is stored or logged.
+3. **Fetch the quoted address from Stripe**, in memory only: `GET /v1/payment_intents/<stripe_payment_intent>` with the pinned version; the name, phone and address from its `shipping`, which is exactly the address the delivery was quoted against (17.1) and which the buyer couldn't change on Stripe's page. Nothing from it is stored or logged.
 4. **Issue the master links:** for each distinct photo in the order, `issueOrderGrant(db, PHOTO_LINK_SECRET, orderId, photoId, 72 hours)` returns `<SITE_ORIGIN>/photos/downloads/<photo id>?token=<token>`. This is the existing full-resolution route serving the private master JPEG from `PHOTO_PRINTS`, never a preview, and an order grant serves its photo's current master whether or not the photo is published (13.3): a paid print goes ahead if George hides the photo afterwards. A photo whose master object is missing from `PHOTO_PRINTS` (checked with `head`) is a permanent failure for the whole order (section 19). The links are never shown anywhere; they are revoked once the order reaches `in_production` (18.3), and 72 hours is the ceiling for orders stuck while Artelo processes images.
 5. **Create the order** (`POST https://www.artelo.com/api/open/orders/create`, 15-second timeout), one Artelo order with every print:
 
@@ -549,7 +585,7 @@ Artelo status to order status:
 
 Cloudflare Email Service through the `send_email` binding `EMAIL`, from `PRINT_FROM_EMAIL` (`prints@curiousgeorge.dev`, name `george vlachos`), with `replyTo: hello@curiousgeorge.dev`, always with both `text` and a plain `html` version.
 
-- **Shipped**, to the buyer, once (`shipped_email_at` set in the same statement that claims the send): the address is fetched from the Stripe session at send time (`customer_details.email`) and never stored. Subject `your prints are on their way` (`your print is on its way` for one). Body: `hi, your prints have left the printer:` then one line per print (`<name> · medium · oak frame`), then one line per shipment (`tracking: <carrier> <number> <tracking url>`), then `you can check on them here: <order page url>. thanks for buying them. - george`. The order page URL is rebuilt with the view key of 17.1.
+- **Shipped**, to the buyer, once (`shipped_email_at` set in the same statement that claims the send): the address is fetched from the Stripe session at send time (`customer_details.email`) and never stored. Subject `your prints are on their way` (`your print is on its way` for one). Body: `hi, your prints have left the printer:` then one line per print (`<name> · medium · oak frame`), then one line per shipment (`tracking: <carrier> <number> <tracking url>`), then `you can check on them here: <order page url>. thanks for buying them. - george`. The order page URL is rebuilt with the view key of 17.2.
 - **Needs attention**, to `ADMIN_EMAIL`, once each time an order enters `needs_attention` (`attention_notified_at`, cleared when it leaves): subject `print order <id> needs attention`, body the reason and `<SITE_ORIGIN>/admin/#orders`.
 - **Paid without a webhook** (18.6), **cancelled by Artelo** and **Artelo webhook missing** (at most once a day), to `ADMIN_EMAIL`.
 - Receipts are Stripe's free receipts, which show the payment description with the GST sentence (17.1).
@@ -557,7 +593,7 @@ Cloudflare Email Service through the `send_email` binding `EMAIL`, from `PRINT_F
 
 ### 18.5 The order page, /prints/<order id>?key=…
 
-Shown when the key equals the recomputed view key (17.1, constant-time); otherwise the notebook 404, so the page never says whether an order exists. Private headers (13.3), `noindex`, `referrer="no-referrer"`, no beacon, no script, the key never logged.
+Shown when the key equals the recomputed view key (17.2, constant-time); otherwise the notebook 404, so the page never says whether an order exists. Private headers (13.3), `noindex`, `referrer="no-referrer"`, no beacon, no script, the key never logged.
 
 | Margin label | Content |
 |---|---|
@@ -575,13 +611,13 @@ Status lines: `checkout` `your payment's on its way through. this page updates w
 2. **Reconcile checkouts:** for `checkout` orders created more than 65 minutes ago (sessions expire after 60), at most 20 per run, `GET /v1/checkout/sessions/<stripe_session_id>`. If `status = complete` and `payment_status = paid`, apply exactly the paid transition of 18.1 (same function, same status guard, no `stripe_events` row needed because the `UPDATE ... WHERE status IN ('checkout', 'expired')` is the guard) and email George `print order <id> was paid but stripe's webhook never arrived. check the webhook in stripe.`. If `status = expired`, mark the order `expired`. If `status = open`, call `POST /v1/checkout/sessions/<id>/expire` and leave it for the next run. An order with no `stripe_session_id` (Stripe never answered) becomes `expired`, because its buyer never saw a payment page.
 3. Retry unsent emails (18.4).
 4. Poll Artelo statuses (18.3).
-5. **Daily jobs**, each when its `print_settings` timestamp is more than 20 hours old: refresh the exchange rate; check the Artelo webhook (`GET /webhooks/get` lists one with our URL and topic, else `/admin` and an email say it's missing); delete `expired` orders older than 30 days with their items, `stripe_events` older than 90 days and `print_costs` rows older than 6 hours.
+5. **Daily jobs**, each when its `print_settings` timestamp is more than 20 hours old: refresh the exchange rate; check the Artelo webhook (`GET /webhooks/get` lists one with our URL and topic, else `/admin` and an email say it's missing); delete `expired` orders older than 30 days with their items and `stripe_events` older than 90 days.
 
 `bun run prints:webhook --local | --remote` (`scripts/artelo-webhook.mjs`) saves the webhook (`POST /webhooks/save`: topic `OrderStatusChange`, URL `<SITE_ORIGIN>/api/prints/artelo`, `filters.statuses` every status in 18.3's table) and pipes the returned `secret` straight into `wrangler secret put ARTELO_WEBHOOK_SECRET` on standard input. It prints only `webhook saved; its secret is stored on the worker.`
 
 ## 19. Failure handling
 
-- **Never charged without being tracked:** the order and its items are written before the Checkout Session exists (17.1), the webhook can recreate a missing order from the session metadata (18.1), and the cron's reconciliation (18.6) finds any paid session whose webhook never arrived. A webhook that can't write answers 500, so Stripe redelivers.
+- **Never charged without being tracked:** the order and its items are written before the Checkout Session exists (17.2), the webhook can recreate a missing order from the session metadata (18.1), and the cron's reconciliation (18.6) finds any paid session whose webhook never arrived. A webhook that can't write answers 500, so Stripe redelivers.
 - **Whole-order retries with backoff:** after failed attempt `n`, the next waits `min(5 minutes × 3^(n-1), 6 hours)`: 5 minutes, 15, 45, 2 hours 15, then every 6 hours, picked up by the first cron run after it falls due. The window is 24 hours from payment (`retry_until`): when the next attempt would fall after it, the order becomes `needs_attention` with `artelo didn't take the order within a day: <last error>` and George is emailed. That is at most 8 attempts.
 - **What counts as retryable:** a network error, a timeout, 408, 429, any 5xx and a failed lookup (18.2 step 2). Any other 4xx (Artelo refusing the order, a bad key) is permanent: `needs_attention` at once with Artelo's error message (at most 200 characters, with anything that looks like an address stripped).
 - **Partial refusals go to `needs_attention`:** Artelo's create is one request for the whole order, so a refusal of any item refuses the order, and its message (which may name the item) becomes the reason. A photo whose master is missing, and an order Artelo accepts but then holds in `PendingFulfillmentAction` (for example one design it can't use), go to `needs_attention` too. The site never drops an item to place the rest.
@@ -594,7 +630,7 @@ Status lines: `checkout` `your payment's on its way through. this page updates w
 
 A third new section, `orders` (`AdminSection` gains it), after `links`, following 6.1's rules; it purges nothing.
 
-- A status line first: `prints are open` or `prints are closed: <reason>` (16.4), then `us$1 = a$1.52 · ecb rate of 07.10.26` (with `- older than a week, check the rate job` when stale), then `artelo webhook: connected · last heard 08.10.26 14:02` or `artelo webhook: missing - run bun run prints:webhook --remote` (18.6).
+- A status line first: `prints are open` or `prints are closed: <reason>` (16.5), then `us$1 = a$1.52 · ecb rate of 07.10.26` (with `- older than a week, check the rate job` when stale), then `artelo webhook: connected · last heard 08.10.26 14:02` or `artelo webhook: missing - run bun run prints:webhook --remote` (18.6).
 - **Delivery buffer:** a number field `buffer` in percent (0 to 20, whole numbers, current value shown), intent `prints.buffer`, saving `print_settings.delivery_buffer`. Hint: `added to artelo's delivery cost for exchange-rate movement. it applies to the next quote.`
 - The latest 100 orders whose status isn't `checkout` or `expired`, `needs_attention` first (each with a `--red` dot and its reason), then newest paid first. Each line: paid date and time (Sydney), the order id, the prints (`2 prints: DFkL1xrsnOH-02 medium oak, DFkL1xrsnOH-05 small unframed`, photo ids linked to `/photos/<id>`), `to au`, `$238 + $65 = $303`, a status word (`waiting to place`, `needs attention`, `with artelo`, `printing`, `shipped`, `delivered`, `cancelled`, `refunded`), `test` for test-mode orders, `refunded $65` when partly or fully refunded, Artelo's id and cost (`artelo us$61.40`) once placed, and tracking (`ups 1Z… ›` per shipment) once shipped.
 - **retry now** shows only on `needs_attention` orders with no `artelo_order_id` (intent `order.retry`): it sets the order back to `paid` with `attempts` at 0 and a fresh 24-hour retry window (section 19), runs the first attempt in `waitUntil` and redirects with the saved line `retrying - refresh in a minute to see how it went.` A retry is safe against duplicates because every attempt looks the order up at Artelo before creating it (18.2). A `needs_attention` order that Artelo already has shows `open it in artelo` instead.
@@ -604,25 +640,25 @@ A third new section, `orders` (`AdminSection` gains it), after `links`, followin
 
 ### 21.1 Cookies and analytics
 
-- The site still sets no cookies and uses no storage. The basket is in the URL (15.2). Stripe's Checkout is on Stripe's own domain, and the basket says so before the button. `visitor info` (R2) is unchanged and stays true of curiousgeorge.dev.
-- The beacon sends `/basket` and `/photos…` page views with the path only (ADR-0013), so a basket's `items` never reaches analytics. `/prints/` carries no beacon and is refused by the ingest proxy (13.3). View keys and order tokens never reach analytics, logs or referrers.
-- The privacy smoke test adds the print row, a basket with two prints and a chosen country: no `Set-Cookie`, empty storage, every request to the site's own origin (the checkout redirect itself is not followed).
+- The site still sets no cookies and uses no storage. The basket is in the URL (15.2); the delivery address is only ever in a form body (15.4, 16.3). Stripe's Checkout is on Stripe's own domain, and the basket says so before the button. `visitor info` (R2) is unchanged and stays true of curiousgeorge.dev.
+- The beacon sends `/basket` and `/photos…` page views with the path only (ADR-0013), so a basket's `items` never reaches analytics, and a page showing an address (a POST render of the basket) carries no beacon at all. `/prints/` carries no beacon and is refused by the ingest proxy (13.3). View keys and order tokens never reach analytics, logs or referrers.
+- The privacy smoke test adds the print row and a basket with two prints quoted for a test address: no `Set-Cookie`, empty storage, every request to the site's own origin and the address in no URL, request line or `Referer` (the checkout redirect itself is not followed).
 
 ### 21.2 What is kept where
 
-- **Stripe** holds the buyer's name, email, phone, billing and shipping address and payment details. **Artelo** gets the name, shipping address and (outside the US) phone. The site fetches the address and email from Stripe in memory when it needs them (18.2, 18.4) and never writes them anywhere.
-- **D1** keeps, per order: the order id, country, print total, delivery amount, status and reason, the Stripe session and payment intent ids, Artelo's order id, status and cost, the shipments' carriers, tracking numbers and URLs (a parcel's, not a person's), refund amounts, timestamps and retry bookkeeping; and per line, the photo, tier, Artelo size, frame, quantity and unit price. Nothing else. The view key is derived, never stored (17.1).
-- Logs carry order ids, statuses and error summaries, never addresses, emails, tokens, keys or request bodies.
+- **Stripe** holds the buyer's email, billing details and payment details, and the delivery name, address and phone on the payment (`payment_intent_data[shipping]`, 17.1). **Artelo** gets the name, address and (outside the US) phone twice: once for the quote (16.1) and once for the order (18.2). The site holds the address only while handling the quote and checkout requests, in the form body and memory, and afterwards fetches it and the email from Stripe in memory when it needs them (18.2, 18.4). It never writes them to D1, a log or a URL.
+- **D1** keeps, per order: the order id, country, print total, delivery amount, status and reason, the Stripe session and payment intent ids, Artelo's order id, status and cost, the shipments' carriers, tracking numbers and URLs (a parcel's, not a person's), refund amounts, timestamps and retry bookkeeping; and per line, the photo, tier, Artelo size, frame, quantity and unit price. Nothing else. The view key is derived, never stored (17.2).
+- Logs carry order ids, statuses and error summaries, never addresses, phone numbers, emails, tokens, signed quotes, keys or request bodies. Artelo's refusal messages are shown to the buyer who caused them but logged only as a status code.
 
 ### 21.3 Abuse
 
-Two Workers Rate Limiting bindings (13.3), keyed by `CF-Connecting-IP`: `QUOTE_LIMIT` (30 a minute) for basket renders with a country, and `CHECKOUT_LIMIT` (6 a minute) for checkouts. Workers rate limits count per Cloudflare location, which is accepted. They set no cookie (R10's zone rules forbid rate-limiting rules that do). Test builds key both on an `X-Test-Client` header when one is present, so end-to-end checkouts from one address don't trip them. The D1 cost cache (16.1) bounds Artelo calls to one per size, frame, country and quantity every 6 hours.
+Every quote calls Artelo, so quotes are limited with the existing Workers Rate Limiting approach, which uses no cookie (R10's zone rules forbid rate-limiting rules that do). Three bindings (13.3): `QUOTE_LIMIT` (10 quotes a minute, keyed by `CF-Connecting-IP`), `ARTELO_LIMIT` (30 Price Checks every 10 seconds, keyed by the constant `price-check`, keeping quotes under Artelo's 50 requests per 10 seconds so order placement keeps headroom) and `CHECKOUT_LIMIT` (6 checkouts a minute, keyed by `CF-Connecting-IP`). A quote checks both of its limits before calling Artelo. Workers rate limits count per Cloudflare location, which is accepted. Test builds key the address-keyed limits on an `X-Test-Client` header when one is present, so end-to-end runs from one address don't trip them.
 
 ### 21.4 Secrets and configuration
 
-- Worker secrets George sets with `wrangler secret put`: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `ARTELO_API_KEY`, `ARTELO_WEBHOOK_SECRET` (set by `prints:webhook`), `PRINT_VIEW_SECRET` (32 random bytes as lowercase hex) and `PHOTO_LINK_SECRET` (from part 1).
-- Vars in `wrangler.jsonc`: `PRINTS_OPEN` (`"false"` until launch), `PRINT_SELLER_NAME` (`"george vlachos"`), `PRINT_GST` (`"none"` or `"inclusive"`), `STRIPE_GST_TAX_RATE` (empty until needed), `PRINT_FROM_EMAIL` (`"prints@curiousgeorge.dev"`), `SITE_ORIGIN` (`"https://curiousgeorge.dev"`, needed by the cron, which has no request), `ARTELO_API_BASE` (`"https://www.artelo.com/api/open"`) and `FX_URL` (the Frankfurter URL in 16.3). Tests point the last two at the fixture (23.3).
-- The delivery buffer is a D1 setting, not a var (16.3). Test builds refuse a `STRIPE_SECRET_KEY` that starts with `sk_live_`.
+- Worker secrets George sets with `wrangler secret put`: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `ARTELO_API_KEY`, `ARTELO_WEBHOOK_SECRET` (set by `prints:webhook`), `PRINT_VIEW_SECRET` (32 random bytes as lowercase hex; it derives order view keys and seals quotes, each under its own label) and `PHOTO_LINK_SECRET` (from part 1).
+- Vars in `wrangler.jsonc`: `PRINTS_OPEN` (`"false"` until launch), `PRINT_SELLER_NAME` (`"george vlachos"`), `PRINT_GST` (`"none"` or `"inclusive"`), `STRIPE_GST_TAX_RATE` (empty until needed), `PRINT_FROM_EMAIL` (`"prints@curiousgeorge.dev"`), `SITE_ORIGIN` (`"https://curiousgeorge.dev"`, needed by the cron, which has no request), `ARTELO_API_BASE` (`"https://www.artelo.com/api/open"`) and `FX_URL` (the Frankfurter URL in 16.4). Tests point the last two at the fixture (23.3).
+- The delivery buffer is a D1 setting, not a var (16.4). Test builds refuse a `STRIPE_SECRET_KEY` that starts with `sk_live_`.
 
 ## 22. Data: migration 0007
 
@@ -642,18 +678,6 @@ INSERT INTO print_prices (tier, frame, amount) VALUES
 
 CREATE TABLE print_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
 INSERT INTO print_settings (key, value, updated_at) VALUES ('delivery_buffer', '0.08', 0);
-
-CREATE TABLE print_costs (
-  size TEXT NOT NULL,
-  frame TEXT NOT NULL CHECK (frame IN ('unframed', 'oak')),
-  country TEXT NOT NULL CHECK (length(country) = 2),
-  quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 10),
-  production_cost INTEGER,                   -- US cents
-  shipping_cost INTEGER,                     -- US cents
-  refused INTEGER NOT NULL DEFAULT 0 CHECK (refused IN (0, 1)),
-  fetched_at INTEGER NOT NULL,
-  PRIMARY KEY (size, frame, country, quantity)
-);
 
 CREATE TABLE print_orders (
   id TEXT PRIMARY KEY,                       -- lowercase ULID; Artelo's orderId and Stripe's client_reference_id
@@ -706,13 +730,13 @@ ALTER TABLE photo_download_grants ADD COLUMN order_id TEXT;
 CREATE INDEX photo_grants_order ON photo_download_grants(order_id);
 ```
 
-`print_order_items.photo_id` has no foreign key, so an order keeps its history whatever happens to the photo. The total prints in an order (the sum of quantities) is at most 10, enforced by the basket parser. No exchange rate is seeded: the daily job fetches it (16.3).
+`print_order_items.photo_id` has no foreign key, so an order keeps its history whatever happens to the photo. The total prints in an order (the sum of quantities) is at most 10, enforced by the basket parser. No exchange rate is seeded: the daily job fetches it (16.4).
 
 ## 23. Budgets and testing (part 2)
 
 ### 23.1 Budgets
 
-R11's method applies to `/photos/<id>` with the print row and to `/basket` with two prints: JavaScript before any interaction under 10KB gzipped (the beacon plus `basket.ts` on the basket; the print row adds none), HTML under 30KB gzipped, CSS under 15KB gzipped, the same two fonts, cumulative layout shift under 0.01 at 1280px and 375px, and the basket's 240 previews eager (at most 10).
+R11's method applies to `/photos/<id>` with the print row and to `/basket` with two prints: JavaScript before any interaction under 10KB gzipped (the beacon only; neither the print row nor the basket has a script), HTML under 30KB gzipped, CSS under 15KB gzipped, the same two fonts, cumulative layout shift under 0.01 at 1280px and 375px, and the basket's 240 previews eager (at most 10).
 
 ### 23.2 Tests
 
@@ -720,7 +744,9 @@ R11's method applies to `/photos/<id>` with the print row and to `/basket` with 
 
 - **Eligibility:** the crop tolerance at 2.9% and 3.1%; the family choice; the 200 ppi line; orientation; the real dimension classes of 14.1 (3648 × 5472 all three; 3024 × 4032 small and medium; 6048 × 8064 all three; 2194 × 3291 small; 3575 × 4172 and 1756 × 3097 none; 2048 × 2048 small only).
 - **The basket:** parsing, grouping identical entries, the 10-print cap, dropped entries and their messages, `add`, `remove` and `more`, canonical URLs.
-- **Pricing:** grouping by size and frame, the sum rule, the buffer read from `print_settings`, rounding up to whole dollars, a missing or stale rate, the D1 cost cache with refusals kept and 5xx not.
+- **The address form:** each field's rule, the phone rule, the 1,200-character custom text limit.
+- **Pricing:** the Price Check request built from a basket and an address (address mapping, one item per line, no designs), delivery from `arteloShipping` with the buffer read from `print_settings` and rounded up to whole dollars, a missing or stale rate, refusals versus errors.
+- **The signed quote:** sealing and verifying, expiry and a changed address field, item or amount each refused.
 - **The guard:** a duplicate event id applies nothing; a concurrent duplicate fails its batch with 500; two events for one session pay once; an event with no order answers 500 and records nothing; a missing order is recreated from metadata in `needs_attention`; an amount, currency or `currency_conversion` mismatch reaches `needs_attention`; a full refund before placement stops retries; a full refund after placement reaches `needs_attention`; a partial refund changes only the amounts.
 - **Reconciliation:** a paid session with no webhook reaches `paid` and is placed by the cron; an open session is expired; an expired session marks the order; an order with no session becomes `expired`.
 - **Retries:** the backoff schedule, the 24-hour window, retryable versus permanent statuses, a failed lookup never creating, the lease, adopting an order found by the lookup, a missing master failing the whole order and an email retried until its guard column is set.
@@ -730,16 +756,17 @@ R11's method applies to `/photos/<id>` with the print row and to `/basket` with 
 
 **End to end (Playwright, Chromium):**
 
-- **A full test order** (runs when `STRIPE_TEST_SECRET_KEY` is set, skipped with an annotation otherwise): on `/photos/fixture-b-01` add medium with an oak frame; follow `keep looking` to `/photos/fixture-b-02` (the basket carried in the links) and add small unframed; on the basket choose australia; the quote reads `prints $238 + delivery $65 = $303` (two groups at the fixture's US$20.00 each, at 1.50, plus 8%, rounded up). `continue to payment` reaches `checkout.stripe.com` in test mode, which offers only Australia and shows two print lines and one delivery line; Playwright pays with Stripe's published test card `4242 4242 4242 4242` and test address; the browser lands on the order page. The test then fetches the real `checkout.session.completed` event from Stripe's events API, asserts the session has `currency: aud` and no `currency_conversion`, and delivers the event to `/api/prints/stripe` signed with the local test webhook secret, twice. The stand-in Artelo received exactly one order with two items (`x12x18`, `NaturalOak`, `Vertical`; `x8x12`, unframed, `Horizontal`; both `ArchivalMatteFineArt`; `isTestOrder: true`), whose two design URLs it fetched: JPEGs of 4000 × 6000 and 6000 × 4000 matching their masters' SHA-256, not previews. The fixture then sends a signed `Shipped` webhook; the order page shows the tracking, the order's grants are revoked and the email sink holds one shipped email.
+- **A full test order** (runs when `STRIPE_TEST_SECRET_KEY` is set, skipped with an annotation otherwise): on `/photos/fixture-b-01` add medium with an oak frame; follow `keep looking` to `/photos/fixture-b-02` (the basket carried in the links) and add small unframed; on the basket fill in a test address in Australia and press `quote delivery`; the stand-in received one Price Check with both items and that address, and the quote reads `prints $238 + delivery $49 = $287` (the fixture's US$30.00 freight, at 1.50, plus 8%, rounded up). `continue to payment` reaches `checkout.stripe.com` in test mode, which shows two print lines, one delivery line and `posting to: …` with the test address, and asks for no shipping address; Playwright pays with Stripe's published test card `4242 4242 4242 4242`; the browser lands on the order page. The test then fetches the real `checkout.session.completed` event from Stripe's events API, asserts the session has `currency: aud` and no `currency_conversion` and its payment's `shipping` is the quoted address, and delivers the event to `/api/prints/stripe` signed with the local test webhook secret, twice. The stand-in Artelo received exactly one order, to the quoted address, with two items (`x12x18`, `NaturalOak`, `Vertical`; `x8x12`, unframed, `Horizontal`; both `ArchivalMatteFineArt`; `isTestOrder: true`), whose two design URLs it fetched: JPEGs of 4000 × 6000 and 6000 × 4000 matching their masters' SHA-256, not previews. The fixture then sends a signed `Shipped` webhook; the order page shows the tracking, the order's grants are revoked and the email sink holds one shipped email.
 - **Reconciliation:** a second paid test order whose webhook the test withholds is moved to `paid` by triggering the cron, and George's `webhook never arrived` email is in the sink.
 - **Artelo failure** (same server and key; `/admin` through the test build's local bypass, R7): the stand-in answers 503 to every create; with `PRINT_RETRY_WINDOW=0` the first failure leaves the order `needs_attention`; `/admin` lists it first with its reason and the sink holds George's email. With the stand-in set to accept, `retry now` places it once.
 - **Partial refusal:** the stand-in refuses (400, naming the item) any order containing `fixture-b-02`; a two-print order reaches `needs_attention` with that message; no Artelo order exists and nothing was placed for the other print.
-- **Basket without JavaScript:** add, one more, remove one, the cap at 10, a tampered `items` entry dropped with its line, a changed total at checkout answered with the new total.
+- **Basket without JavaScript:** add, one more, remove one, the cap at 10, a tampered `items` entry dropped with its line, an invalid address reopened with its messages, an address edited after the quote refused at checkout with `that quote has changed or run out. quote delivery again.`, an Artelo refusal shown beside the form, and the address never appearing in any request URL.
+- **Quote limits:** the eleventh quote in a minute from one test client answers 429 without reaching the stand-in.
 - **Privacy and budgets:** as 21.1 and 23.1.
 
 ### 23.3 Fixtures and servers
 
-- A stand-in Artelo, `tests/fixtures/artelo-site.mjs` on port 4401 (like the snapshot fixture site on 4400): `catalog/get-costs` (production US$40.00 and shipping US$20.00 for every size, country and quantity, and a 400 for `AQ`), `orders/price-check`, `orders/create` (which fetches every design URL and records each file's SHA-256 and dimensions), `orders/get`, `orders/get-by-id`, `webhooks/get` and `webhooks/save`, plus `/fx` answering Frankfurter's shape with 1.50, `/__mode` to switch creation between `ok`, `down` (503) and `refuse=<photo id>` (400 naming it), `/__ship` to send a signed `OrderStatusChange` to the site, `/__requests` to read what it received and `/__mail` as the email sink.
+- A stand-in Artelo, `tests/fixtures/artelo-site.mjs` on port 4401 (like the snapshot fixture site on 4400): `catalog/get-costs` (production US$40.00 and shipping US$20.00 for every size, country and quantity), `orders/price-check` (US$30.00 `arteloShipping` for any basket, production US$40.00 per print, and a 400 with a message for an address in `AQ`), `orders/create` (which fetches every design URL and records each file's SHA-256 and dimensions), `orders/get`, `orders/get-by-id`, `webhooks/get` and `webhooks/save`, plus `/fx` answering Frankfurter's shape with 1.50, `/__mode` to switch creation between `ok`, `down` (503) and `refuse=<photo id>` (400 naming it), `/__ship` to send a signed `OrderStatusChange` to the site, `/__requests` to read what it received and `/__mail` as the email sink.
 - A prints server on port 4335, recreated every run like the admin server: `rm -rf .wrangler/prints`, `wrangler d1 migrations apply curiousgeorge-logbook --local --persist-to .wrangler/prints`, the seed of 11.3, then `wrangler dev -c dist/server/wrangler.json --port 4335 --persist-to .wrangler/prints --test-scheduled` with vars for the fixture key, `PRINTS_OPEN=true`, `SITE_ORIGIN=http://localhost:4335`, `ARTELO_API_BASE` and `FX_URL` on 4401, test `ARTELO_API_KEY`, webhook and view secrets, `STRIPE_SECRET_KEY` from `STRIPE_TEST_SECRET_KEY` and the test-only `EMAIL_SINK=http://127.0.0.1:4401/__mail` (test builds send mail there instead of the binding). The migrations include 0006 and 0007. Specs trigger the cron with `GET /__scheduled?cron=*/5+*+*+*+*` and send `X-Test-Client` (21.3).
 
 ## 24. Launch (part 2)
@@ -762,16 +789,16 @@ Artelo's documentation hides some answers behind an account or truncates its enu
 1. **Artelo sizes:** the frameable sizes are those in Artelo's documentation bundle (`NON_GALLERY_PRODUCT_SIZES_SUPPORTING_FRAMES`, read 2026-10-08) and all exist for `IndividualArtPrint`. Checked by `prints:check`, which fails on any refused combination.
 2. **Artelo's standard oak frame** is `frameColor: "NaturalOak"` at order time and `frameStyle: "Oak"` in cost queries, and an unframed print is `frameColor: null`. Checked by `prints:check` (Price Check with the exact `productInfo`).
 3. **Paper:** `ArchivalMatteFineArt` is offered at every size in 14.1, framed and unframed. Checked by `prints:check`.
-4. **Currency:** Get Catalog Product Costs, Price Check and an order's `details` are in US dollars, the account currency. Checked by `prints:check` comparing Price Check (`currency: "USD"`) with Get Catalog Product Costs, and by the first real order's cost against Artelo's charge.
-5. **No combined freight without an address:** Get Catalog Product Costs prices one product (with a quantity) per request and Price Check needs a full address, so a basket's delivery is the sum rule of 16.1. `prints:check` shows Artelo's real combined freight for two-item orders beside the sum, and the launch order shows what Artelo charged.
-6. **Refusals:** a country Artelo won't ship to gets a 400 or 422 from Get Catalog Product Costs. `prints:check` prints Artelo's real answer for `AQ`.
+4. **Currency:** Price Check with `currency: "USD"`, Get Catalog Product Costs and an order's `details` are in US dollars, the account currency. Checked by `prints:check` comparing Price Check with Get Catalog Product Costs, and by the first real order's cost against Artelo's charge.
+5. **The quote is the charge:** Price Check's `arteloShipping` for a basket and an address is what Artelo then charges for the same order to the same address, and it doesn't depend on `orderId`, `unitPrice` or the missing `designs`. Checked by the launch order (its `details.arteloShipping` against the quote) and, for every order after, by `artelo_cost` in `/admin`.
+6. **Refusals:** an address or country Artelo won't ship to gets a 400 or 422 from Price Check, with a message fit to show the buyer. `prints:check` prints Artelo's real answer for an address in `AQ`.
 7. **The master link:** Artelo fetches a design from any HTTPS URL, including one with a query string that answers with `Content-Disposition: attachment` and a JPEG of 10 to 30MB, within 72 hours of the order. Mimicked by the stand-in; truly checked by the launch order.
 8. **Order lookup:** Get Orders' `name` filter returns an order by our `orderId`, and Artelo doesn't itself refuse a duplicate `orderId`, so the site looks the order up before every create. Checked by `prints:check`.
 9. **The webhook payload** carries `orderId` (Artelo's id or ours; both are looked up), `status` and, when shipped, `shipments`, at the top level or in a `data` object, signed as an HMAC-SHA256 hex of the body. Handled both ways, logged by key name when unreadable, backed by the 12-hour poll; the first real status change is shown in `/admin` (`last heard`).
 10. **Addresses:** Artelo accepts the city and state fallbacks and an empty `zipcode` for places without one, and requires a phone only outside the US. Checked by the launch order and, after that, by `needs_attention` reasons if Artelo refuses one.
 11. **Order amounts:** Artelo uses `total`, `shippingCost` and `unitPrice` (sent in AUD) only for the packing slip and customs declaration, in the order's currency. Checked by the launch order's paperwork.
 12. **Test orders:** `isTestOrder: true` orders cost nothing, are never produced and get status `Ignored`. From Artelo's Create Order documentation; the end-to-end test only uses the stand-in.
-13. **Stripe API version** `2025-09-30.clover` returns the shipping name and address in `collected_information.shipping_details` and the phone and email in `customer_details`. Pinned on every request; checked by the end-to-end test against Stripe's test mode.
+13. **The quoted address on Stripe:** with `shipping_address_collection` off, `payment_intent_data[shipping]` is stored on the PaymentIntent unchanged and hosted Checkout neither shows an address form nor lets the buyer change it; the address reaches the buyer's eyes only through `custom_text[submit][message]`. Stripe's documentation offers no prefilled, locked shipping form on the hosted page (`permissions.update_shipping_details` is for embedded and elements sessions only). API version `2025-09-30.clover`, pinned on every request, returns the email in `customer_details`. Checked by the end-to-end test against Stripe's test mode.
 14. **Stripe's free receipt** shows the payment's description, so the GST sentence reaches the buyer's receipt; Stripe emails receipts only in live mode with customer emails on. Checked by the launch order's receipt.
 15. **Stripe fees in Australia** are 1.7% + $0.30 for domestic cards and 3.5% + $0.30 for international ones; `prints:check` uses the worse.
 16. **Checkout images:** Stripe shows the 480 WebP preview as a line item's image; if it doesn't, Checkout simply shows none. Seen in the end-to-end test.
