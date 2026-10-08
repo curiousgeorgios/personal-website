@@ -15,7 +15,7 @@
 - Copy is lowercase George-voice: Australian spelling, spaced hyphen ` - `, no em dashes, no Oxford comma, sentence case. This applies to every message, label, comment and doc line. UI strings the spec quotes are used exactly as quoted, including `prices include no gst; the seller isn't registered for gst.`
 - Use bun, never npm. D1 migrations only through `wrangler d1 migrations apply` (`bun run db:migrate:local`, and the e2e servers' own `--persist-to` stores); `wrangler d1 execute --command` only reads or sets test data in local stores.
 - Never run `wrangler deploy` (except `--dry-run`), any `--remote` command, `bun run prints:check --remote` or `bun run prints:webhook --remote`; never put a real secret in a task; never call live Stripe or live Artelo. Stripe runs in test mode only, with `STRIPE_TEST_SECRET_KEY` from the environment, and the one spec that uses it skips with an annotation without it. Artelo is the stand-in fixture server, `tests/fixtures/artelo-site.mjs` on port 4401, which also stands in for Stripe's API, the exchange rate and the mail binding.
-- Every local server started from `dist/` passes `--var PHOTO_LINK_SECRET:` with the fixture key (64 ones, `PHOTO_KEY_VAR` in `playwright.config.ts`, ADR-0024) and, for the prints servers, the fixture print secrets from `tests/e2e/prints-site.ts`. Tasks never read `.dev.vars` and never run `photos:key` or `photos:link`.
+- Every local server started from `dist/` passes `--var PHOTO_LINK_SECRET:` with the fixture key (64 ones, `PHOTO_KEY_VAR` in `playwright.config.ts`, ADR-0024) and, for the prints servers, the fixture print secrets and explicit print settings from `tests/e2e/prints-site.ts` (`printVars`), because `build:test` copies `.dev.vars` into `dist/server` and anything left unpinned would come from George's machine. Tasks never read `.dev.vars` and never run `photos:key` or `photos:link`.
 - Money: amounts are AUD cents in D1 and in code; prices come only from `print_prices` (changed only by a migration); `delivery = ceil((arteloShipping + destination tax) × usd_aud × (1 + delivery_buffer))` whole dollars; the buffer is `print_settings.delivery_buffer`, seeded `0.08`, editable 0 to 0.20; Stripe is called with `fetch`, form-encoded, `Stripe-Version: 2025-09-30.clover` on every request, `adaptive_pricing[enabled]=false` on every session; Artelo is called with `Authorization: Bearer <ARTELO_API_KEY>` and a 15-second timeout.
 - The money-path guarantees each have a test, named in the task that owns them: never charged without a tracked order (Tasks 7 and 10); each Stripe event applied once (Task 10); no duplicate Artelo orders (Task 9); the cron reconciling with Stripe before expiring (Task 10); Adaptive Pricing off (Tasks 7, 10 and 15); the sealed quote (Tasks 6 and 7); the address never stored or logged (Tasks 6, 7, 9 and 15).
 - Privacy (spec 21): `cookies: none. nothing to accept.` stays literally true of the site and `tests/e2e/privacy.spec.ts`'s empty-storage assertion keeps passing; the basket lives only in the query string; the delivery address lives only in form bodies, the rendered POST response, Stripe and Artelo, and never in D1, a log, a URL or a `Referer`; logs carry order ids, event ids, statuses and status codes only; `/basket` GET renders carry the beacon (path only), POST renders and `/prints/` carry none and the ingest proxy refuses `/prints/`.
@@ -37,7 +37,9 @@
     --var STRIPE_API_BASE:http://127.0.0.1:4401/stripe --var STRIPE_SECRET_KEY:sk_test_fixture_prints \
     --var STRIPE_WEBHOOK_SECRET:whsec_fixture_prints --var ARTELO_API_KEY:artelo-fixture-key \
     --var ARTELO_WEBHOOK_SECRET:artelo-fixture-webhook-secret \
-    --var PRINT_VIEW_SECRET:2222222222222222222222222222222222222222222222222222222222222222 &
+    --var PRINT_VIEW_SECRET:2222222222222222222222222222222222222222222222222222222222222222 \
+    --var PRINT_GST:none --var STRIPE_GST_TAX_RATE: --var 'PRINT_SELLER_NAME:george vlachos' \
+    --var PRINT_FROM_EMAIL:prints@curiousgeorge.dev --var ADMIN_EMAIL:hello@curiousgeorge.dev &
   curl --retry 30 --retry-connrefused --retry-delay 1 -sf http://localhost:4336/ -o /dev/null
   ```
 
@@ -78,8 +80,9 @@ Recorded so reviewers know they are deliberate:
 - **Ports.** Plan 6 gave 4335 to the gallery server, so the spec's prints server becomes two: 4337 with every provider stood in (the stand-in on 4401 answers Stripe's three endpoints too), which runs on every e2e run, and 4338 with Stripe's real test mode for the one full order through `checkout.stripe.com`, started only when `STRIPE_TEST_SECRET_KEY` is set. Spec 23.2's other money specs (reconciliation, Artelo failure, partial refusal) therefore run in every CI run instead of only where the key exists. A new var, `STRIPE_API_BASE` (`https://api.stripe.com`), is how 4337 points at the stand-in; `ARTELO_API_BASE` and `FX_URL` already exist in the spec for the same reason.
 - **The checkout redirect on 4337 is read, not followed.** The CSP's `form-action 'self' https://checkout.stripe.com` (spec 13.3) rightly blocks a redirect to the stand-in, so the 4337 specs post the pay form with Playwright's request context and read the 303's `Location`. 4338 follows it to Stripe.
 - **Task order differs from spec 1.2 where a later step's code is needed earlier.** The pure catalogue and basket come before the migration (the store types use them); the stand-in and the 4337 server arrive with the first page (Task 5) and grow task by task; mail (Task 8) comes before the Stripe webhook, because reconciliation, placement and Artelo statuses all send mail; `placeOrder` (Task 9) comes before the Stripe webhook (Task 10), which starts it.
-- **Mail is driven by state.** `sendDueMail` sends every due `needs attention` and `shipped` email (claimed through `attention_notified_at` and `shipped_email_at`), from the cron and right after any transition. The two emails without a guard column (`paid without a webhook` and `cancelled by artelo`) go once, at the transition, which a status guard already makes happen once.
-- **Migration 0007 adds one column the spec's schema lacks:** `print_orders.delivery_taxed` (0 or 1). Spec 16.1 says the line reads `delivery and destination taxes` on the order page and in `/admin` too, and nothing else in D1 says whether a quote carried tax. It is not personal data. The session's metadata carries it too, so a recreated order keeps it.
+- **Mail is driven by state.** `sendDueMail` sends every due `needs attention` and `shipped` email (claimed through `attention_notified_at` and `shipped_email_at`), from the cron and right after any transition. George's two other order emails (`paid without a webhook` and `cancelled by artelo`) share a guard column, `admin_notified_at`, which is 0 while one is due and the send time once it went, so a failed send is retried by the cron as spec 18.4 asks; a 0 sentinel, rather than NULL, is what tells `sendDueMail` an email is due at all.
+- **Migration 0007 adds two columns the spec's schema lacks:** `print_orders.delivery_taxed` (0 or 1), because spec 16.1 says the line reads `delivery and destination taxes` on the order page and in `/admin` too and nothing else in D1 says whether a quote carried tax (the session's metadata carries it too, so a recreated order keeps it); and `print_orders.admin_notified_at`, the guard that lets George's cancellation and missed-webhook emails be retried (spec 18.4). Neither is personal data.
+- **Money-path guards the review added:** a full refund that lands while placement holds the lease leaves the order `needs_attention` with Artelo's id and the refund reason, never silently placed; an Artelo status for an order not yet Artelo's (`checkout`, `expired`, `paid`) is only recorded, so placement's lookup adopts it; a `needs_attention` this site set is cleared only by a cancellation; each attempt revokes the last attempt's master links, and a full refund before placement revokes them too.
 - **The basket's canonical form** lists one entry per print with a line's prints adjacent, lines in the order first seen (`items=fixture-b-01:medium:oak,fixture-b-01:medium:oak,fixture-b-02:small:unframed`). A change that can't apply (`one more` at 10 prints, an `add` the photo doesn't offer) or a URL with dropped entries renders the basket with its line instead of redirecting, so the line is seen; a clean change answers 303 to the canonical URL.
 - **The exchange rate is shown to four decimals with trailing zeros trimmed, at least two** (`a$1.50`, `a$1.5237`), so the breakdown shows the rate the arithmetic used.
 - **Artelo's answers whose shape its public documentation doesn't show are read defensively and fail closed.** Get Orders may answer a list or an object holding one under `orders` or `data`; anything else counts as a failed lookup, which is retryable and never followed by a create. Create Order, Get Order by Id and the webhook may wrap the order in `data`. Section "Assumptions" lists each.
@@ -91,7 +94,7 @@ Recorded so reviewers know they are deliberate:
 - **Order lines name a photograph by its place among its post's published photographs plus itself**, so a print keeps a sensible name after George hides the photograph; its thumbnail is left out then, because plan 6's media route no longer serves a hidden photograph's previews.
 - **An unexpected throw while placing (a D1 hiccup) is retryable;** Stripe's PaymentIntent read is retryable on a network error, 429 or 5xx and permanent on any other 4xx; a missing master or a missing `PHOTO_LINK_SECRET` is permanent.
 - **Copy the spec leaves open:** two or more dropped prints read `2 prints were taken out: those photos aren't available as prints any more.`; an empty or unreadable post reads `that form couldn't be read. try again.`; too many checkouts read `too many tries - wait a minute and try again.`; an address too long for Stripe's page reads `that address is too long for the payment page. shorten it and quote again.`; the basket failing outright reads `the basket isn't loading right now. try again in a bit.`; a one-print shipped email reads `hi, your print has left the printer:` and `you can check on it here: <url>. thanks for buying it. - george`; one-print order pages use `your print`, `it's with the printer.` and the like; the missed-webhook email's subject is `print order <id>: stripe's webhook never arrived`; the webhook-missing email's subject is `the artelo webhook is missing`; the buffer field's saved line is `saved - it applies to the next quote.`; prints closed reasons are `PRINTS_OPEN isn't "true"`, `these secrets aren't set: …` and `no exchange rate has been fetched yet`; the address field labels are `full name`, `street address`, `apartment, unit or building`, `city or suburb`, `state or region`, `postcode`, `country` and `phone`, with messages `add your name.`, `add the street address.`, `add the city or suburb.`, `choose a country.`, `add a phone number.`, `that phone number looks too short.`, `use digits, spaces, +, -, ( and ) only.`, `one line of plain text.` and `<n> characters at most.`
-- **The probe in Task 1 was reasoned, not run, while planning:** the adapter's config customiser keeps a custom `main` (`config.main ?? "@astrojs/cloudflare/entrypoints/server"`), `@astrojs/cloudflare/handler` exports `handle`, and the current `dist/server/wrangler.json` already carries `triggers`, `send_email` and `ratelimits` keys. Task 1 proves it with a build; if it fails, the task stops and reports, because spec 13.3's fallback (a separate `workers/prints/` Worker) is a controller decision.
+- **The custom entry was proven in the plan's review, in a scratch copy:** the adapter's config customiser keeps a custom `main`; the built `wrangler.json` keeps the cron, the three rate limits and `send_email`; the handler runs when wrangler's local explorer triggers the cron (`POST /cdn-cgi/local/explorer/api/local/scheduled?worker=personal-website`, as `tests/e2e/snapshots-live.spec.ts` does). `GET /__scheduled` doesn't work on a server started from `dist/`: its config has `no_bundle`, so wrangler can't inject the `--test-scheduled` middleware, and no server here passes that flag. Task 1 still proves the entry with a build and the probe; if either fails, the task stops and reports, because spec 13.3's fallback (a separate `workers/prints/` Worker) is a controller decision.
 - **The modules the two print scripts import under plain Node keep their value imports' `.ts` extensions** (`catalogue.ts`, `money.ts`, `quote.ts`, `artelo.ts`, `artelo-status.ts`, `margin.ts`), which Astro's tsconfig allows (`allowImportingTsExtensions`): Node resolves no extensionless relative path, which is also why plan 6's scripts import only `tokens.ts`. For the same reason Artelo's status table (`artelo-status.ts`) stays free of value imports and the code that applies statuses lives in `artelo-updates.ts`.
 - **An order's grants are revoked when Artelo cancels it too**, beside the spec's `in_production`, `shipped` and `delivered`: nothing needs the masters after a cancellation.
 - **Task 12's admin edits are written against the working tree of plan 6's final review** (`ActionResult` carrying `purge?: string[]`, `submitForm` merging `result.purge`). If that review lands differently, keep what landed and add only what Task 12 adds.
@@ -135,6 +138,7 @@ src/lib/photos/store.ts                         modify: photoMaster, activeGrant
 src/lib/photos/download.ts                      modify: an order grant serves its photo's master
 src/lib/photos/gallery.ts                       modify: frameView carries the basket
 src/lib/photos/http.ts                          modify: /prints/ is private
+src/middleware.ts                               modify: an order page's own failure message
 src/lib/admin/gate.ts                           modify: the two webhook paths need no Origin
 src/lib/admin/actions.ts, submit.ts, validate.ts   modify: the orders section's two actions
 src/lib/ingest.ts                               modify: refuse /prints/
@@ -167,13 +171,13 @@ docs/prints.md, README.md, docs/superpowers/plans/2026-10-03-redesign-roadmap.md
 docs/superpowers/plans/2026-10-08-plan-7-followups.md   create
 ```
 
-Tasks touch shared files in this order, so each builds on the last: `cron.ts` (1, 4, 8, 9, 10, 11, 14), `prints/store.ts` (3, 5, 7, 8, 9), `artelo.ts` (4, 9, 14), `stripe.ts` (7, 10), `artelo-status.ts` (9), `basket-page.ts` (6, 7), `prints.css` (5, 6, 13), `tests/fixtures/artelo-site.mjs` (5, 6, 7, 8, 9, 11, 14), `tests/e2e/prints.ts` (5, 6, 7, 10, 11), `prints-fakes.ts` (3), `playwright.config.ts` (5, 15), `package.json` (1, 14), `ci.yml` (1, 15), `photos/store.ts` (3), `PhotoView.astro`, `Gallery.astro`, `Entry.astro`, `gallery.ts` and `photo-sheet.ts` (5), `prints-basket.spec.ts` (5, 6), `prints-order.spec.ts` (10, 11, 13), `admin/actions.ts`, `submit.ts`, `validate.ts`, `admin/index.astro` (12), `photos/http.ts`, `ingest.ts`, `Notebook.astro` (13), `privacy.spec.ts`, `budgets.spec.ts`, `perf.spec.ts` (15).
+Tasks touch shared files in this order, so each builds on the last: `cron.ts` (1, 4, 8, 9, 10, 11, 14), `prints/store.ts` (3, 5, 7, 8, 9), `artelo.ts` (4, 9, 14), `stripe.ts` (7, 10), `artelo-status.ts` (9), `basket-page.ts` (6, 7), `prints.css` (5, 6, 13), `tests/fixtures/artelo-site.mjs` (5, 6, 7, 8, 9, 11, 14), `tests/e2e/prints.ts` (5, 6, 7, 10, 11), `prints-fakes.ts` (3), `playwright.config.ts` (5, 15), `package.json` (1, 14), `ci.yml` (1, 15), `photos/store.ts` (3), `PhotoView.astro`, `Gallery.astro`, `Entry.astro`, `gallery.ts` and `photo-sheet.ts` (5), `prints-basket.spec.ts` (5, 6), `prints-order.spec.ts` (10, 11, 13), `admin/actions.ts`, `submit.ts`, `validate.ts`, `admin/index.astro` (12), `photos/http.ts`, `middleware.ts`, `ingest.ts`, `Notebook.astro` (13), `privacy.spec.ts`, `budgets.spec.ts`, `perf.spec.ts` (15).
 
 ---
 
 ### Task 1: the Worker entry, its bindings and the probe
 
-The first plan B step (spec 1.2, 13.3): `wrangler.jsonc`'s `main` becomes `src/worker.ts`, which exports Astro's `fetch` and a `scheduled` handler running the prints cron; the config gains the five-minute cron, the `send_email` binding, the three rate limits and the print vars (spec 21.4). A check script proves after every build that `dist/server/wrangler.json` keeps all of it, and a probe proves `wrangler dev --test-scheduled` reaches the handler. The print code's view of the env (`printConfig`) and the cron's step runner start here, empty of steps.
+The first plan B step (spec 1.2, 13.3): `wrangler.jsonc`'s `main` becomes `src/worker.ts`, which exports Astro's `fetch` and a `scheduled` handler running the prints cron; the config gains the five-minute cron, the `send_email` binding, the three rate limits and the print vars (spec 21.4). A check script proves after every build that `dist/server/wrangler.json` keeps all of it, and a probe proves the handler runs when wrangler's local explorer triggers the cron, as `tests/e2e/snapshots-live.spec.ts` already does (`GET /__scheduled` can't reach it: the built config has `no_bundle`, so wrangler can't inject its `--test-scheduled` middleware). The print code's view of the env (`printConfig`) and the cron's step runner start here, empty of steps.
 
 **Files:**
 - Create: `src/worker.ts`, `src/lib/prints/config.ts`, `src/lib/prints/cron.ts`, `scripts/check-built-worker.mjs`, `tests/unit/print-config.test.ts`, `tests/unit/cron.test.ts`, `tests/unit/worker-entry.test.ts`
@@ -600,15 +604,15 @@ Run:
 
 ```bash
 pkill -f "port 4336"
-bunx wrangler dev -c dist/server/wrangler.json --port 4336 --persist-to .wrangler/visual --test-scheduled \
+bunx wrangler dev -c dist/server/wrangler.json --port 4336 --persist-to .wrangler/visual \
   --var PHOTO_LINK_SECRET:1111111111111111111111111111111111111111111111111111111111111111 > "$TMPDIR/probe.log" 2>&1 &
 curl --retry 30 --retry-connrefused --retry-delay 1 -sf http://localhost:4336/ -o /dev/null
-curl -sf "http://localhost:4336/__scheduled?cron=*/5+*+*+*+*"; sleep 2
+curl -sf -X POST "http://localhost:4336/cdn-cgi/local/explorer/api/local/scheduled?worker=personal-website" -H "content-type: application/json" -d '{"cron":"*/5 * * * *"}'; sleep 2
 grep -c "prints: cron ran" "$TMPDIR/probe.log"; curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4336/
 pkill -f "port 4336"; rm -rf .wrangler/visual
 ```
 
-Expected: the scheduled call answers `Ran scheduled event`, the grep counts at least 1 and the home page answers 200. If the adapter dropped the custom entry (no `prints: cron ran`, or `/` fails), stop and report BLOCKED with the log: spec 13.3's fallback, a separate `workers/prints/` Worker, is the controller's call.
+Expected: the scheduled call answers `{"success":true,…"outcome":"ok"…}`, the grep counts at least 1 (`prints: cron ran`) and the home page answers 200. If the adapter dropped the custom entry (no `prints: cron ran`, or `/` fails), stop and report BLOCKED with the log: spec 13.3's fallback, a separate `workers/prints/` Worker, is the controller's call.
 
 - [ ] **Step 9: Commit**
 
@@ -1127,6 +1131,7 @@ CREATE TABLE print_orders (
   status_checked_at INTEGER,
   shipped_email_at INTEGER,
   attention_notified_at INTEGER,
+  admin_notified_at INTEGER,                 -- 0 while an email to George is due (an artelo cancellation, a missed webhook), then when it went
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX print_orders_due ON print_orders(status, next_attempt_at);
@@ -1555,6 +1560,8 @@ export interface OrderRow {
   status_checked_at: number | null;
   shipped_email_at: number | null;
   attention_notified_at: number | null;
+  /** 0 while George's cancellation or missed-webhook email is due, then when it went; null when none is due */
+  admin_notified_at: number | null;
   updated_at: number;
 }
 
@@ -1789,6 +1796,10 @@ describe("deliveryAmount", () => {
 
   test("an exact dollar stays that dollar, whatever floating point does", () => {
     expect(deliveryAmount(2500, [], 1.6, 0)).toBe(4000);
+  });
+
+  test("anything over a dollar rounds up to the next", () => {
+    // 10 × 1.1 × 1.1 is 12.1
     expect(deliveryAmount(1000, [], 1.1, 0.1)).toBe(1300);
   });
 });
@@ -2054,7 +2065,7 @@ const RULES: Record<AddressField, { required?: string; max: number }> = {
   phone: { required: "add a phone number.", max: 20 },
 };
 /** Control characters and line or paragraph separators: every field is one line of printable text */
-const NOT_ONE_LINE = /[\u0000-\u001f\u007f-\u009f  ]/;
+const NOT_ONE_LINE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 
 export function checkAddress(fields: Address): { ok: true; address: Address } | { ok: false; errors: AddressErrors } {
   const errors: AddressErrors = {};
@@ -3227,10 +3238,18 @@ export function printStore(store: string): string {
   ].join(" && ");
 }
 
-/** The vars both prints servers share: prints open, the stand-in for Artelo, the rate and mail, and the fixture secrets */
+/**
+ * The vars both prints servers share: prints open, the stand-in for Artelo, the rate and mail, the fixture secrets and
+ * every print setting at wrangler.jsonc's value. build:test copies George's .dev.vars into dist/server, so anything left
+ * unpinned would come from his machine (ADR-0024's reasoning). Each is quoted for the shell: the seller's name has a space
+ */
 export function printVars(origin: string): string {
-  const vars: Record<string, string> = { PRINTS_OPEN: "true", SITE_ORIGIN: origin, ARTELO_API_BASE: STAND_IN, FX_URL: `${STAND_IN}/fx`, EMAIL_SINK: `${STAND_IN}/__mail`, ...FIXTURE_SECRETS };
-  return Object.entries(vars).map(([name, value]) => `--var ${name}:${value}`).join(" ");
+  const vars: Record<string, string> = {
+    PRINTS_OPEN: "true", SITE_ORIGIN: origin, ARTELO_API_BASE: STAND_IN, FX_URL: `${STAND_IN}/fx`, EMAIL_SINK: `${STAND_IN}/__mail`,
+    PRINT_GST: "none", STRIPE_GST_TAX_RATE: "", PRINT_SELLER_NAME: "george vlachos", PRINT_FROM_EMAIL: "prints@curiousgeorge.dev", ADMIN_EMAIL: "hello@curiousgeorge.dev",
+    ...FIXTURE_SECRETS,
+  };
+  return Object.entries(vars).map(([name, value]) => `--var '${name}:${value}'`).join(" ");
 }
 ```
 
@@ -3334,9 +3353,9 @@ and add these two entries at the end of the `webServer` array:
         { command: "node tests/fixtures/artelo-site.mjs", url: `${STAND_IN}/__requests`, reuseExistingServer: false, timeout: 30_000 },
         // A sixth server for the print specs, every provider stood in, recreated every run like the admin server. Stripe
         // points at the stand-in too, so the money specs run on every run; a first failed order goes straight to
-        // needs_attention (PRINT_RETRY_WINDOW=0, spec 19). Specs trigger the cron through --test-scheduled
+        // needs_attention (PRINT_RETRY_WINDOW=0, spec 19). Specs trigger the cron through wrangler's local explorer (runCron)
         {
-          command: `${printStore(".wrangler/prints")} && wrangler dev -c dist/server/wrangler.json --port 4337 --persist-to .wrangler/prints --test-scheduled ${PHOTO_KEY_VAR} ${printVars(PRINTS)} --var STRIPE_SECRET_KEY:${FIXTURE_STRIPE_KEY} --var STRIPE_API_BASE:${STAND_IN}/stripe --var PRINT_RETRY_WINDOW:0`,
+          command: `${printStore(".wrangler/prints")} && wrangler dev -c dist/server/wrangler.json --port 4337 --persist-to .wrangler/prints ${PHOTO_KEY_VAR} ${printVars(PRINTS)} --var STRIPE_SECRET_KEY:${FIXTURE_STRIPE_KEY} --var STRIPE_API_BASE:${STAND_IN}/stripe --var PRINT_RETRY_WINDOW:0`,
           url: PRINTS,
           reuseExistingServer: false,
           timeout: 120_000,
@@ -3358,7 +3377,7 @@ test.skip(({ browserName }) => browserName !== "chromium", "the print specs run 
 
 const labels = (page: import("@playwright/test").Page) => page.locator(".row > .label");
 
-test("a photograph's page offers the sizes it prints at, priced, with how delivery works", async ({ page }) => {
+test("a photograph's page offers the sizes it prints at, priced, with how delivery works; none while prints are closed", async ({ page }) => {
   const response = await page.goto("/photos/fixture-b-01");
   expect(response?.headers()["cache-control"]).toBe("no-cache");
   await expect(labels(page)).toHaveText(["photo", "prints", "say hi"]);
@@ -3371,6 +3390,11 @@ test("a photograph's page offers the sizes it prints at, priced, with how delive
   ]);
   await expect(form.locator(".frame-choice")).toHaveText(["unframed", "oak frame"]);
   await expect(form.locator(".prints-hint")).toHaveText("delivery is quoted for your address in the basket. prices include no gst; the seller isn't registered for gst.");
+  // The same photo on the gallery server, where prints are closed: no row, and the plain intro
+  await page.goto(`${GALLERY}/photos/fixture-b-01`);
+  await expect(page.locator("form#prints")).toHaveCount(0);
+  await page.goto(`${GALLERY}/photos`);
+  await expect(page.locator(".intro")).toHaveText("photos i've taken, one entry per instagram post, newest first.");
 });
 
 test("a square photo prints small only, and one too small or the wrong shape gets no row", async ({ page }) => {
@@ -3378,12 +3402,6 @@ test("a square photo prints small only, and one too small or the wrong shape get
   await expect(page.locator("form#prints .size-choice")).toHaveText(["small · 10 × 10 in (25 × 25 cm) · $59, or $139 framed"]);
   await page.goto("/photos/fixture-c-01");
   await expect(labels(page)).toHaveText(["photo", "say hi"]);
-});
-
-test("while prints are closed there is no row (the gallery server)", async ({ page }) => {
-  await page.goto(`${GALLERY}/photos/fixture-b-01`);
-  await expect(page.locator("form#prints")).toHaveCount(0);
-  await expect(page.locator(".intro")).toHaveText("photos i've taken, one entry per instagram post, newest first.");
 });
 
 test("while prints are open the gallery's intro and the home page's line say some come as prints", async ({ page }) => {
@@ -3516,7 +3534,7 @@ import { ADDRESS, captureLogs, fakeFetch, json, NOW, printDb, testConfig, testDe
 const TWO = "fixture-b-01:medium:oak,fixture-b-02:small:unframed";
 const PRICE_CHECK = "POST https://artelo.test/orders/price-check";
 const quoted: Handler = async (request) => {
-  const body = await request.json();
+  const body = (await request.json()) as { customerAddress: { country: string } };
   return json({ orderCosts: { productionCost: 80, arteloShipping: 30, usSalesTax: body.customerAddress.country === "US" ? 4.2 : 0, total: 110 } });
 };
 const url = (query: string) => new URL(`https://curiousgeorge.dev/basket${query}`);
@@ -3825,7 +3843,7 @@ const LABEL = "print-quote:";
 
 export const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-export function fromB64url(text: string): Uint8Array | null {
+export function fromB64url(text: string): Uint8Array<ArrayBuffer> | null {
   if (!/^[A-Za-z0-9_-]*$/.test(text)) return null;
   try {
     const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4));
@@ -4432,6 +4450,10 @@ test.describe("the basket without javascript", () => {
 });
 
 test("the eleventh quote in a minute from one client answers 429 without reaching artelo", async ({ request }) => {
+  test.setTimeout(90_000);
+  // Miniflare's local limiter aligns its windows to the wall clock's minutes, so start well inside one
+  const into = Date.now() % 60_000;
+  if (into > 40_000) await new Promise((resolve) => setTimeout(resolve, 60_500 - into));
   const name = `Ada ${unique()}`;
   const client = `spec-${unique()}`;
   const statuses: number[] = [];
@@ -5016,7 +5038,14 @@ export async function startCheckout(deps: PrintDeps, basket: ResolvedBasket, pay
     await markExpired(db, id, deps.now());
     return { failure: "stripe" };
   }
-  await setSession(db, id, session.id, deps.now());
+  try {
+    await setSession(db, id, session.id, deps.now());
+  } catch (error) {
+    // The buyer never sees that session's page, so it can't be paid; say nothing was charged rather than a broken basket
+    console.error("prints: couldn't record the session of order", id, error instanceof Error ? error.message : String(error));
+    await markExpired(db, id, deps.now()).catch(() => false);
+    return { failure: "stripe" };
+  }
   return { url: session.url };
 }
 ```
@@ -5168,7 +5197,7 @@ Create `tests/e2e/prints-checkout.spec.ts`:
 
 ```ts
 import { expect, test } from "@playwright/test";
-import { asTestClient, auAddress, fillAddress, postPayForm, printsD1, quoteDelivery, sessionsFor, TWO_PRINTS, unique } from "./prints";
+import { asTestClient, auAddress, postPayForm, printsD1, quoteDelivery, sessionsFor, TWO_PRINTS, unique } from "./prints";
 import { PRINTS, STAND_IN } from "./prints-site";
 
 test.use({ baseURL: PRINTS });
@@ -5225,8 +5254,9 @@ test.describe("without javascript", () => {
     expect(response.status()).toBe(422);
     expect(await response.text()).toContain("that quote has changed or run out. quote delivery again.");
     expect(await sessionsFor(name)).toEqual([]);
-    // Back on the page, quoting again starts over cleanly
-    await fillAddress(page, auAddress(name));
+    // Back on the page, quoting the edited address again gives a fresh quote
+    await quoteDelivery(page, { ...auAddress(name), line1: "13 Example Street" });
+    await expect(page.locator(".quote-line")).toHaveText("prints $238 + delivery $49 = $287");
   });
 });
 ```
@@ -5257,7 +5287,7 @@ Spec 18.4: Cloudflare Email Service through the `EMAIL` binding (test builds pos
 **Interfaces:**
 - Consumes: `PrintDeps` (Task 1); `printLine`-style labels: `frameLabel` (Task 2); `getOrder`, `shipmentsOf`, `Shipment`, `OrderRow` (Task 3); `PHOTO_FACTS`, `FactRow`, `toBasketPhoto`, `photoNameOf` (Task 5); `getSession` (Task 7); `orderPageUrl` (Task 7); `previewOf` (plan 6).
 - Produces (`src/lib/prints/store.ts`): `interface OrderLine { line: number; photoId: string; tier: Tier; size: string; frame: Frame; quantity: number; unitAmount: number; name: string; thumb: PublicPreview | null }`; `orderLines(db, orderIds: string[]): Promise<Map<string, OrderLine[]>>`
-- Produces (`src/lib/prints/mail.ts`): `REPLY_TO = "hello@curiousgeorge.dev"`; `interface Mail { to: string; subject: string; text: string }`; `mailHtml(text: string): string`; `sendMail(deps, mail, about: string): Promise<boolean>`; `mailAdmin(deps, subject, text, about): Promise<boolean>`; `shippedText(lines, shipments, pageUrl): string`; `sendAttention(deps, orderId): Promise<void>`; `sendShipped(deps, orderId): Promise<void>`; `sendDueMail(deps): Promise<void>`
+- Produces (`src/lib/prints/mail.ts`): `sendAdminNote(deps, orderId): Promise<void>`; `REPLY_TO = "hello@curiousgeorge.dev"`; `interface Mail { to: string; subject: string; text: string }`; `mailHtml(text: string): string`; `sendMail(deps, mail, about: string): Promise<boolean>`; `mailAdmin(deps, subject, text, about): Promise<boolean>`; `shippedText(lines, shipments, pageUrl): string`; `sendAttention(deps, orderId): Promise<void>`; `sendShipped(deps, orderId): Promise<void>`; `sendDueMail(deps): Promise<void>`
 - Produces (e2e): the stand-in's `POST /__mail` and `GET /__mail`
 
 - [ ] **Step 1: Write the failing unit test**
@@ -5305,7 +5335,7 @@ describe("sending", () => {
     expect(email.send).not.toHaveBeenCalled();
     expect(sink).toHaveBeenCalledTimes(1);
     const broken = testDeps(deps.db, { email: { send: vi.fn(async () => { throw new Error("rejected"); }) } as unknown as SendEmail });
-    expect(await sendMail(broken, { to: "buyer@example.com", subject: "s", text: "t" }, "the shipped email for order x")).toBe(false);
+    expect(await sendMail(broken, { to: "buyer@example.com", subject: "s", text: "t" }, "shipped email for order x")).toBe(false);
     expect(logs()).toContain("prints: couldn't send the shipped email for order x");
     expect(logs()).not.toContain("buyer@example.com");
   });
@@ -5366,12 +5396,31 @@ describe("due mail", () => {
   });
 });
 
+describe("george's notes", () => {
+  test("a cancellation or a missed webhook is due until it goes: a failed send is given back and the cron sends it", async () => {
+    captureLogs();
+    const { db, deps } = await mailDeps();
+    const cancelled = await insertOrder(db, { id: "01k6x00000000000000000000a", status: "cancelled", admin_notified_at: 0 });
+    const reconciled = await insertOrder(db, { id: "01k6x00000000000000000000b", status: "paid", admin_notified_at: 0 });
+    const failing = { send: vi.fn(async () => { throw new Error("down"); }) };
+    await sendDueMail(testDeps(db, { email: failing as unknown as SendEmail }));
+    expect((await db.prepare("SELECT admin_notified_at FROM print_orders ORDER BY id").all()).results).toEqual([{ admin_notified_at: 0 }, { admin_notified_at: 0 }]);
+    await sendDueMail(deps);
+    await sendDueMail(deps);
+    expect(deps.email!.send).toHaveBeenCalledTimes(2);
+    expect(deps.email!.send).toHaveBeenCalledWith(expect.objectContaining({ to: "hello@curiousgeorge.dev", subject: `print order ${cancelled} was cancelled by artelo`, text: `artelo cancelled order ${cancelled}. refund it in stripe.` }));
+    expect(deps.email!.send).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${reconciled}: stripe's webhook never arrived`, text: `print order ${reconciled} was paid but stripe's webhook never arrived. check the webhook in stripe.` }));
+    expect((await db.prepare("SELECT admin_notified_at FROM print_orders ORDER BY id").all()).results).toEqual([{ admin_notified_at: NOW }, { admin_notified_at: NOW }]);
+  });
+});
+
 test("order lines name each photo, keep a hidden photo's name and leave out its thumbnail", async () => {
   const { db } = await mailDeps();
   const id = await insertOrder(db);
   await db.prepare("UPDATE photos SET published = 0 WHERE id = 'fixture-b-02'").run();
   const [first, second] = (await orderLines(db, [id])).get(id)!;
-  expect(first).toMatchObject({ line: 1, photoId: "fixture-b-01", tier: "medium", size: "x12x18", frame: "oak", quantity: 1, unitAmount: 17900, name: "photo 1 of 2 from 14.06.26" });
+  // The visible photo's name now counts only what is published; the hidden one counts itself ("Decisions")
+  expect(first).toMatchObject({ line: 1, photoId: "fixture-b-01", tier: "medium", size: "x12x18", frame: "oak", quantity: 1, unitAmount: 17900, name: "photo 1 of 1 from 14.06.26" });
   expect(first.thumb?.url).toMatch(/240\.webp$/);
   expect(second).toMatchObject({ name: "photo 2 of 2 from 14.06.26", thumb: null });
 });
@@ -5540,14 +5589,29 @@ export async function sendShipped(deps: PrintDeps, id: string): Promise<void> {
   if (!sent) await release(deps.db, id, "shipped_email_at", now);
 }
 
+/**
+ * George's email about an Artelo cancellation (refund the buyer) or a paid order Stripe's webhook missed: due while
+ * admin_notified_at is 0, claimed by setting the time and given back on failure so the cron tries again (spec 18.4)
+ */
+export async function sendAdminNote(deps: PrintDeps, id: string): Promise<void> {
+  const now = deps.now();
+  if ((await deps.db.prepare("UPDATE print_orders SET admin_notified_at = ? WHERE id = ? AND admin_notified_at = 0").bind(now, id).run()).meta.changes === 0) return;
+  const order = await getOrder(deps.db, id);
+  const sent = order?.status === "cancelled"
+    ? await mailAdmin(deps, `print order ${id} was cancelled by artelo`, `artelo cancelled order ${id}. refund it in stripe.`, `cancellation email for order ${id}`)
+    : await mailAdmin(deps, `print order ${id}: stripe's webhook never arrived`, `print order ${id} was paid but stripe's webhook never arrived. check the webhook in stripe.`, `missed-webhook email for order ${id}`);
+  if (!sent) await deps.db.prepare("UPDATE print_orders SET admin_notified_at = 0 WHERE id = ? AND admin_notified_at = ?").bind(id, now).run();
+}
+
 /** Every email that is due: from the cron's third step and right after any change that makes one due */
 export async function sendDueMail(deps: PrintDeps): Promise<void> {
   const { results } = await deps.db
-    .prepare("SELECT id, status FROM print_orders WHERE (status = 'needs_attention' AND attention_notified_at IS NULL) OR (status = 'shipped' AND shipped_email_at IS NULL) ORDER BY updated_at LIMIT 20")
+    .prepare("SELECT id, status, attention_notified_at, shipped_email_at, admin_notified_at FROM print_orders WHERE (status = 'needs_attention' AND attention_notified_at IS NULL) OR (status = 'shipped' AND shipped_email_at IS NULL) OR admin_notified_at = 0 ORDER BY updated_at LIMIT 20")
     .all();
-  for (const row of results as unknown as { id: string; status: string }[]) {
-    if (row.status === "shipped") await sendShipped(deps, row.id);
-    else await sendAttention(deps, row.id);
+  for (const row of results as unknown as { id: string; status: string; attention_notified_at: number | null; shipped_email_at: number | null; admin_notified_at: number | null }[]) {
+    if (row.status === "shipped" && row.shipped_email_at === null) await sendShipped(deps, row.id);
+    if (row.status === "needs_attention" && row.attention_notified_at === null) await sendAttention(deps, row.id);
+    if (row.admin_notified_at === 0) await sendAdminNote(deps, row.id);
   }
 }
 ```
@@ -5596,7 +5660,7 @@ Spec 1.2 step 9 (sections 18.2 and 19): `placeOrder` claims a paid order with a 
 
 **Interfaces:**
 - Consumes: `PrintDeps`, `PrintConfig` (Task 1); `parseSize`, `Frame`, `Orientation` (Task 2); `getOrder`, `OrderRow`, `OrderStatus`, `Shipment` (Task 3); `photoMaster`, `issueOrderGrant` (Task 3); `Address` (Task 4); `artelo`, `arteloAddress`, `productInfo`, `ArteloResult`, `readOrderCosts` (Task 4); `getPaymentIntent` (Task 7); `sendDueMail` (Task 8).
-- Produces (`src/lib/prints/artelo-status.ts`): `PENDING_REASON`; `STATUS_MAP: Record<string, OrderStatus>`; `ARTELO_STATUSES: string[]`; `mapStatus(status: unknown): OrderStatus | null`
+- Produces (`src/lib/prints/artelo-status.ts`): `PENDING_REASON`; `REFUND_REASON`; `STATUS_MAP: Record<string, OrderStatus>`; `ARTELO_STATUSES: string[]`; `mapStatus(status: unknown): OrderStatus | null`
 - Produces (`src/lib/prints/artelo.ts`): `interface ArteloOrder { id: string; orderId: string | null; status: string | null; costCents: number | null; shipments: Shipment[] | null }`; `unwrap(value: unknown): Record<string, unknown> | null`; `readShipments(value: unknown): Shipment[] | null`; `readArteloOrder(value: unknown): ArteloOrder | null`; `ordersList(value: unknown): unknown[] | null`
 - Produces (`src/lib/prints/store.ts`): `toAttention(db, id, reason, now): Promise<void>`
 - Produces (`src/lib/prints/place.ts`): `LEASE_SECONDS = 120`; `LINK_SECONDS = 259_200`; `nextDelay(attempt: number): number`; `type PlaceOutcome = "placed" | "adopted" | "not-due" | "retry" | "attention"`; `scrub(message: string, address: Address | null): string`; `placeOrder(deps, orderId): Promise<PlaceOutcome>`; `placeDue(deps): Promise<void>`
@@ -5619,7 +5683,7 @@ const CREATE = "POST https://artelo.test/orders/create";
 const INTENT = "GET https://stripe.test/v1/payment_intents/pi_test_place";
 const shipping = { name: ADDRESS.name, phone: ADDRESS.phone, address: { line1: ADDRESS.line1, line2: ADDRESS.line2, city: ADDRESS.city, state: ADDRESS.state, postal_code: ADDRESS.postcode, country: ADDRESS.country } };
 const accepted: Handler = async (request) => {
-  const body = await request.json();
+  const body = (await request.json()) as { orderId: string };
   return json({ id: "artelo-1", orderId: body.orderId, status: "Received", details: { productionCost: 80, arteloShipping: 30, usSalesTax: 0 } });
 };
 const world = (over: Record<string, Handler> = {}) => fakeFetch({ [LOOKUP]: () => json([]), [CREATE]: accepted, [INTENT]: () => json({ id: "pi_test_place", shipping }), ...over });
@@ -5693,7 +5757,7 @@ describe("placeOrder", () => {
   });
 
   test("an order not yet due, or no longer paid, isn't touched", async () => {
-    for (const columns of [{ next_attempt_at: NOW + 1 }, { status: "needs_attention" }, { status: "placed" }, { status: "refunded" }]) {
+    for (const columns of [{ next_attempt_at: NOW + 1 }, { status: "needs_attention" }, { status: "placed" }, { status: "refunded" }] as Record<string, string | number | null>[]) {
       const { fake, deps } = await setup({}, columns);
       expect(await placeOrder(deps, ORDER)).toBe("not-due");
       expect(fake.calls).toHaveLength(0);
@@ -5783,9 +5847,32 @@ describe("placeOrder", () => {
 
   test("artelo holding the order for action at once sends it to needs attention, adopted", async () => {
     captureLogs();
-    const { db, deps } = await setup({ [CREATE]: async (request) => json({ id: "artelo-9", orderId: (await request.json()).orderId, status: "PendingFulfillmentAction" }) });
+    const { db, deps } = await setup({ [CREATE]: async (request) => json({ id: "artelo-9", orderId: ((await request.json()) as { orderId: string }).orderId, status: "PendingFulfillmentAction" }) });
     await placeOrder(deps, ORDER);
     expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", artelo_order_id: "artelo-9", attention_reason: "artelo needs something before it can print: open the order in artelo." });
+  });
+
+  test("a full refund landing while artelo makes the order flags it for cancelling there; it is never lost", async () => {
+    captureLogs();
+    const holder: { db?: D1Database } = {};
+    const { db, deps } = await setup({
+      [CREATE]: async (request) => {
+        await holder.db!.prepare("UPDATE print_orders SET status = 'refunded', refunded_amount = 28700 WHERE id = ?").bind(ORDER).run();
+        return accepted(request);
+      },
+    });
+    holder.db = db;
+    await placeOrder(deps, ORDER);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", artelo_order_id: "artelo-1", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", lease_until: null });
+  });
+
+  test("each attempt revokes the last attempt's master links, so only one set works", async () => {
+    captureLogs();
+    const { db, deps } = await setup({ [CREATE]: () => json({}, 503) });
+    await placeOrder(deps, ORDER);
+    await placeOrder({ ...deps, now: () => NOW + 300 }, ORDER);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ?").bind(ORDER).first("n")).toBe(4);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(2);
   });
 
   test("a 2xx without an order id is retried, and the next attempt's lookup adopts what artelo made (review focus 5)", async () => {
@@ -5844,6 +5931,8 @@ import type { OrderStatus } from "./store";
 // Artelo's order statuses and what each means for an order here (spec 18.3)
 
 export const PENDING_REASON = "artelo needs something before it can print: open the order in artelo.";
+/** A full refund of an order Artelo has (spec 18.1), or reaches while it is being placed: George cancels it there */
+export const REFUND_REASON = "refunded in stripe: cancel it in artelo if it hasn't printed.";
 
 export const STATUS_MAP: Record<string, OrderStatus> = {
   ImagesProcessing: "placed",
@@ -5939,10 +6028,10 @@ export async function toAttention(db: D1Database, id: string, reason: string, no
 Create `src/lib/prints/place.ts`:
 
 ```ts
-import { issueOrderGrant, photoMaster } from "../photos/store";
+import { issueOrderGrant, photoMaster, revokeOrderGrants } from "../photos/store";
 import type { Address } from "./address";
 import { artelo, arteloAddress, ordersList, productInfo, readArteloOrder, type ArteloOrder, type ArteloResult } from "./artelo";
-import { mapStatus, PENDING_REASON } from "./artelo-status";
+import { mapStatus, PENDING_REASON, REFUND_REASON } from "./artelo-status";
 import { parseSize, type Frame, type Orientation } from "./catalogue";
 import type { PrintConfig, PrintDeps } from "./config";
 import { sendDueMail } from "./mail";
@@ -6019,6 +6108,8 @@ async function quotedAddress(deps: PrintDeps, order: OrderRow): Promise<Address>
 async function masterLinks(deps: PrintDeps, orderId: string, items: readonly Item[]): Promise<Map<string, { url: string; orientation: Orientation }>> {
   const secret = deps.config.secrets.PHOTO_LINK_SECRET;
   if (!secret) throw new Permanent("PHOTO_LINK_SECRET isn't set.");
+  // The last attempt's links go first: this runs only after the lookup found nothing at Artelo, so nothing needs them
+  await revokeOrderGrants(deps.db, orderId, deps.now());
   const links = new Map<string, { url: string; orientation: Orientation }>();
   for (const photoId of new Set(items.map((item) => item.photo_id))) {
     const photo = await photoMaster(deps.db, photoId);
@@ -6061,10 +6152,21 @@ function refusal(result: Extract<ArteloResult, { ok: false }>, address: Address)
 async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Promise<void> {
   const now = deps.now();
   const status = mapStatus(found.status) ?? "placed";
-  await deps.db
+  const result = await deps.db
     .prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, shipments = COALESCE(?, shipments), placed_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'paid'")
     .bind(status, status === "needs_attention" ? PENDING_REASON : null, found.id, found.status, found.costCents, found.shipments ? JSON.stringify(found.shipments) : null, now, now, order.id)
     .run();
+  if (result.meta.changes === 0) {
+    // The order left paid while this attempt held the lease: a full refund landed. Artelo has it all the same, so it
+    // keeps Artelo's id and needs George to cancel it there, never silently printed for a refunded buyer
+    await deps.db
+      .prepare("UPDATE print_orders SET artelo_order_id = ?, artelo_status = ?, artelo_cost = ?, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ?")
+      .bind(found.id, found.status, found.costCents, REFUND_REASON, now, order.id)
+      .run();
+    console.error("prints: order", order.id, "reached artelo after it left paid, so it was flagged for george");
+    await sendDueMail(deps);
+    return;
+  }
   if (status === "needs_attention") await sendDueMail(deps);
 }
 
@@ -6167,6 +6269,8 @@ route("POST", "/orders/create", async ({ body, headers }) => {
   const order = JSON.parse(body);
   const mode = artelo.modes.get(order.orderId) ?? "ok";
   received.orders.push({ orderId: order.orderId, mode });
+  // Artelo refuses a design under 150 dpi unless dangerouslySkipDPICheck is set; the only png here is the margin check's share card
+  if (order.items.some((item) => item.productInfo.designs?.[0]?.sourceImage?.url.endsWith(".png")) && !order.dangerouslySkipDPICheck) return [400, { message: "the dpi of one or more designs falls below the 150 threshold" }];
   if (mode === "down") return [503, "<html><body>service unavailable</body></html>"];
   if (mode && typeof mode === "object" && mode.refuse) {
     const item = order.items.find((entry) => entry.productInfo.designs?.[0]?.sourceImage?.url.includes(`/photos/downloads/${mode.refuse}?`));
@@ -6211,10 +6315,10 @@ Spec 1.2 step 8 (sections 18.1, 18.6 step 2 and 19): `POST /api/prints/stripe` v
 - Test: the two new unit tests, `tests/unit/gate.test.ts`, `tests/unit/middleware.test.ts` (unchanged, must pass), `tests/e2e/prints-order.spec.ts`
 
 **Interfaces:**
-- Consumes: `PrintDeps`, `printDeps` (Task 1); `offerFor`, `printsFor`, `isTier`, `isFrame` (Task 2); `getOrder`, `OrderRow`, `loadPrices` (Task 3); `photoMaster` (Task 3); `StripeSession`, `getSession`, `expireSession`, `stripe` (Task 7); `markExpired` (Task 7); `mailAdmin`, `sendDueMail` (Task 8); `placeOrder` (Task 9); `fromB64url`-style hex decoding is written here.
+- Consumes: `PrintDeps`, `printDeps` (Task 1); `offerFor`, `printsFor`, `isTier`, `isFrame` (Task 2); `getOrder`, `OrderRow`, `loadPrices` (Task 3); `photoMaster`, `revokeOrderGrants` (Task 3); `StripeSession`, `getSession`, `expireSession`, `stripe` (Task 7); `markExpired` (Task 7); `sendAdminNote`, `sendDueMail` (Task 8); `placeOrder`, `REFUND_REASON` (Task 9); `fromB64url`-style hex decoding is written here.
 - Produces (`src/lib/prints/stripe.ts`): `SIGNATURE_TOLERANCE = 300`; `fromHex(text: string): Uint8Array | null`; `verifyStripeSignature(secret, header: string | null, body: string, now: number): Promise<boolean>`
 - Produces (`src/lib/prints/http.ts`): `readCapped(request: Request, limit: number): Promise<string | "big" | null>`; `jsonAnswer(value: unknown, status: number): Response`
-- Produces (`src/lib/prints/stripe-events.ts`): `interface StripeEvent { id: string; type: string; livemode: boolean; data: { object: Record<string, unknown> } }`; `readEvent(value: unknown): StripeEvent | null`; `MISMATCH_REASON`, `MISSING_REASON`, `REFUND_REASON`; `type PaidOutcome = "paid" | "attention" | "unchanged" | "recreated" | "unpaid"`; `applyPaid(deps, session: StripeSession, before: D1PreparedStatement[], livemode?: boolean): Promise<PaidOutcome>`; `handleStripeEvent(deps, event): Promise<200 | 500>`; `RECONCILE_AFTER = 3900`; `reconcileCheckouts(deps): Promise<void>`
+- Produces (`src/lib/prints/stripe-events.ts`): `interface StripeEvent { id: string; type: string; livemode: boolean; data: { object: Record<string, unknown> } }`; `readEvent(value: unknown): StripeEvent | null`; `MISMATCH_REASON`, `MODE_REASON`, `MISSING_REASON` (`REFUND_REASON` comes from Task 9's `artelo-status.ts`); `type PaidOutcome = "paid" | "attention" | "unchanged" | "recreated" | "unpaid"`; `applyPaid(deps, session: StripeSession, before: D1PreparedStatement[], livemode?: boolean): Promise<PaidOutcome>`; `handleStripeEvent(deps, event): Promise<200 | 500>`; `RECONCILE_AFTER = 3900`; `reconcileCheckouts(deps): Promise<void>`
 - Produces (`src/lib/admin/gate.ts`): `WEBHOOK_PATHS`; `originAllowed` exempts exactly `POST /api/prints/stripe` and `POST /api/prints/artelo`
 - Produces (e2e, `tests/e2e/prints.ts`): `checkoutOrder(page, name, items?, site?)`, `payAtStandIn(sessionId, extra?)`, `stripeSignature(body, secret, t?)`, `deliverStripe(site, event, secret?)`, `waitForStatus(orderId, status, store?)`, `setMode(orderId, mode)`, `arteloOrdersFor(orderId)`, `mailFor(match)`, `runCron(site)`
 
@@ -6224,10 +6328,11 @@ Create `tests/unit/stripe-events.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { issueOrderGrant } from "../../src/lib/photos/store";
 import { applyPaid, handleStripeEvent, reconcileCheckouts, type StripeEvent } from "../../src/lib/prints/stripe-events";
 import { verifyStripeSignature } from "../../src/lib/prints/stripe";
 import { getOrder } from "../../src/lib/prints/store";
-import { captureLogs, fakeFetch, insertOrder, json, NOW, printDb, testDeps, type Handler } from "./prints-fakes";
+import { captureLogs, fakeFetch, insertOrder, json, NOW, PHOTO_KEY, printDb, testDeps, type Handler } from "./prints-fakes";
 
 const ORDER = "01k6x00000000000000000000a";
 const session = (over: Record<string, unknown> = {}) => ({
@@ -6348,11 +6453,13 @@ describe("the guard", () => {
 describe("refunds", () => {
   const refund = (amount_refunded: number, refunded: boolean, id = "evt_r") => event("charge.refunded", { payment_intent: `pi_test_${ORDER}`, amount: 28700, amount_refunded, refunded }, id);
 
-  test("a full refund before placement stops the retries", async () => {
+  test("a full refund before placement stops the retries and revokes the master links", async () => {
     const { db, deps } = await setup();
     await insertOrder(db, { id: ORDER });
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
     await handleStripeEvent(deps, refund(28700, true));
     expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", refunded_amount: 28700, refunded_at: NOW });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(0);
   });
 
   test("a full refund after placement needs attention, to cancel it at artelo", async () => {
@@ -6408,6 +6515,41 @@ describe("reconciliation", () => {
     expect(await events(db)).toEqual([]);
     expect(deps.waited).toHaveLength(1);
     expect(mail).toHaveBeenCalledWith(expect.objectContaining({ to: "hello@curiousgeorge.dev", subject: `print order ${ORDER}: stripe's webhook never arrived`, text: `print order ${ORDER} was paid but stripe's webhook never arrived. check the webhook in stripe.` }));
+    expect((await getOrder(db, ORDER))?.admin_notified_at).toBe(NOW);
+  });
+
+  test("the missed-webhook email stays due when its send fails, for the cron to retry", async () => {
+    const { db, deps } = await setup({ [SESSION]: () => json(session()) });
+    await checkout(db, { created_at: OLD });
+    await reconcileCheckouts(deps);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", admin_notified_at: 0 });
+  });
+
+  test("a session stripe doesn't know a day after it should have ended expires its order; a younger one waits its turn", async () => {
+    let { db, deps } = await setup({ [SESSION]: () => json({ error: {} }, 404) });
+    await checkout(db, { created_at: NOW - 25 * 3600 - 1 });
+    await reconcileCheckouts(deps);
+    expect((await getOrder(db, ORDER))?.status).toBe("expired");
+    ({ db, deps } = await setup({ [SESSION]: () => json({ error: {} }, 404) }));
+    await checkout(db, { created_at: OLD });
+    await reconcileCheckouts(deps);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "checkout", status_checked_at: NOW });
+  });
+
+  test("orders it has just read go to the back of the line, so twenty stuck ones can't hide a newer paid one", async () => {
+    captureLogs();
+    const db = await printDb();
+    const handlers: Record<string, Handler> = { [SESSION]: () => json(session()) };
+    for (let i = 0; i < 20; i++) {
+      await insertOrder(db, { id: `stuck-${i}`, status: "checkout", stripe_session_id: `cs_stuck_${i}`, stripe_payment_intent: null, paid_at: null, created_at: OLD - 1000 - i });
+      handlers[`GET https://stripe.test/v1/checkout/sessions/cs_stuck_${i}`] = () => json(session({ id: `cs_stuck_${i}`, status: "complete", payment_status: "unpaid" }));
+    }
+    await checkout(db, { created_at: OLD });
+    const fetch = fakeFetch(handlers).fetch;
+    await reconcileCheckouts(testDeps(db, { fetch }));
+    expect((await getOrder(db, ORDER))?.status).toBe("checkout");
+    await reconcileCheckouts(testDeps(db, { fetch, now: () => NOW + 300 }));
+    expect((await getOrder(db, ORDER))?.status).toBe("paid");
   });
 
   test("an open session is expired at stripe and left for the next run; an expired one expires its order", async () => {
@@ -6518,7 +6660,7 @@ Append to `src/lib/prints/stripe.ts`:
 /** Stripe's signed timestamp may be at most five minutes from now (spec 18.1) */
 export const SIGNATURE_TOLERANCE = 300;
 
-export function fromHex(text: string): Uint8Array | null {
+export function fromHex(text: string): Uint8Array<ArrayBuffer> | null {
   if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return null;
   return Uint8Array.from(text.match(/../g)!, (byte) => Number.parseInt(byte, 16));
 }
@@ -6583,10 +6725,11 @@ export const jsonAnswer = (value: unknown, status: number) =>
 Create `src/lib/prints/stripe-events.ts`:
 
 ```ts
-import { photoMaster } from "../photos/store";
+import { photoMaster, revokeOrderGrants } from "../photos/store";
+import { REFUND_REASON } from "./artelo-status";
 import { isFrame, isTier, offerFor, printsFor } from "./catalogue";
 import type { PrintDeps } from "./config";
-import { mailAdmin, sendDueMail } from "./mail";
+import { sendAdminNote, sendDueMail } from "./mail";
 import { placeOrder } from "./place";
 import { getOrder, loadPrices, markExpired, type OrderRow } from "./store";
 import { expireSession, getSession, type StripeSession } from "./stripe";
@@ -6612,8 +6755,6 @@ export function readEvent(value: unknown): StripeEvent | null {
 export const MISMATCH_REASON = "the amount paid differs from the quote";
 export const MODE_REASON = "stripe's test and live modes don't match this order; check it before it's placed.";
 export const MISSING_REASON = "the order row was missing; check it before it's placed.";
-export const REFUND_REASON = "refunded in stripe: cancel it in artelo if it hasn't printed.";
-
 export type PaidOutcome = "paid" | "attention" | "unchanged" | "recreated" | "unpaid";
 
 /** Why a paid session can't go straight to placing, or null. Adaptive Pricing is off, so any conversion is a mismatch */
@@ -6665,7 +6806,7 @@ export async function applyPaid(deps: PrintDeps, session: StripeSession, before:
   const reason = mismatch(order, session);
   const results = await db.batch([
     ...before,
-    db.prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, paid_at = ?, stripe_session_id = ?, stripe_payment_intent = ?, attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, updated_at = ? WHERE id = ? AND status IN ('checkout', 'expired')")
+    db.prepare("UPDATE print_orders SET status = ?, attention_reason = ?, attention_notified_at = NULL, paid_at = ?, stripe_session_id = ?, stripe_payment_intent = ?, attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, status_checked_at = NULL, updated_at = ? WHERE id = ? AND status IN ('checkout', 'expired')")
       .bind(reason ? "needs_attention" : "paid", reason, now, session.id, session.payment_intent, now + deps.config.retryWindow, now, now, order.id),
   ]);
   if (results.at(-1)!.meta.changes === 0) return "unchanged";
@@ -6712,6 +6853,8 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
         );
       }
       await db.batch(statements);
+      // Refunded before Artelo had it: nothing will be made, so its master links go now (Artelo's statuses revoke the rest)
+      if (object.refunded === true && order.artelo_order_id === null) await revokeOrderGrants(db, order.id, now);
       deps.waitUntil(sendDueMail(deps));
       return 200;
     }
@@ -6726,29 +6869,41 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
 
 /** Checkouts older than this are asked about: sessions expire after an hour */
 export const RECONCILE_AFTER = 65 * 60;
+/** A session Stripe doesn't know this long after its order began (a session lasts an hour) is gone for good */
+export const UNKNOWN_SESSION_AFTER = 25 * 3600;
 
-/** The cron's second step (spec 18.6): no paid order goes unnoticed, and nothing expires before Stripe is asked */
+/**
+ * The cron's second step (spec 18.6): no paid order goes unnoticed, and nothing expires before Stripe is asked. Each
+ * order read goes to the back of the line (status_checked_at), so twenty that stay checkout can't hide a newer paid one
+ */
 export async function reconcileCheckouts(deps: PrintDeps): Promise<void> {
   const { results } = await deps.db
-    .prepare("SELECT id, stripe_session_id FROM print_orders WHERE status = 'checkout' AND created_at < ? ORDER BY created_at LIMIT 20")
+    .prepare("SELECT id, stripe_session_id, created_at FROM print_orders WHERE status = 'checkout' AND created_at < ? ORDER BY COALESCE(status_checked_at, created_at), created_at LIMIT 20")
     .bind(deps.now() - RECONCILE_AFTER)
     .all();
-  for (const row of results as unknown as { id: string; stripe_session_id: string | null }[]) {
+  for (const row of results as unknown as { id: string; stripe_session_id: string | null; created_at: number }[]) {
     // Stripe never answered, so the buyer never saw a payment page
     if (!row.stripe_session_id) {
       await markExpired(deps.db, row.id, deps.now());
       continue;
     }
+    const now = deps.now();
+    await deps.db.prepare("UPDATE print_orders SET status_checked_at = ? WHERE id = ?").bind(now, row.id).run();
     const result = await getSession(deps, row.stripe_session_id);
     if (!result.ok) {
-      console.error("prints: couldn't read the session of order", row.id, result.status ?? "no answer");
+      if (result.status === 404 && row.created_at < now - UNKNOWN_SESSION_AFTER) {
+        await markExpired(deps.db, row.id, now);
+        console.error(`prints: order ${row.id}'s session is unknown to stripe; expired`);
+      } else console.error("prints: couldn't read the session of order", row.id, result.status ?? "no answer");
       continue;
     }
     const session = result.body as unknown as StripeSession;
     if (session.status === "complete" && session.payment_status === "paid") {
       const outcome = await applyPaid(deps, session, []);
       if (outcome === "paid" || outcome === "attention") {
-        await mailAdmin(deps, `print order ${row.id}: stripe's webhook never arrived`, `print order ${row.id} was paid but stripe's webhook never arrived. check the webhook in stripe.`, `missed-webhook email for order ${row.id}`);
+        // George's email is due until it goes: claimed and released like the others and retried by the cron (spec 18.4)
+        await deps.db.prepare("UPDATE print_orders SET admin_notified_at = 0 WHERE id = ?").bind(row.id).run();
+        await sendAdminNote(deps, row.id);
       }
     } else if (session.status === "expired") {
       await markExpired(deps.db, row.id, deps.now());
@@ -6872,10 +7027,14 @@ export async function mailFor(match: string) {
   return (await standIn<{ to: string; subject: string; text: string; html: string; replyTo: string; from: { email: string; name: string } }[]>("/__mail")).filter((mail) => mail.subject.includes(match) || mail.text.includes(match));
 }
 
-/** Runs the prints cron once (wrangler dev --test-scheduled) */
+/**
+ * Runs the prints cron once through wrangler's local explorer, as snapshots-live.spec.ts does: GET /__scheduled can't
+ * reach a Worker built with no_bundle
+ */
 export async function runCron(site = PRINTS) {
-  const response = await fetch(`${site}/__scheduled?cron=*/5+*+*+*+*`);
-  if (!response.ok) throw new Error(`the cron answered ${response.status}`);
+  const response = await fetch(`${site}/cdn-cgi/local/explorer/api/local/scheduled?worker=personal-website`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cron: "*/5 * * * *" }) });
+  const answer = (await response.json().catch(() => null)) as { success?: boolean } | null;
+  if (!response.ok || !answer?.success) throw new Error(`the cron answered ${response.status}`);
 }
 ```
 
@@ -6984,7 +7143,7 @@ Spec 1.2 step 10 (section 18.3): `POST /api/prints/artelo` verifies Artelo's hex
 - Test: the two new unit tests, `tests/e2e/prints-order.spec.ts`
 
 **Interfaces:**
-- Consumes: `PrintDeps`, `printDeps` (Task 1); `getOrder`, `writeSetting`, `OrderRow`, `OrderStatus`, `Shipment` (Task 3); `revokeOrderGrants` (Task 3); `artelo` (Task 4); `fromHex` (Task 10); `mailAdmin`, `sendDueMail` (Task 8); `mapStatus`, `PENDING_REASON` (Task 9); `unwrap`, `readShipments`, `readArteloOrder` (Task 9); `readCapped`, `jsonAnswer` (Task 10).
+- Consumes: `PrintDeps`, `printDeps` (Task 1); `getOrder`, `writeSetting`, `OrderRow`, `OrderStatus`, `Shipment` (Task 3); `revokeOrderGrants` (Task 3); `artelo` (Task 4); `fromHex` (Task 10); `sendDueMail`, `sendAdminNote` (Task 8); `mapStatus`, `PENDING_REASON` (Task 9); `unwrap`, `readShipments`, `readArteloOrder` (Task 9); `readCapped`, `jsonAnswer` (Task 10).
 - Produces (`src/lib/prints/artelo-updates.ts`): `interface ArteloUpdate { orderId: string; status: string; shipments: Shipment[] | null }`; `readArteloUpdate(value: unknown): ArteloUpdate | null`; `verifyArteloSignature(secret, header: string | null, raw: string): Promise<boolean>`; `type UpdateOutcome = "applied" | "ignored" | "unknown"`; `applyArteloUpdate(deps, update): Promise<UpdateOutcome>`; `POLL_AFTER = 43_200`; `pollStatuses(deps, pause?: (ms: number) => Promise<void>): Promise<void>`
 - Produces (e2e): the stand-in's `GET /orders/get-by-id`, `POST /__ship` (`{ site, order, status?, wrap? }`, signs and delivers an `OrderStatusChange`) and `POST /__status` (`{ order, status }`, changes the stand-in's order without a webhook); in `tests/e2e/prints.ts`: `placedOrder(page, name)`, `ship(site, orderId, status?)`
 
@@ -7041,10 +7200,13 @@ describe("applying a status", () => {
   test("artelo needing something sends a placed order to needs attention and emails george; after production it is ignored", async () => {
     let { db, deps } = await setup();
     expect(await applyArteloUpdate(deps, update("PendingFulfillmentAction"))).toBe("applied");
-    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: "artelo needs something before it can print: open the order in artelo.", attention_notified_at: null });
     expect(deps.waited).toHaveLength(1);
+    // The email's claim runs at once; with no binding here it is released, so wait for that before reading the row
+    await Promise.all(deps.waited);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: "artelo needs something before it can print: open the order in artelo.", attention_notified_at: null });
     // A later status moves it on and clears the attention
     await db.prepare("UPDATE print_orders SET attention_notified_at = 1 WHERE id = ?").bind(ORDER).run();
+    await Promise.all(deps.waited);
     expect(await applyArteloUpdate(deps, update("InProduction"))).toBe("applied");
     expect(await getOrder(db, ORDER)).toMatchObject({ status: "in_production", attention_reason: null, attention_notified_at: null });
     ({ db, deps } = await setup({ status: "in_production" }));
@@ -7076,6 +7238,20 @@ describe("applying a status", () => {
     await applyArteloUpdate(deps, update("Canceled"));
     await Promise.all(deps.waited);
     expect(mail).not.toHaveBeenCalled();
+  });
+
+  test("a needs attention this site set (a refund to cancel at artelo) isn't cleared by artelo's later statuses", async () => {
+    const { db, deps } = await setup({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed." });
+    expect(await applyArteloUpdate(deps, update("InProduction"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", artelo_status: "InProduction" });
+    expect(await applyArteloUpdate(deps, update("Canceled"))).toBe("applied");
+    expect((await getOrder(db, ORDER))?.status).toBe("cancelled");
+  });
+
+  test("a status for an order still being placed is only recorded, so the next attempt's lookup adopts it", async () => {
+    const { db, deps } = await setup({ status: "paid", artelo_order_id: null });
+    expect(await applyArteloUpdate(deps, update("Received", null, ORDER))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", artelo_order_id: null, artelo_status: "Received" });
   });
 
   test("a status this site doesn't map changes nothing but artelo's status; an unknown order is unknown", async () => {
@@ -7211,7 +7387,7 @@ import { revokeOrderGrants } from "../photos/store";
 import { artelo, readArteloOrder, readShipments, unwrap } from "./artelo";
 import { mapStatus, PENDING_REASON } from "./artelo-status";
 import type { PrintDeps } from "./config";
-import { mailAdmin, sendDueMail } from "./mail";
+import { sendDueMail } from "./mail";
 import { getOrder, type OrderRow, type OrderStatus, type Shipment } from "./store";
 import { fromHex } from "./stripe";
 
@@ -7251,8 +7427,9 @@ export async function verifyArteloSignature(secret: string, header: string | nul
   return false;
 }
 
-/** needs_attention set by Artelo ranks with placed; checkout and expired orders never get Artelo statuses */
-const RANK: Partial<Record<OrderStatus, number>> = { paid: 0, placed: 1, needs_attention: 1, in_production: 2, shipped: 3, delivered: 4 };
+/** needs_attention set by Artelo ranks with placed; an order not yet Artelo's (checkout, expired, paid) has no rank */
+const RANK: Partial<Record<OrderStatus, number>> = { placed: 1, needs_attention: 1, in_production: 2, shipped: 3, delivered: 4 };
+const NOT_YET_ARTELOS: ReadonlySet<OrderStatus> = new Set(["checkout", "expired", "paid"]);
 const FINAL: ReadonlySet<OrderStatus> = new Set(["cancelled", "delivered", "refunded"]);
 /** Once in production nothing needs the masters, and after a cancellation neither ("Decisions") */
 const REVOKES: ReadonlySet<OrderStatus> = new Set(["in_production", "shipped", "delivered", "cancelled"]);
@@ -7273,13 +7450,26 @@ export async function applyArteloUpdate(deps: PrintDeps, update: ArteloUpdate): 
     if (!target) console.log("prints: artelo sent order", order.id, "a status this site doesn't map:", update.status);
     return "ignored";
   }
+  // Still being placed (an answer lost, say): only recorded, so placement's next lookup adopts the order properly rather
+  // than leaving it placed with no Artelo id, where neither placement nor the poll would ever look at it again
+  if (NOT_YET_ARTELOS.has(order.status)) {
+    await record();
+    return "ignored";
+  }
+  // A needs_attention this site set (a refund to cancel at Artelo, say) isn't Artelo's to clear: only needs_attention set
+  // by Artelo ranks with placed (spec 18.3). A cancellation still ends it
+  if (order.status === "needs_attention" && order.attention_reason !== PENDING_REASON && target !== "cancelled") {
+    await record();
+    return "ignored";
+  }
   if (target === "cancelled") {
-    await db.prepare("UPDATE print_orders SET status = 'cancelled', attention_reason = NULL, artelo_status = ?, status_checked_at = ?, lease_until = NULL, updated_at = ? WHERE id = ?").bind(update.status, now, now, order.id).run();
+    // George's email is due unless the buyer is already refunded in full; it is sent and retried like the others (spec 18.4)
+    await db
+      .prepare("UPDATE print_orders SET status = 'cancelled', attention_reason = NULL, artelo_status = ?, status_checked_at = ?, lease_until = NULL, admin_notified_at = CASE WHEN COALESCE(refunded_amount, 0) < print_total + delivery_amount THEN 0 ELSE NULL END, updated_at = ? WHERE id = ?")
+      .bind(update.status, now, now, order.id)
+      .run();
     await revokeOrderGrants(db, order.id, now);
-    // Left out when the buyer is already refunded in full
-    if ((order.refunded_amount ?? 0) < order.print_total + order.delivery_amount) {
-      deps.waitUntil(mailAdmin(deps, `print order ${order.id} was cancelled by artelo`, `artelo cancelled order ${order.id}. refund it in stripe.`, `cancellation email for order ${order.id}`));
-    }
+    deps.waitUntil(sendDueMail(deps));
     return "applied";
   }
   if (target === "needs_attention") {
@@ -8106,7 +8296,7 @@ Spec 1.2 step 13 (sections 18.5, 13.3 and 21.1): `/prints/<order id>?key=<view k
 
 **Files:**
 - Create: `src/pages/prints/[id].astro`, `src/components/prints/Order.astro`, `src/lib/prints/order-page.ts`, `tests/unit/order-page.test.ts`
-- Modify: `src/layouts/Notebook.astro`, `src/lib/photos/http.ts`, `src/lib/ingest.ts`, `src/styles/prints.css`, `tests/unit/middleware.test.ts`, `tests/unit/ingest.test.ts`, `tests/e2e/prints-order.spec.ts`
+- Modify: `src/layouts/Notebook.astro`, `src/lib/photos/http.ts`, `src/middleware.ts`, `src/lib/ingest.ts`, `src/styles/prints.css`, `tests/unit/middleware.test.ts`, `tests/unit/ingest.test.ts`, `tests/e2e/prints-order.spec.ts`
 - Test: `tests/unit/order-page.test.ts`, `tests/unit/middleware.test.ts`, `tests/unit/ingest.test.ts`, `tests/unit/notebook.test.ts` (unchanged, must pass), `tests/e2e/prints-order.spec.ts`
 
 **Interfaces:**
@@ -8141,7 +8331,7 @@ describe("the order page", () => {
     const doc = await render(Order, { ...(await load({ status: "placed" })), gst: GST });
     expect(labels(doc)).toEqual(["your order", "status", "say hi"]);
     expect(text(doc.querySelector("h1"))).toBe("your prints");
-    expect([...doc.querySelectorAll(".basket-line")].map((line) => text(line))).toEqual(["photo 1 of 2 from 14.06.26 medium · 12 × 18 in · oak frame", "photo 2 of 2 from 14.06.26 small · 8 × 12 in · unframed"]);
+    expect([...doc.querySelectorAll(".basket-line")].map((line) => [text(line.querySelector(".line-name")), text(line.querySelector(".line-what"))])).toEqual([["photo 1 of 2 from 14.06.26", "medium · 12 × 18 in · oak frame"], ["photo 2 of 2 from 14.06.26", "small · 8 × 12 in · unframed"]]);
     expect(doc.querySelector(".basket-line img")!.getAttribute("width")).toBe("160");
     expect([...doc.querySelectorAll(".order-facts p")].map(text)).toEqual(["to australia", "prints $238 + delivery $49 = $287", GST, "paid 08.10.26"]);
     expect(text(doc.querySelector(".order-status"))).toBe("they're with the printer.");
@@ -8185,6 +8375,14 @@ describe("the order page", () => {
     expect([...doc.querySelectorAll(".order-facts p")].map(text)).not.toContain("paid 08.10.26");
   });
 
+  test("a recreated order's line with no artelo size still reads", async () => {
+    const db = await printDb();
+    await insertOrder(db, { id: ORDER, status: "needs_attention" }, [["fixture-b-01", "medium", "oak", 1]]);
+    await db.prepare("UPDATE print_order_items SET size = '' WHERE order_id = ?").bind(ORDER).run();
+    const doc = await render(Order, { order: (await getOrder(db, ORDER))!, lines: (await orderLines(db, [ORDER])).get(ORDER)!, gst: GST });
+    expect(text(doc.querySelector(".line-what"))).toBe("medium · oak frame");
+  });
+
   test("the notebook refreshes a page only when asked", async () => {
     const asked = await render(Notebook, { title: "t", noindex: true, refresh: 10 });
     expect(asked.querySelector('meta[http-equiv="refresh"]')!.getAttribute("content")).toBe("10");
@@ -8205,6 +8403,14 @@ test("an order page is private too: never cached, indexed or passed on as a refe
     expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
   }
   for (const path of ["/prints", "/printsx", "/basket"]) expect(isPrivatePath(path)).toBe(false);
+});
+
+test("an order page that throws says so in its own words, still private", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await run("/prints/01k6x00000000000000000000a?key=private", () => Promise.reject(new Error("down")));
+  expect(response.status).toBe(503);
+  expect(await response.text()).toBe("this page isn't loading right now. try again in a bit.");
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
 });
 ```
 
@@ -8255,7 +8461,7 @@ Create `src/components/prints/Order.astro`:
 ```astro
 ---
 import Row from "../Row.astro";
-import { parseSize, printLine } from "../../lib/prints/catalogue";
+import { frameLabel, parseSize, printLine } from "../../lib/prints/catalogue";
 import { countryName } from "../../lib/prints/countries";
 import { aud } from "../../lib/prints/money";
 import { ORDER_STATUS_LINES } from "../../lib/prints/order-page";
@@ -8286,7 +8492,8 @@ const shipments = order.status === "shipped" ? shipmentsOf(order) : [];
           {line.thumb && <img src={line.thumb.url} width={line.thumb.width} height={line.thumb.height} alt="" loading="eager" decoding="async" />}
           <div>
             <p class="line-name">{line.name}</p>
-            <p class="line-what">{printLine(line.tier, parseSize(line.size), line.frame)}{line.quantity > 1 && ` × ${line.quantity}`}</p>
+            {/* A recreated order's line may have no Artelo size (spec 18.1): it still reads */}
+            <p class="line-what">{line.size ? printLine(line.tier, parseSize(line.size), line.frame) : `${line.tier} · ${frameLabel(line.frame)}`}{line.quantity > 1 && ` × ${line.quantity}`}</p>
           </div>
         </li>
       ))}
@@ -8399,6 +8606,16 @@ export const isPrivatePath = (pathname: string) =>
   pathname === "/api/photos/downloads" || pathname === "/api/photos/downloads/" || pathname === "/photos/downloads" || pathname.startsWith("/photos/downloads/") || pathname.startsWith("/prints/");
 ```
 
+In `src/middleware.ts`, replace the private paths' `catch` line, `catch { console.error("photos: route unavailable"); response = plain("Downloads are temporarily unavailable.", 503); }`, with:
+
+```ts
+      catch {
+        // An order page has its own words; the downloads keep theirs
+        console.error(url.pathname.startsWith("/prints/") ? "prints: an order page failed" : "photos: route unavailable");
+        response = plain(url.pathname.startsWith("/prints/") ? "this page isn't loading right now. try again in a bit." : "Downloads are temporarily unavailable.", 503);
+      }
+```
+
 In `src/lib/ingest.ts`, replace `isDownloadsUrl` with:
 
 ```ts
@@ -8502,7 +8719,7 @@ Then shoot `http://localhost:4336/prints/01k6x00000000000000000000b?key=$KEY` at
 - [ ] **Step 9: Commit**
 
 ```bash
-git add "src/pages/prints/[id].astro" src/components/prints/Order.astro src/lib/prints/order-page.ts src/layouts/Notebook.astro src/lib/photos/http.ts src/lib/ingest.ts src/styles/prints.css tests/unit/order-page.test.ts tests/unit/middleware.test.ts tests/unit/ingest.test.ts tests/e2e/prints.ts tests/e2e/prints-order.spec.ts
+git add "src/pages/prints/[id].astro" src/components/prints/Order.astro src/lib/prints/order-page.ts src/layouts/Notebook.astro src/lib/photos/http.ts src/middleware.ts src/lib/ingest.ts src/styles/prints.css tests/unit/order-page.test.ts tests/unit/middleware.test.ts tests/unit/ingest.test.ts tests/e2e/prints.ts tests/e2e/prints-order.spec.ts
 git commit -m "feat: the buyer's private order page, refreshing until the payment lands; /prints/ is private and never counted"
 ```
 
@@ -8510,7 +8727,7 @@ git commit -m "feat: the buyer's private order page, refreshing until the paymen
 
 ### Task 14: the margin check, the webhook script and the daily jobs
 
-Spec 1.2 step 14 (sections 17.5 and 18.6 step 5): `bun run prints:check` checks every size and frame against Artelo's costs and Price Check at five landmark addresses, fails on a refused combination or a margin under 15%, warns under 30% or when a quote drifts from the catalogue, prints Antarctica's answer and proves the order lookup the duplicate guard needs. `bun run prints:webhook` saves Artelo's webhook for every status and pipes its secret straight to the Worker's secret store. The cron's daily jobs check the webhook is still there and clear out old expired orders and Stripe events. Neither script is in CI (both need the live key); their tests run them against the stand-in.
+Spec 1.2 step 14 (sections 17.5 and 18.6 step 5): `bun run prints:check` checks every size and frame against Artelo's costs and Price Check at five landmark addresses, fails on a refused combination or a margin under 15%, warns under 30% or when a quote drifts from the catalogue, prints Antarctica's answer and proves the order lookup the duplicate guard needs. `bun run prints:webhook` saves Artelo's webhook for every status a real order goes through and pipes its secret straight to the Worker's secret store. The cron's daily jobs check the webhook is still there and clear out old expired orders and Stripe events. Neither script is in CI (both need the live key); their tests run them against the stand-in.
 
 **Files:**
 - Create: `src/lib/prints/margin.ts`, `src/lib/prints/daily.ts`, `scripts/print-check.mjs`, `scripts/artelo-webhook.mjs`, `tests/unit/margin.test.ts`, `tests/unit/daily.test.ts`, `tests/e2e/prints-scripts.spec.ts`
@@ -8570,9 +8787,10 @@ Create `tests/unit/daily.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { daily } from "../../src/lib/prints/cron";
 import { checkArteloWebhook, cleanUp } from "../../src/lib/prints/daily";
 import { readSettings } from "../../src/lib/prints/store";
-import { captureLogs, fakeFetch, insertOrder, json, NOW, printDb, testDeps, type Handler } from "./prints-fakes";
+import { captureLogs, fakeFetch, insertOrder, json, NOW, printDb, testConfig, testDeps, type Handler } from "./prints-fakes";
 
 const HOOKS = "GET https://artelo.test/webhooks/get";
 const withHooks = async (handler: Handler) => {
@@ -8596,6 +8814,15 @@ describe("the webhook check", () => {
     expect(await checkArteloWebhook(deps)).toBe(true);
     expect((await readSettings(db)).webhookMissing).toBe(true);
     expect(mail).toHaveBeenCalledWith(expect.objectContaining({ to: "hello@curiousgeorge.dev", subject: "the artelo webhook is missing" }));
+  });
+
+  test("with no artelo key yet (before launch), nothing is asked and the day counts as checked", async () => {
+    const db = await printDb();
+    const fake = fakeFetch({});
+    const deps = testDeps(db, { fetch: fake.fetch, config: testConfig({ secrets: { ...testConfig().secrets, ARTELO_API_KEY: "" } }) });
+    await daily(deps, "webhook_check", () => checkArteloWebhook(deps));
+    expect(fake.calls).toHaveLength(0);
+    expect((await readSettings(db)).daily.webhook_check).toBe(NOW);
   });
 
   test("artelo unreachable or unreadable decides nothing and is tried again", async () => {
@@ -8721,6 +8948,8 @@ export function webhooksList(value: unknown): unknown[] | null {
 
 /** Artelo lists a webhook with our URL and topic, or /admin and an email say it's missing; true once it has decided */
 export async function checkArteloWebhook(deps: PrintDeps): Promise<boolean> {
+  // Before launch there is no key: decided for the day, rather than a refused call every five minutes
+  if (!deps.config.secrets.ARTELO_API_KEY) return true;
   const result = await artelo(deps, "GET", "/webhooks/get");
   if (!result.ok) {
     console.error("prints: couldn't list artelo's webhooks", result.status ?? "no answer");
@@ -8828,7 +9057,8 @@ const warn = (text) => {
 const refused = (result) => `${result.status ?? "no answer"}${result.message ? `: ${result.message}` : ""}`;
 const pct = (share) => `${Math.round(share * 100)}%`;
 
-// The prices, the buffer and the rate from the chosen D1
+// The prices, the buffer and the rate from the chosen D1. Reads only: with --local this can be a running test server's
+// store (the scripts spec opens 4337's), so nothing here may ever write
 const platform = await photoPlatform({ remote: args.includes("--remote"), persistTo: arg("--persist-to") ?? ".wrangler/state" });
 let prices;
 let settings;
@@ -8852,7 +9082,8 @@ for (const combination of COMBINATIONS) {
   const price = prices[`${combination.tier}:${combination.frame}`];
   const catalogue = {};
   for (const country of ["AU", "US"]) {
-    const result = await call("POST", "/catalog/get-costs", { catalogProductId: "IndividualArtPrint", size: combination.size.size, frameStyle: combination.frame === "oak" ? "Oak" : null, paperType: "ArchivalMatteFineArt", country, quantity: 1 });
+    // Get Catalog Product Costs' required fields: shippingDestination, the three booleans and a listed frameStyle
+    const result = await call("POST", "/catalog/get-costs", { catalogProductId: "IndividualArtPrint", size: combination.size.size, frameStyle: combination.frame === "oak" ? "Oak" : "Unframed", includeMats: false, includeFramingService: false, includeHangingPins: false, paperType: "ArchivalMatteFineArt", shippingDestination: country, quantity: 1 });
     if (!result.ok) {
       fail(`${name}: artelo refused its catalogue costs to ${country} (${refused(result)})`);
       continue;
@@ -8913,6 +9144,9 @@ const checkId = `check-${Date.now()}`;
 const created = await call("POST", "/orders/create", {
   orderId: checkId, createdAt: new Date().toISOString(), currency: "AUD", total: prices["small:unframed"] / 100, shippingCost: 0, channelName: "curiousgeorge.dev",
   companyName: "george vlachos", isTestOrder: true, customerAddress: arteloAddress(LANDMARKS[0].address),
+  // Only this test order skips the DPI check: its image is the 1200 × 630 share card, about 100 ppi at 8 × 12 in. Real
+  // orders never send it (Task 9's test pins that)
+  dangerouslySkipDPICheck: true,
   items: [{ orderItemId: `${checkId}-1`, quantity: 1, unitPrice: prices["small:unframed"] / 100, productInfo: productInfo({ size: small.size, frame: "unframed", orientation: "Vertical" }, "https://curiousgeorge.dev/og.png") }],
 });
 if (!created.ok) fail(`lookup check: artelo refused the test order (${refused(created)})`);
@@ -8959,7 +9193,8 @@ const base = (process.env.ARTELO_API_BASE ?? "https://www.artelo.com/api/open").
 const response = await fetch(`${base}/webhooks/save`, {
   method: "POST",
   headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "application/json" },
-  body: JSON.stringify({ topic: "OrderStatusChange", url: `${origin}/api/prints/artelo`, filters: { statuses: ARTELO_STATUSES } }),
+  // Ignored is a test order's end and isn't among Save Webhook's filter values; test orders never need a webhook
+  body: JSON.stringify({ topic: "OrderStatusChange", url: `${origin}/api/prints/artelo`, filters: { statuses: ARTELO_STATUSES.filter((status) => status !== "Ignored") } }),
   signal: AbortSignal.timeout(15_000),
 });
 if (!response.ok) {
@@ -8994,7 +9229,14 @@ In `tests/fixtures/artelo-site.mjs`, add above the line `// Routes added by late
 ```js
 // Catalogue costs (US$40.00 production and US$20.00 shipping for everything) and webhooks, for the two scripts
 const hooks = [];
-route("POST", "/catalog/get-costs", ({ headers }) => (keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY) ? [200, { productionCost: 40, shippingCost: 20 }] : [401, { message: "invalid api key" }]));
+route("POST", "/catalog/get-costs", ({ body, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  // The fields Artelo's reference marks required, so the margin check can't drift from them unnoticed
+  const query = JSON.parse(body);
+  const booleans = ["includeMats", "includeFramingService", "includeHangingPins"].every((name) => typeof query[name] === "boolean");
+  if (!query.shippingDestination || !booleans || !["PremiumMetal", "PremiumOak", "Unframed", "Metal", "Oak"].includes(query.frameStyle)) return [400, { message: "shippingDestination, includeMats, includeFramingService, includeHangingPins and a listed frameStyle are required" }];
+  return [200, { productionCost: 40, shippingCost: 20 }];
+});
 route("POST", "/webhooks/save", ({ body, headers }) => {
   if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
   const hook = { ...JSON.parse(body), id: `hook-${hooks.length + 1}`, secret: `artelo-hook-secret-${hooks.length + 1}-${Date.now().toString(36)}` };
@@ -9019,7 +9261,7 @@ import { FIXTURE_SECRETS, PRINTS, STAND_IN } from "./prints-site";
 // Both scripts against the stand-in and the prints server's own store; never against Artelo or George's stores
 test.skip(({ browserName }) => browserName !== "chromium", "the print specs run in chromium");
 
-test("prints:webhook saves the webhook for every status and pipes its secret straight to the store, printing one line", async () => {
+test("prints:webhook saves the webhook for every real status and pipes its secret straight to the store, printing one line", async () => {
   const folder = mkdtempSync(join(tmpdir(), "prints-webhook-"));
   const sink = join(folder, "sink.mjs");
   const stored = join(folder, "secret.txt");
@@ -9030,7 +9272,7 @@ test("prints:webhook saves the webhook for every status and pipes its secret str
   expect(result.status).toBe(0);
   expect(result.stdout).toBe("webhook saved; its secret went to the local sink.\n");
   const hook = (await standIn<{ url: string; topic: string; filters: { statuses: string[] }; secret: string }[]>("/__hooks")).findLast((entry) => entry.url === `${PRINTS}/api/prints/artelo`)!;
-  expect(hook).toMatchObject({ topic: "OrderStatusChange", filters: { statuses: ["ImagesProcessing", "Received", "Ignored", "PendingFulfillmentAction", "InProduction", "Shipped", "Delivered", "Canceled"] } });
+  expect(hook).toMatchObject({ topic: "OrderStatusChange", filters: { statuses: ["ImagesProcessing", "Received", "PendingFulfillmentAction", "InProduction", "Shipped", "Delivered", "Canceled"] } });
   expect(readFileSync(stored, "utf8")).toBe(hook.secret);
   expect(result.stdout + result.stderr).not.toContain(hook.secret);
 });
@@ -9092,10 +9334,12 @@ In `playwright.config.ts`, add `PRINTS_STRIPE` to the `./tests/e2e/prints-site` 
 ```ts
         // A seventh server, only when STRIPE_TEST_SECRET_KEY is set (George's GitHub secret; locally, your own test key):
         // the full test order through Stripe's hosted page in test mode (spec 23.2). The key reaches wrangler through the
-        // shell, never this file; a test build refuses a live key (spec 21.4)
+        // shell, never this file, though it shows on the process's command line in ps while the server runs, which is
+        // acceptable for a test key; a test build refuses a live key (spec 21.4). Stripe's base and the retry window are
+        // pinned too, so nothing in .dev.vars can change them (ADR-0024's reasoning)
         ...(process.env.STRIPE_TEST_SECRET_KEY
           ? [{
-              command: `${printStore(".wrangler/stripe")} && wrangler dev -c dist/server/wrangler.json --port 4338 --persist-to .wrangler/stripe --test-scheduled ${PHOTO_KEY_VAR} ${printVars(PRINTS_STRIPE)} --var STRIPE_SECRET_KEY:$STRIPE_TEST_SECRET_KEY`,
+              command: `${printStore(".wrangler/stripe")} && wrangler dev -c dist/server/wrangler.json --port 4338 --persist-to .wrangler/stripe ${PHOTO_KEY_VAR} ${printVars(PRINTS_STRIPE)} --var STRIPE_SECRET_KEY:$STRIPE_TEST_SECRET_KEY --var STRIPE_API_BASE:https://api.stripe.com --var PRINT_RETRY_WINDOW:86400`,
               url: PRINTS_STRIPE,
               reuseExistingServer: false,
               timeout: 120_000,
@@ -9165,6 +9409,8 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
   if (await country.count()) await country.selectOption("AU");
   const postal = page.locator("#billingPostalCode");
   if (await postal.isVisible().catch(() => false)) await postal.fill("2026");
+  // Events from a minute before paying on: the test account may be shared with other runs
+  const started = Math.floor(Date.now() / 1000) - 60;
   await page.locator("button[type=submit]").click();
   await page.waitForURL(new RegExp(`^${PRINTS_STRIPE}/prints/[0-9a-z]{26}\\?key=`), { timeout: 90_000 });
   const orderId = new URL(page.url()).pathname.split("/").at(-1)!;
@@ -9174,7 +9420,7 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
   const [{ stripe_session_id: sessionId }] = printsD1<{ stripe_session_id: string }>(`SELECT stripe_session_id FROM print_orders WHERE id = '${orderId}'`, STORE);
   let event: { id: string; data: { object: { id: string } } } | undefined;
   await expect.poll(async () => {
-    event = ((await stripeApi("/v1/events?type=checkout.session.completed&limit=20")).data as typeof event[]).find((entry) => entry?.data.object.id === sessionId);
+    event = ((await stripeApi(`/v1/events?type=checkout.session.completed&created%5Bgte%5D=${started}&limit=100`)).data as (typeof event)[]).find((entry) => entry?.data.object.id === sessionId);
     return !!event;
   }, { timeout: 60_000 }).toBe(true);
   const session = await stripeApi(`/v1/checkout/sessions/${sessionId}`);
@@ -9353,7 +9599,12 @@ Migration 0007 arrives with the deploy (the deploy job runs `migrations apply`),
 - Artelo's real API: Price Check, Create Order, Get Orders' `name` filter, Get Order by Id, the webhook's payload and signature, Get Catalog Product Costs and the webhook endpoints are all exercised against the stand-in. `prints:check` and the launch order are the first real runs (spec 25).
 - Stripe's hosted page in test mode runs only where `STRIPE_TEST_SECRET_KEY` is set; Stripe's live mode and its receipts only at launch.
 - The `EMAIL` binding: every test build sends to the sink.
-- The cron under a real Cloudflare trigger: locally it runs through `wrangler dev --test-scheduled`.
+- The cron under a real Cloudflare trigger: locally it runs through wrangler's local explorer (`/cdn-cgi/local/explorer/api/local/scheduled`).
+
+## Known gaps
+
+- A shipped order whose Stripe session has no email is retried by every cron run, with a Stripe call each time, until it has one. Cheap, and it should never happen with Checkout collecting the email; if it shows up in the logs, back the retry off.
+- Spec 17.5 still names `country` and an unframed `frameStyle: null` for Get Catalog Product Costs; Artelo's reference requires `shippingDestination`, the three booleans and `frameStyle: "Unframed"`, which `prints:check` sends (plan 7, assumption 12). Correct the spec's wording when it is next edited.
 
 ## Assumptions to confirm
 
@@ -9382,17 +9633,17 @@ git commit -m "test: a real test order through stripe, privacy, budgets and layo
 Each assumption a task depends on, and how the build checks it. Spec section 25's numbered list stands; these are the ones the plan's code leans on, with what the plan added.
 
 1. **Artelo's sizes, oak frame and paper** (spec 25.1 to 25.3): every size in the table exists for `IndividualArtPrint` on `ArchivalMatteFineArt`, framed (`frameColor: "NaturalOak"`) and unframed (`frameColor: null`). Tasks 2, 4 and 9. Checked by `prints:check`, which fails on a refused combination.
-2. **Price Check's request and answer** (25.4, 25.5): `POST /orders/price-check` takes the order's `customerAddress` and `items` without `designs`, in `currency: "USD"`, and answers `{ orderCosts: { productionCost, arteloShipping, usSalesTax, gst, hst, pst, total, … } }` in US dollars as numbers; its freight and tax are what Artelo charges for the same order. Tasks 4 and 6. Checked by `prints:check` and the launch order's cost against the quote.
+2. **Price Check's request and answer** (25.4, 25.5): `POST /orders/price-check` takes the order's `customerAddress` and `items` without `designs`, in `currency: "USD"`, and answers `{ orderCosts: { productionCost, arteloShipping, usSalesTax, gst, hst, pst, total, … } }` in US dollars as numbers; its freight and tax are what Artelo charges for the same order. Artelo's reference marks `canvasDesignedFor`, `canvasBorderStyle`, `state` and `zipcode` required, and the plan sends `null`, `null`, the city as a fallback and `""` where an address has none; `prints:check` is the check. Tasks 4 and 6. Checked by `prints:check` and the launch order's cost against the quote.
 3. **Price Check refusals** (25.6): an address or product Artelo won't take answers 400 or 422 with a `message` (or `error`, `title` or `errors[0].message`) fit to show the buyer; everything else is "unavailable". Task 4. Checked by `prints:check`'s Antarctica line.
-4. **Create Order's answer** (plan): a 2xx whose body (or its `data`) holds the order's `id`, `orderId`, `status` and `details` with the cost fields of assumption 2; a 2xx without an `id` counts as retryable and the next attempt's lookup adopts what Artelo made. Task 9. Checked by the launch order.
-5. **Get Orders** (25.8, plan): `GET /orders/get?limit=5&name=<our orderId>` answers a list, or an object holding one under `orders`, `data` or `items`, whose entries carry our `orderId`; anything else is a failed lookup, which is retryable and never followed by a create. Artelo itself doesn't refuse a duplicate `orderId`. Task 9. Checked by `prints:check`'s lookup check.
+4. **Create Order's answer** (plan): Artelo refuses a design under 150 dpi unless `dangerouslySkipDPICheck` is sent, which only the margin check's test order does; a 2xx whose body (or its `data`) holds the order's `id`, `orderId`, `status` and `details` with the cost fields of assumption 2; a 2xx without an `id` counts as retryable and the next attempt's lookup adopts what Artelo made. Task 9. Checked by the launch order.
+5. **Get Orders** (25.8, plan): `GET /orders/get?limit=5&name=<our orderId>` answers a list, or an object holding one under `orders`, `data` or `items`, whose entries carry our `orderId`; anything else is a failed lookup, which is retryable and never followed by a create. Artelo's reference confirms a bare array, a `name` filter matching "name or orderId" and `allOrders` defaulting to API-created orders only. Artelo itself doesn't refuse a duplicate `orderId`. Task 9. Checked by `prints:check`'s lookup check.
 6. **Get Order by Id** (plan): `GET /orders/get-by-id?orderId=<artelo id>` answers the order (or it in `data`) with `status` and `shipments`. Task 11. Checked by the launch order's status reaching `/admin` and, after launch, by `last heard`.
 7. **The webhook** (25.9): `x-artelo-signature` is the hex HMAC-SHA256 of the raw body or of `JSON.stringify` of it; the body (or its `data`) carries `orderId` (Artelo's or ours), `status` and, when shipped, `shipments` of `{ carrierCode, trackingNumber, trackingUrl }`; a tracking URL that isn't `https://` is kept without its link. Task 11. Checked by the first real status change (`last heard` in `/admin`), backed by the 12-hour poll.
-8. **Artelo's statuses** (spec 18.3): `ImagesProcessing`, `Received`, `Ignored`, `PendingFulfillmentAction`, `InProduction`, `Shipped`, `Delivered`, `Canceled`; any other is stored and logged and changes nothing. Tasks 9, 11 and 14. Checked by the launch order and the webhook filter `prints:webhook` saves.
+8. **Artelo's statuses** (spec 18.3): `ImagesProcessing`, `Received`, `Ignored`, `PendingFulfillmentAction`, `InProduction`, `Shipped`, `Delivered`, `Canceled`; any other is stored and logged and changes nothing. Save Webhook's filter lists every one but `Ignored` (a test order's end, which needs no webhook), so `prints:webhook` leaves it out. Tasks 9, 11 and 14. Checked by the launch order and George's first `prints:webhook --remote`.
 9. **The master link** (25.7): Artelo fetches each design from an `https://` URL with a query string, answering a 10 to 30MB JPEG with `Content-Disposition: attachment`, within 72 hours. Task 9. Mimicked by the stand-in, which fetches every design and checks its SHA-256 and size; truly checked by the launch order.
 10. **Addresses and amounts** (25.10, 25.11): Artelo accepts the city and state fallbacks and an empty `zipcode`, needs a phone only outside the US, and uses `total`, `shippingCost` and `unitPrice` (in AUD) only for paperwork. Tasks 4 and 9. Checked by the launch order.
 11. **Test orders** (25.12): `isTestOrder: true` costs nothing, is never produced and ends `Ignored`. Task 9. From Artelo's Create Order documentation; the tests use only the stand-in.
-12. **Webhook management and catalogue costs** (plan): `POST /webhooks/save` with `{ topic, url, filters: { statuses } }` answers the webhook with its `secret` (or it in `data`); `GET /webhooks/get` lists webhooks with `url` and `topic` (as a list or under `webhooks`, `data` or `items`); `POST /catalog/get-costs` with `{ catalogProductId, size, frameStyle: "Oak" | null, paperType, country, quantity }` answers `{ productionCost, shippingCost }` in US dollars, and `prints:check` prints the raw answer and fails the combination when it can't read it. Task 14. Checked by George's first `prints:webhook --remote` and `prints:check --remote`.
+12. **Webhook management and catalogue costs** (plan): `POST /webhooks/save` with `{ topic, url, filters: { statuses } }` answers the webhook with its `secret` (or it in `data`); `GET /webhooks/get` lists webhooks with `url` and `topic` (as a list or under `webhooks`, `data` or `items`); `POST /catalog/get-costs` with `{ catalogProductId, size, frameStyle: "Oak" | "Unframed", includeMats, includeFramingService, includeHangingPins, paperType, shippingDestination, quantity }` (the fields Artelo's reference marks required; spec 17.5's wording predates this) answers `{ productionCost, shippingCost }` in US dollars, and `prints:check` prints the raw answer and fails the combination when it can't read it. Task 14. Checked by George's first `prints:webhook --remote` and `prints:check --remote`.
 13. **Artelo's rate limit** (spec 18.3, 21.3): 50 requests in 10 seconds, so quotes keep to 30 and the poll and the check pace themselves. Tasks 6, 11 and 14.
 14. **The quoted address on Stripe** (25.13): with `shipping_address_collection` and `phone_number_collection` off, `payment_intent_data[shipping]` is stored on the PaymentIntent unchanged and hosted Checkout shows no address form; the buyer sees the address only in `custom_text[submit][message]` (at most 1,200 characters). Tasks 7 and 9. Checked by Task 15's order against Stripe's test mode.
 15. **Adaptive Pricing** (25.19): `adaptive_pricing[enabled]=false` keeps a session in AUD with no `currency_conversion`. Tasks 7 and 10. Checked by Task 15's order (and the webhook sends any session with a conversion to `needs_attention`).
