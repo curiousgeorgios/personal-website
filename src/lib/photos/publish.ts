@@ -1,4 +1,4 @@
-import { hasAllPreviews, type PhotoRow, type Preview } from "./store";
+import { hasAllPreviews, previewSize, type PhotoRow, type Preview } from "./store";
 
 export interface PublishDeps {
   db: D1Database;
@@ -8,16 +8,24 @@ export interface PublishDeps {
   media: R2Bucket;
 }
 
+/** A photograph that failed verification, and what failed: "master", "previews" (not the eight) or a preview as "240.avif" */
+export interface Unverified {
+  id: string;
+  failed: string[];
+}
+
 /**
- * `missing`: ids with no photograph. `postless`: photographs with no post row, which the public queries (they join
- * photo_posts) would never show. `unverified`: photographs whose master or previews aren't in R2 as recorded.
+ * `missing`: ids with no photograph. Otherwise a publish that was refused lists every problem found, so George can fix
+ * them in one go: `postless` are photographs with no post row (the public queries join photo_posts, so they would never
+ * show) and `unverified` are those whose master or previews aren't in R2 as recorded. Both are in input order.
  */
-export type PublishOutcome = { ok: true } | { ok: false; missing: string[] } | { ok: false; postless: string[] } | { ok: false; unverified: string[] };
+export type PublishOutcome = { ok: true } | { ok: false; missing: string[] } | { ok: false; postless: string[]; unverified: Unverified[] };
 
 /**
  * R2 head requests in flight at once. A 20-photo post needs 180 (one master and eight previews each), well within
  * Workers Paid's default of 10,000 subrequests per invocation (Cloudflare's limits page, checked 2026-10-08; R2 and D1
- * binding calls count towards it).
+ * binding calls count towards it). R2 calls also count towards Workers' cap of 6 simultaneous outgoing connections, so
+ * ten are in flight and six run at a time while the rest wait: ten is an upper bound, and harmless since a head has no body.
  */
 export const VERIFY_CONCURRENCY = 10;
 
@@ -65,22 +73,36 @@ export async function setPublished(deps: PublishDeps, ids: string[], published: 
     const withPost = (await deps.db.prepare("SELECT photos.id FROM photos JOIN photo_posts ON photo_posts.collection = photos.collection WHERE photos.id IN (SELECT value FROM json_each(?))").bind(list).all<{ id: string }>()).results;
     const posted = new Set(withPost.map((row) => row.id));
     const postless = ids.filter((id) => !posted.has(id));
-    if (postless.length > 0) return { ok: false, postless };
-    const failed = new Set<string>();
-    const checks: { id: string; run: () => Promise<boolean> }[] = [];
+    const failed = new Map<string, string[]>();
+    const fail = (id: string, what: string) => failed.set(id, [...(failed.get(id) ?? []), what]);
+    const checks: { id: string; what: string; run: () => Promise<boolean> }[] = [];
     for (const row of rows) {
       const previews = JSON.parse(row.previews) as Preview[];
       if (!hasAllPreviews(previews) || previews.some((preview) => !preview.key.startsWith("photos/previews/"))) {
-        failed.add(row.id);
+        fail(row.id, "previews");
         continue;
       }
-      checks.push({ id: row.id, run: () => masterChecks(deps.prints, row) });
-      for (const preview of previews) checks.push({ id: row.id, run: () => previewChecks(deps.media, preview) });
+      checks.push({ id: row.id, what: "master", run: () => masterChecks(deps.prints, row) });
+      for (const preview of previews) checks.push({ id: row.id, what: `${previewSize(preview.key)}.${preview.format}`, run: () => previewChecks(deps.media, preview) });
     }
     const passed = await pooled(checks.map((check) => check.run), VERIFY_CONCURRENCY);
-    checks.forEach((check, i) => { if (!passed[i]) failed.add(check.id); });
-    if (failed.size > 0) return { ok: false, unverified: ids.filter((id) => failed.has(id)) };
+    checks.forEach((check, i) => { if (!passed[i]) fail(check.id, check.what); });
+    if (postless.length > 0 || failed.size > 0) {
+      return { ok: false, postless, unverified: ids.filter((id) => failed.has(id)).map((id) => ({ id, failed: failed.get(id)! })) };
+    }
   }
   await deps.db.prepare("UPDATE photos SET published = ? WHERE id IN (SELECT value FROM json_each(?))").bind(published ? 1 : 0, list).run();
   return { ok: true };
+}
+
+/** Says everything that stopped a publish, in the admin's error voice: the post, the master and which previews failed */
+export function publishRefusal(outcome: Extract<PublishOutcome, { postless: string[] }>): string {
+  const reasons = outcome.postless.length > 0 ? ["Photo has no post, so it would stay hidden. Import its post first."] : [];
+  for (const { failed } of outcome.unverified) {
+    if (failed.includes("master")) reasons.push("Verified print master unavailable.");
+    if (failed.includes("previews")) reasons.push("Responsive previews unavailable.");
+    const previews = failed.filter((what) => what !== "master" && what !== "previews");
+    if (previews.length > 0) reasons.push(`Preview ${previews.join(", ")} unavailable.`);
+  }
+  return reasons.join(" ");
 }

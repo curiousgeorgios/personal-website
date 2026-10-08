@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { setPublished, VERIFY_CONCURRENCY } from "../../src/lib/photos/publish";
+import { publishRefusal, setPublished, VERIFY_CONCURRENCY } from "../../src/lib/photos/publish";
 import { sqliteD1 } from "./sqlite-d1";
 
 const SHA = "b8".repeat(32);
@@ -59,19 +59,19 @@ describe("setPublished", () => {
     for (const broken of [undefined, { size: 999, contentType: "image/jpeg", sha256: SHA }, { size: 1000, contentType: "text/html", sha256: SHA }, { size: 1000, contentType: "image/jpeg", sha256: "0".repeat(64) }]) {
       if (broken) prints.set(key, broken);
       else prints.delete(key);
-      expect(await setPublished(deps(), ["post-01"], true)).toEqual({ ok: false, unverified: ["post-01"] });
+      expect(await setPublished(deps(), ["post-01"], true)).toEqual({ ok: false, postless: [], unverified: [{ id: "post-01", failed: ["master"] }] });
     }
     expect(await publishedOf("post-01")).toBe(0);
   });
 
   test("a preview that's missing or of another type fails its photo, and six previews fail without asking R2", async () => {
     media.delete(`photos/previews/post-01/${SHA}/240.avif`);
-    expect(await setPublished(deps(), ["post-01"], true)).toEqual({ ok: false, unverified: ["post-01"] });
+    expect(await setPublished(deps(), ["post-01"], true)).toEqual({ ok: false, postless: [], unverified: [{ id: "post-01", failed: ["240.avif"] }] });
     media.set(`photos/previews/post-01/${SHA}/240.avif`, "image/webp");
-    expect(await setPublished(deps(), ["post-01"], true)).toEqual({ ok: false, unverified: ["post-01"] });
+    expect(await setPublished(deps(), ["post-01"], true)).toEqual({ ok: false, postless: [], unverified: [{ id: "post-01", failed: ["240.avif"] }] });
     await addPhoto("post-03", 2, false, previews("post-03").filter((p) => !p.key.includes("/240.")));
     printBucket.head.mockClear();
-    expect(await setPublished(deps(), ["post-03"], true)).toEqual({ ok: false, unverified: ["post-03"] });
+    expect(await setPublished(deps(), ["post-03"], true)).toEqual({ ok: false, postless: [], unverified: [{ id: "post-03", failed: ["previews"] }] });
     expect(printBucket.head).not.toHaveBeenCalled();
   });
 
@@ -79,7 +79,7 @@ describe("setPublished", () => {
     await addPhoto("post-03", 2);
     prints.delete(`prints/post-03/${SHA}.jpg`);
     media.delete(`photos/previews/post-01/${SHA}/1600.webp`);
-    expect(await setPublished(deps(), ["post-01", "post-02", "post-03"], true)).toEqual({ ok: false, unverified: ["post-01", "post-03"] });
+    expect(await setPublished(deps(), ["post-01", "post-02", "post-03"], true)).toEqual({ ok: false, postless: [], unverified: [{ id: "post-01", failed: ["1600.webp"] }, { id: "post-03", failed: ["master"] }] });
     for (const id of ["post-01", "post-02", "post-03"]) expect(await publishedOf(id)).toBe(0);
   });
 
@@ -94,13 +94,32 @@ describe("setPublished", () => {
       .bind("lost-01", "no-such-post", 5, "", 0, JSON.stringify(previews("lost-01")), `prints/lost-01/${SHA}.jpg`, 2048, 2048, 1000, SHA).run();
     prints.set(`prints/lost-01/${SHA}.jpg`, { size: 1000, contentType: "image/jpeg", sha256: SHA });
     for (const preview of previews("lost-01")) media.set(preview.key, `image/${preview.format}`);
-    printBucket.head.mockClear();
-    expect(await setPublished(deps(), ["post-01", "lost-01"], true)).toEqual({ ok: false, postless: ["lost-01"] });
-    expect(printBucket.head).not.toHaveBeenCalled();
+    expect(await setPublished(deps(), ["post-01", "lost-01"], true)).toEqual({ ok: false, postless: ["lost-01"], unverified: [] });
     expect(await publishedOf("post-01")).toBe(0);
     expect(await publishedOf("lost-01")).toBe(0);
     // Hiding it is still fine: nothing is shown either way
     expect(await setPublished(deps(), ["lost-01"], false)).toEqual({ ok: true });
+  });
+
+  test("a set with photos that have no post and photos that fail verification reports both, and nothing changes", async () => {
+    await db.prepare("INSERT INTO photos (id, collection, position, title, published, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind("lost-01", "no-such-post", 5, "", 0, JSON.stringify(previews("lost-01")), `prints/lost-01/${SHA}.jpg`, 2048, 2048, 1000, SHA).run();
+    prints.set(`prints/lost-01/${SHA}.jpg`, { size: 1000, contentType: "image/jpeg", sha256: SHA });
+    for (const preview of previews("lost-01")) media.set(preview.key, `image/${preview.format}`);
+    prints.delete(`prints/post-02/${SHA}.jpg`);
+    media.delete(`photos/previews/post-02/${SHA}/480.webp`);
+    media.delete(`photos/previews/post-02/${SHA}/960.avif`);
+    const outcome = await setPublished(deps(), ["post-01", "post-02", "lost-01"], true);
+    expect(outcome).toEqual({ ok: false, postless: ["lost-01"], unverified: [{ id: "post-02", failed: ["master", "480.webp", "960.avif"] }] });
+    for (const id of ["post-01", "post-02", "lost-01"]) expect(await publishedOf(id)).toBe(0);
+    if (!("postless" in outcome)) throw new Error("expected a refusal");
+    expect(publishRefusal(outcome)).toBe("Photo has no post, so it would stay hidden. Import its post first. Verified print master unavailable. Preview 480.webp, 960.avif unavailable.");
+  });
+
+  test("the refusal says which of the master, the preview set or the previews failed", () => {
+    expect(publishRefusal({ ok: false, postless: [], unverified: [{ id: "a", failed: ["master"] }] })).toBe("Verified print master unavailable.");
+    expect(publishRefusal({ ok: false, postless: [], unverified: [{ id: "a", failed: ["previews"] }] })).toBe("Responsive previews unavailable.");
+    expect(publishRefusal({ ok: false, postless: [], unverified: [{ id: "a", failed: ["240.avif"] }] })).toBe("Preview 240.avif unavailable.");
   });
 
   test("hiding asks R2 nothing, and a repeat of either is fine", async () => {
