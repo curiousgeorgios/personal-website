@@ -43,11 +43,12 @@ describe("applying a status", () => {
     expect(deps.waited).toHaveLength(1);
   });
 
-  test("a lower status arriving late is ignored, but recorded as artelo's", async () => {
+  // Fix round 1 (Minor 4): a late or replayed status is ignored and writes nothing, not even artelo's status or the check time
+  test("a lower status arriving late is ignored and writes nothing", async () => {
     const { db, deps } = await setup({ status: "shipped" });
     expect(await applyArteloUpdate(deps, update("Received"))).toBe("ignored");
     expect(await applyArteloUpdate(deps, update("InProduction"))).toBe("ignored");
-    expect(await getOrder(db, ORDER)).toMatchObject({ status: "shipped", artelo_status: "InProduction" });
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "shipped", artelo_status: null, status_checked_at: null });
   });
 
   test("artelo needing something sends a placed order to needs attention and emails george; after production it is ignored", async () => {
@@ -166,10 +167,18 @@ describe("the poll", () => {
     expect(pause.mock.calls).toEqual([[300]]);
   });
 
-  test("a failed check leaves the order to be asked again", async () => {
+  // Fix round 1 (ruling 1): replaces the brief's "a failed check leaves the order to be asked again", which pinned an empty stamp
+  test("a failed check is asked again an hour later, not on every run", async () => {
     const { db, deps } = await setup({ placed_at: NOW - 50_000 }, { "GET https://artelo.test/orders/get-by-id": () => json({}, 503) });
     await pollStatuses(deps, async () => {});
-    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", status_checked_at: null });
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", status_checked_at: NOW - 43_200 + 3600 });
+    const asked = async (at: number) => {
+      const fake = fakeFetch({ "GET https://artelo.test/orders/get-by-id": () => json({}, 503) });
+      await pollStatuses(testDeps(db, { fetch: fake.fetch, now: () => at }), async () => {});
+      return fake.calls.length;
+    };
+    expect(await asked(NOW + 59 * 60)).toBe(0);
+    expect(await asked(NOW + 61 * 60)).toBe(1);
   });
 });
 
@@ -296,7 +305,7 @@ describe("the guards the brief's tests don't reach (task 11 rulings)", () => {
   test("the poll never applies an answer about another order, and one that throws doesn't stop the rest", async () => {
     const { db, deps } = await setup({ placed_at: NOW - 50_000 }, { "GET https://artelo.test/orders/get-by-id": () => json({ id: "artelo-999", status: "Canceled" }) });
     await pollStatuses(deps, async () => {});
-    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", status_checked_at: null });
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", status_checked_at: NOW - 43_200 + 3600 });
     const second = await setup({ placed_at: NOW - 50_000 }, { "GET https://artelo.test/orders/get-by-id": (request) => json({ id: new URL(request.url).searchParams.get("orderId"), status: "InProduction" }) });
     await insertOrder(second.db, { id: "01k6x00000000000000000000b", status: "placed", artelo_order_id: "artelo-2", placed_at: NOW - 45_000 });
     let calls = 0;
@@ -310,7 +319,154 @@ describe("the guards the brief's tests don't reach (task 11 rulings)", () => {
       },
     });
     await expect(pollStatuses({ ...second.deps, db: flaky }, async () => {})).rejects.toThrow("1 of the polled orders' statuses couldn't be applied");
-    expect((await getOrder(second.db, ORDER))?.status).toBe("placed");
+    expect(await getOrder(second.db, ORDER)).toMatchObject({ status: "placed", status_checked_at: NOW - 43_200 + 3600 });
     expect((await getOrder(second.db, "01k6x00000000000000000000b"))?.status).toBe("in_production");
+  });
+});
+
+describe("fix round 1", () => {
+  const BACKED_OFF = NOW - 43_200 + 3600;
+  const GET = "GET https://artelo.test/orders/get-by-id";
+  const answering = (status: string) => (request: Request) => json({ id: new URL(request.url).searchParams.get("orderId"), status });
+  /** A db whose batch first runs `meanwhile`, every time, as another writer landing between the read and the write */
+  const interrupted = (db: D1Database, meanwhile: () => Promise<unknown>) =>
+    new Proxy(db, {
+      get(target, property) {
+        if (property !== "batch") return Reflect.get(target, property);
+        return async (statements: D1PreparedStatement[]) => {
+          await meanwhile();
+          return target.batch(statements);
+        };
+      },
+    });
+
+  test("every poll outcome that writes nothing backs the order off an hour: a status that isn't a word, lost races, a throw", async () => {
+    let { db, deps } = await setup({ placed_at: NOW - 50_000 }, { [GET]: answering("Held_for_review_by_a_person_at_artelo_today") });
+    await pollStatuses(deps, async () => {});
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_status: null, status_checked_at: BACKED_OFF });
+    // Three lost races in a row: the reason changes under every move
+    ({ db, deps } = await setup({ placed_at: NOW - 50_000 }, { [GET]: answering("InProduction") }));
+    let flips = 0;
+    const racing = interrupted(db, () => db.prepare("UPDATE print_orders SET attention_reason = ? WHERE id = ?").bind(`flip ${++flips}`, ORDER).run());
+    await pollStatuses({ ...deps, db: racing }, async () => {});
+    expect(flips).toBe(3);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", status_checked_at: BACKED_OFF });
+    ({ db, deps } = await setup({ placed_at: NOW - 50_000 }, { [GET]: answering("InProduction") }));
+    const throwing = interrupted(db, async () => { throw new Error("D1_ERROR: a hiccup"); });
+    await expect(pollStatuses({ ...deps, db: throwing }, async () => {})).rejects.toThrow();
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", status_checked_at: BACKED_OFF });
+  });
+
+  test("an answer that changes nothing counts as a check: asked again in twelve hours", async () => {
+    const { db, deps } = await setup({ placed_at: NOW - 50_000, artelo_status: "Received" }, { [GET]: answering("Received") });
+    await pollStatuses(deps, async () => {});
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_status: "Received", status_checked_at: NOW });
+  });
+
+  test("the poll's stamp never pulls back a fresher one a webhook wrote during the poll", async () => {
+    const holder: { db?: D1Database } = {};
+    const { db, deps } = await setup({ placed_at: NOW - 50_000 }, {
+      [GET]: async () => {
+        await holder.db!.prepare("UPDATE print_orders SET status_checked_at = ? WHERE id = ?").bind(NOW - 5, ORDER).run();
+        return json({}, 503);
+      },
+    });
+    holder.db = db;
+    await pollStatuses(deps, async () => {});
+    expect((await getOrder(db, ORDER))?.status_checked_at).toBe(NOW - 5);
+  });
+
+  test("a refund changing only the attention reason of an order artelo holds is never overwritten (minor 1)", async () => {
+    const REFUND = "refunded in stripe: cancel it in artelo if it hasn't printed.";
+    const { db, deps } = await setup({ status: "needs_attention", attention_reason: "artelo needs something before it can print: open the order in artelo.", artelo_status: "PendingFulfillmentAction" });
+    await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW);
+    let landed = false;
+    const racing = interrupted(db, async () => {
+      if (landed) return;
+      landed = true;
+      await db.prepare("UPDATE print_orders SET attention_reason = ?, attention_notified_at = NULL WHERE id = ?").bind(REFUND, ORDER).run();
+    });
+    expect(await applyArteloUpdate({ ...deps, db: racing }, update("InProduction"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attention_reason: REFUND, attention_notified_at: null, artelo_status: "InProduction" });
+    expect(await activeGrants(db)).toBe(1);
+  });
+
+  test("a fully refunded order cancelled while its missed-webhook note is due gets that note, not 'refund it in stripe' (minor 3)", async () => {
+    const mail = vi.fn(async () => ({ messageId: "m" }));
+    const { db } = await setup({ refunded_amount: 28700, admin_notified_at: 0 });
+    const deps = testDeps(db, { email: { send: mail } as unknown as SendEmail });
+    expect(await applyArteloUpdate(deps, update("Canceled"))).toBe("applied");
+    await Promise.all(deps.waited);
+    expect(mail).toHaveBeenCalledTimes(1);
+    expect(mail).toHaveBeenCalledWith(expect.objectContaining({ subject: `print order ${ORDER}: stripe's webhook never arrived` }));
+    expect((await getOrder(db, ORDER))?.admin_notified_at).toBe(NOW);
+  });
+
+  test("a late or replayed status writes nothing at all, by webhook or poll (minor 4)", async () => {
+    const row = (db: D1Database) => db.prepare("SELECT status, artelo_status, status_checked_at, updated_at, shipments FROM print_orders WHERE id = ?").bind(ORDER).first();
+    const cases: [Record<string, string | number | null>, string][] = [
+      [{ status: "shipped", artelo_status: "Shipped" }, "Shipped"],
+      [{ status: "shipped", artelo_status: "Shipped" }, "Received"],
+      [{ status: "in_production", artelo_status: "InProduction" }, "PendingFulfillmentAction"],
+      [{ status: "delivered", artelo_status: "Delivered" }, "Shipped"],
+      [{ status: "cancelled", artelo_status: "Canceled" }, "Canceled"],
+      [{ status: "placed", artelo_status: "OnHold" }, "OnHold"],
+      [{ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", artelo_status: "InProduction" }, "Received"],
+      // Artelo's last status is ahead of the order (a site-set needs_attention): judged against that too
+      [{ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", artelo_status: "Shipped" }, "InProduction"],
+      // A cancellation is past every other status, at Artelo as here
+      [{ status: "cancelled", artelo_status: "Canceled" }, "InProduction"],
+      [{ status: "cancelled", artelo_status: "Canceled" }, "Shipped"],
+    ];
+    for (const [columns, status] of cases) {
+      const { db, deps } = await setup({ ...columns, status_checked_at: NOW - 999, updated_at: NOW - 999 });
+      const before = await row(db);
+      expect(await applyArteloUpdate({ ...deps, now: () => NOW + 10 }, update(status, TRACKING))).toBe("ignored");
+      expect(await row(db)).toEqual(before);
+      expect(deps.waited).toHaveLength(0);
+    }
+    // A newer status the rules still don't act on is recorded: a site-set needs_attention hears artelo is printing
+    const { db, deps } = await setup({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", artelo_status: "Received" });
+    expect(await applyArteloUpdate(deps, update("InProduction"))).toBe("ignored");
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", artelo_status: "InProduction", status_checked_at: NOW });
+  });
+
+  test("a status recorded meanwhile isn't overwritten by an older one decided from a stale read", async () => {
+    const REFUND = "refunded in stripe: cancel it in artelo if it hasn't printed.";
+    const { db, deps } = await setup({ status: "needs_attention", attention_reason: REFUND, artelo_status: "Received" });
+    let landed = false;
+    // Another delivery records Shipped between this one's read and its record write
+    const racing = new Proxy(db, {
+      get(target, property) {
+        if (property !== "prepare") return Reflect.get(target, property);
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.startsWith("UPDATE print_orders SET artelo_status") || landed) return statement;
+          return { bind: (...values: unknown[]) => ({ run: async () => {
+            landed = true;
+            await target.prepare("UPDATE print_orders SET artelo_status = 'Shipped' WHERE id = ?").bind(ORDER).run();
+            return statement.bind(...values).run();
+          } }) };
+        };
+      },
+    });
+    expect(await applyArteloUpdate({ ...deps, db: racing }, update("InProduction"))).toBe("ignored");
+    expect(landed).toBe(true);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", artelo_status: "Shipped" });
+  });
+
+  test("tracking loses invisible formatting characters where it is written (minor 5)", async () => {
+    const { db, deps } = await setup();
+    const shipments = [
+      { carrier: "U\u202ES\u202CP", number: "1Z\u200B999\uFEFFAA\u2066\u2069", url: "https://www.ups.com/track?n=1Z\u200B999" },
+      { carrier: "dhl\u00AD", number: "JD\u200D01", url: "https://dhl.example/t?n=JD01" },
+    ];
+    expect(await applyArteloUpdate(deps, { orderId: "artelo-1", status: "Shipped", shipments })).toBe("applied");
+    expect(JSON.parse((await getOrder(db, ORDER))!.shipments!)).toEqual([
+      { carrier: "usp", number: "1Z999AA", url: "" },
+      { carrier: "dhl", number: "JD01", url: "https://dhl.example/t?n=JD01" },
+    ]);
+    // The reader cleans the same way
+    expect(readArteloUpdate({ orderId: "a", status: "Shipped", shipments: [{ carrierCode: "U\u202EPS", trackingNumber: "1\u200BZ" }] })?.shipments).toEqual([{ carrier: "ups", number: "1Z", url: "" }]);
   });
 });

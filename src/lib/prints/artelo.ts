@@ -158,13 +158,17 @@ export function unwrap(value: unknown): Record<string, unknown> | null {
 /** Bounds on Artelo's tracking, which is text from outside: the carrier and number are cut, a longer link is dropped */
 export const TRACKING_LIMITS = { carrier: 40, number: 64, url: 500, shipments: 10 } as const;
 
-/** One line: any run of whitespace or control characters (newlines included) becomes one space */
-const oneLine = (text: string, limit: number) => text.replace(/[\s\p{Cc}]+/gu, " ").trim().slice(0, limit);
+/**
+ * One line: invisible formatting characters (bidi overrides, zero-width characters and the rest of Unicode's Cf, which
+ * could reorder or hide what the buyer reads) go, and any run of whitespace or control characters (newlines included)
+ * becomes one space
+ */
+const oneLine = (text: string, limit: number) => text.replace(/\p{Cf}+/gu, "").replace(/[\s\p{Cc}]+/gu, " ").trim().slice(0, limit);
 const textOf = (value: unknown) => (typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "");
 
 /**
  * A parcel's tracking as it may be stored and shown: the carrier (lowercase) and number on one line each and capped, and
- * the link only when it is a whole https URL, because it becomes a link (the rule mail.ts's shippedText applies again at
+ * the link only when it is a whole https URL with nothing invisible in it, because it becomes a link (the rule mail.ts's shippedText applies again at
  * send time). Null when neither a number nor a link is left
  */
 export function cleanShipment(carrier: unknown, number: unknown, url: unknown): Shipment | null {
@@ -172,7 +176,7 @@ export function cleanShipment(carrier: unknown, number: unknown, url: unknown): 
   const shipment = {
     carrier: oneLine(textOf(carrier), TRACKING_LIMITS.carrier).toLowerCase(),
     number: oneLine(textOf(number), TRACKING_LIMITS.number),
-    url: /^https:\/\/\S+$/i.test(link) && !/\p{Cc}/u.test(link) && link.length <= TRACKING_LIMITS.url ? link : "",
+    url: /^https:\/\/\S+$/i.test(link) && !/[\p{Cc}\p{Cf}]/u.test(link) && link.length <= TRACKING_LIMITS.url ? link : "",
   };
   return shipment.number || shipment.url ? shipment : null;
 }

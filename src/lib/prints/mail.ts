@@ -154,7 +154,10 @@ export async function sendAdminNote(deps: PrintDeps, id: string): Promise<void> 
   let sent = false;
   try {
     const order = await getOrder(deps.db, id);
-    sent = order?.status === "cancelled"
+    // One guard holds either note: a cancellation makes it due only while the buyer isn't refunded in full, so an order
+    // refunded in full whose note is due is owed the missed-webhook note, never "refund it in stripe"
+    const refundedInFull = !!order && (order.refunded_amount ?? 0) >= order.print_total + order.delivery_amount;
+    sent = order?.status === "cancelled" && !refundedInFull
       ? await mailAdmin(deps, `print order ${id} was cancelled by artelo`, `artelo cancelled order ${id}. refund it in stripe.`, `cancellation email for order ${id}`)
       : await mailAdmin(deps, `print order ${id}: stripe's webhook never arrived`, `print order ${id} was paid but stripe's webhook never arrived. check the webhook in stripe.`, `missed-webhook email for order ${id}`);
   } finally {

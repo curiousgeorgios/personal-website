@@ -81,20 +81,36 @@ async function findOrder(db: D1Database, orderId: string): Promise<OrderRow | nu
 }
 
 /**
- * One status against the order as read: "raced" when the order changed between the read and the write, so nothing was
- * moved. Every move is conditional on the status and attention reason it was decided from, so a refund or another
- * delivery landing meanwhile is never overwritten
+ * How far along a status is, for telling a late or replayed one: the order of statuses, with a cancellation past them all
+ * (it is final at Artelo too); -1 for one without a place (unmapped, not yet Artelo's, refunded or none)
  */
-async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipments: readonly Shipment[] | null): Promise<UpdateOutcome | "raced"> {
+const standing = (status: OrderStatus | null) => (status === "cancelled" ? 5 : status ? (RANK[status] ?? -1) : -1);
+
+/**
+ * What one status did: "applied" moved the order, "recorded" stored only Artelo's status and the check time, "stale" wrote
+ * nothing (the status Artelo last reported again, or one at or below where the order and Artelo's last status already
+ * stand: a replay or a late arrival), "raced" moved nothing because the order changed between the read and the write
+ */
+type Applied = "applied" | "recorded" | "stale" | "raced";
+
+/**
+ * One status against the order as read. Every move is conditional on the status and attention reason it was decided
+ * from, so a refund or another delivery landing meanwhile is never overwritten
+ */
+async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipments: readonly Shipment[] | null): Promise<Applied> {
   const { db } = deps;
   const now = deps.now();
   const target = mapStatus(status);
-  const ignore = async () => {
-    await db.prepare("UPDATE print_orders SET artelo_status = ?, status_checked_at = ?, updated_at = ? WHERE id = ?").bind(status, now, now, order.id).run();
-    return "ignored" as const;
+  // A status the rules don't act on is recorded as Artelo's, unless it says nothing new: a late or replayed one writes
+  // nothing, so it can neither show an older status in /admin nor push the poll back
+  const ignore = async (): Promise<Applied> => {
+    if (status === order.artelo_status || (target && standing(target) <= Math.max(standing(order.status), standing(mapStatus(order.artelo_status))))) return "stale";
+    // As read, like a move, so a status that has just moved the order isn't followed by an older one recorded over it
+    const recorded = await db.prepare("UPDATE print_orders SET artelo_status = ?, status_checked_at = ?, updated_at = ? WHERE id = ? AND status = ? AND artelo_status IS ?").bind(status, now, now, order.id, order.status, order.artelo_status).run();
+    return recorded.meta.changes === 0 ? "raced" : "recorded";
   };
   if (!target) {
-    console.log("prints: artelo sent order", order.id, "a status this site doesn't map:", status);
+    if (status !== order.artelo_status) console.log("prints: artelo sent order", order.id, "a status this site doesn't map:", status);
     return ignore();
   }
   // Still being placed (an answer lost, say): only recorded, so placement's next lookup adopts the order properly rather
@@ -137,13 +153,13 @@ async function applyTo(deps: PrintDeps, order: OrderRow, status: string, shipmen
   return "applied";
 }
 
-/** Applies one status to its order: D1 only, inline; any email goes out after the answer, in waitUntil */
-export async function applyArteloUpdate(deps: PrintDeps, update: ArteloUpdate): Promise<UpdateOutcome> {
+/** As applyTo, plus "unapplied" (nothing written: a status that isn't a single word, or three lost races) and "unknown" */
+async function applyUpdate(deps: PrintDeps, update: ArteloUpdate): Promise<Exclude<Applied, "raced"> | "unapplied" | "unknown"> {
   let order = await findOrder(deps.db, update.orderId);
   if (!order) return "unknown";
   if (!statusWord(update.status)) {
     console.error("prints: artelo sent order", order.id, "a status that isn't a single word; nothing was written");
-    return "ignored";
+    return "unapplied";
   }
   // A race costs a fresh read and another go; three in a row is left to the next delivery or the poll
   for (let round = 0; round < 3; round++) {
@@ -153,20 +169,46 @@ export async function applyArteloUpdate(deps: PrintDeps, update: ArteloUpdate): 
     if (!order) return "unknown";
   }
   console.error("prints: order", order.id, "kept changing while artelo's status was applied; the poll will try again");
-  return "ignored";
+  return "unapplied";
+}
+
+/** Applies one status to its order: D1 only, inline; any email goes out after the answer, in waitUntil */
+export async function applyArteloUpdate(deps: PrintDeps, update: ArteloUpdate): Promise<UpdateOutcome> {
+  const outcome = await applyUpdate(deps, update);
+  return outcome === "applied" || outcome === "unknown" ? outcome : "ignored";
 }
 
 /** An order is polled when its last check, or its placement, is this old */
 export const POLL_AFTER = 12 * 3600;
+/** A poll that couldn't apply anything asks again this much later, rather than on every run */
+export const POLL_RETRY = 3600;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** The cron's fourth step: Artelo deletes a webhook after 20 failed deliveries, so ask (at most 20, 300ms apart; Artelo allows 50 in 10 seconds) */
+/**
+ * The poll's own stamp on an order: only while the order is still due, so it never pulls back a fresher stamp a webhook
+ * wrote meanwhile. A failure is logged and left: the order is simply asked again on the next run
+ */
+async function stamp(deps: PrintDeps, id: string, at: number, cutoff: number): Promise<void> {
+  try {
+    await deps.db.prepare("UPDATE print_orders SET status_checked_at = ? WHERE id = ? AND COALESCE(status_checked_at, placed_at, 0) < ?").bind(at, id, cutoff).run();
+  } catch (error) {
+    console.error("prints: couldn't note the check of order", id, error instanceof Error ? error.name : typeof error);
+  }
+}
+
+/**
+ * The cron's fourth step: Artelo deletes a webhook after 20 failed deliveries, so ask (at most 20, 300ms apart; Artelo
+ * allows 50 in 10 seconds). An answer that changes nothing counts as a check (asked again in 12 hours); one that can't be
+ * applied at all (no answer, another order's, an unreadable status, lost races, a throw) is asked again in an hour
+ */
 export async function pollStatuses(deps: PrintDeps, pause: (ms: number) => Promise<void> = sleep): Promise<void> {
+  const cutoff = deps.now() - POLL_AFTER;
   const { results } = await deps.db
     .prepare("SELECT id, artelo_order_id FROM print_orders WHERE artelo_order_id IS NOT NULL AND status IN ('placed', 'in_production', 'shipped', 'needs_attention') AND COALESCE(status_checked_at, placed_at, 0) < ? ORDER BY COALESCE(status_checked_at, placed_at, 0), id LIMIT 20")
-    .bind(deps.now() - POLL_AFTER)
+    .bind(cutoff)
     .all();
+  const later = () => deps.now() - POLL_AFTER + POLL_RETRY;
   let threw = 0;
   for (const [index, row] of (results as unknown as { id: string; artelo_order_id: string }[]).entries()) {
     if (index > 0) await pause(300);
@@ -175,13 +217,17 @@ export async function pollStatuses(deps: PrintDeps, pause: (ms: number) => Promi
     // An answer about another order is never applied to this one
     if (!found?.status || found.id !== row.artelo_order_id) {
       console.error("prints: couldn't check order", row.id, "at artelo:", result.ok ? "an unreadable answer" : (result.status ?? "no answer"));
+      await stamp(deps, row.id, later(), cutoff);
       continue;
     }
     try {
-      await applyArteloUpdate(deps, { orderId: row.artelo_order_id, status: found.status, shipments: found.shipments });
+      const outcome = await applyUpdate(deps, { orderId: row.artelo_order_id, status: found.status, shipments: found.shipments });
+      if (outcome === "stale") await stamp(deps, row.id, deps.now(), cutoff);
+      else if (outcome === "unapplied" || outcome === "unknown") await stamp(deps, row.id, later(), cutoff);
     } catch (error) {
       threw += 1;
       console.error("prints: couldn't apply artelo's status to order", row.id, error instanceof Error ? error.name : typeof error);
+      await stamp(deps, row.id, later(), cutoff);
     }
   }
   // Still the cron's failure to log, once the others have had their turn
