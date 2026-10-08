@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import OrdersAdmin from "../../src/components/admin/OrdersAdmin.astro";
 import { runAction, type ActionDeps } from "../../src/lib/admin/actions";
 import { loadOrdersAdmin, stamp } from "../../src/lib/prints/admin";
+import { REFUND_REASON } from "../../src/lib/prints/artelo-status";
 import { placeOrder } from "../../src/lib/prints/place";
 import { getOrder, readSettings } from "../../src/lib/prints/store";
 import { ADDRESS, captureLogs, fakeFetch, insertOrder, json, NOW, printDb, testConfig, testDeps } from "./prints-fakes";
@@ -87,6 +88,10 @@ describe("retry now never places what it mustn't", () => {
   test("a fully refunded order in needs attention with no artelo id does nothing: it would print for a refunded buyer", async () => {
     // The daily stranded-refund lookup leaves one so when artelo answers for it without a match
     expect(await unchanged({ status: "needs_attention", attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", refunded_amount: 28700, lease_until: null })).toEqual(refused);
+  });
+
+  test("an order flagged with the refund reason does nothing, even with no refund amount recorded", async () => {
+    expect(await unchanged({ status: "needs_attention", attention_reason: REFUND_REASON, refunded_amount: null, lease_until: null })).toEqual(refused);
   });
 
   test("a partly refunded order in needs attention can still be retried", async () => {
@@ -235,6 +240,14 @@ describe("the orders section", () => {
     expect(doc.querySelector("#order-01k6x00000000000000000000r form")).toBeNull();
     expect(doc.querySelector("#order-01k6x00000000000000000000r a.refund")).not.toBeNull();
     expect(doc.querySelector('#order-01k6x00000000000000000000p form input[name="intent"][value="order.retry"]')).not.toBeNull();
+  });
+
+  test("an order flagged with the refund reason shows no retry, even with no refund amount recorded", async () => {
+    const db = await printDb();
+    await insertOrder(db, { id: "01k6x00000000000000000000f", status: "needs_attention", attention_reason: REFUND_REASON, refunded_amount: null });
+    const doc = await render(OrdersAdmin, { data: await loadOrdersAdmin(db, testConfig(), NOW), failure: null });
+    expect(doc.querySelector("#order-01k6x00000000000000000000f")).not.toBeNull();
+    expect(doc.querySelector("#order-01k6x00000000000000000000f form")).toBeNull();
   });
 
   test("the delivery reads as the buyer saw it: with destination taxes when the quote carried tax, plain otherwise (spec 16.1)", async () => {

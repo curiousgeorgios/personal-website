@@ -4,6 +4,7 @@ import { photoCacheTag } from "../media";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
 import { insertGrant, revokeCatalogueLink } from "../photos/store";
 import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
+import { REFUND_REASON } from "../prints/artelo-status";
 import { writeSetting } from "../prints/store";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
@@ -513,16 +514,17 @@ async function saveBuffer(form: FormData, { db }: ActionDeps): Promise<ActionRes
  * retry now (spec 20): one conditional write sets an attention order Artelo doesn't have back to paid, with a fresh
  * window, and only then does placeOrder run it, with its claim, lookup and fence (ADR-0026); nothing here talks to
  * Artelo. A live lease means an attempt is still running, so it is left alone. Any other status is never touched: a
- * refunded order's lease is the marker that Artelo may have it, and stays. Nor is a fully refunded order, which the daily
- * stranded-refund lookup can leave in needs_attention with no Artelo id: retrying it would print for a refunded buyer
+ * refunded order's lease is the marker that Artelo may have it, and stays. Nor is a fully refunded order, or one flagged
+ * with the refund reason (the daily stranded-refund lookup leaves those in needs_attention with no Artelo id, whatever
+ * refund amount is recorded): retrying either would print for a refunded buyer
  */
 async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<ActionResult> {
   const id = String(form.get("id") ?? "");
   if (!ORDER_ID.test(id)) return gone("order");
   const now = Math.floor(Date.now() / 1000);
   const result = await db
-    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND (lease_until IS NULL OR lease_until < ?)")
-    .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, now)
+    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND attention_reason IS NOT ? AND (lease_until IS NULL OR lease_until < ?)")
+    .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, REFUND_REASON, now)
     .run();
   if (result.meta.changes > 0) {
     orders?.placeLater(id);

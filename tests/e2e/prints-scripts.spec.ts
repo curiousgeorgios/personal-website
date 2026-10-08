@@ -31,7 +31,7 @@ function run(args: string[], env: Record<string, string>): Promise<{ status: num
  * - every mode makes production US$5.00 a print (the catalogue's shipping matching Price Check's freight), so every margin
  *   clears and only what the mode changes can fail the run;
  * - "missing": Get Orders' name filter finds nothing; "renamed": each order is listed with our id under name, beside a
- *   buyer's details; "unreadable": Get Orders answers no list;
+ *   buyer's details; "unreadable": Get Orders answers no list; "refused": it answers 400 with a message naming a buyer;
  * - "flaky": the first try of every request answers 429; "busy": the catalogue's costs always answer 503;
  * - "hooks-unreadable": Get Webhooks answers no list; "hooks-down": it answers 503.
  * In process, so the scripts run through run()'s async spawn
@@ -58,6 +58,7 @@ async function proxy() {
     if (mode === "busy" && route === "POST /catalog/get-costs") return answer(503, { message: "unavailable" });
     if (mode === "hooks-unreadable" && route === "GET /webhooks/get") return answer(200, { hooks: "?" });
     if (mode === "hooks-down" && route === "GET /webhooks/get") return answer(503, { message: "unavailable" });
+    if (mode === "refused" && route === "GET /orders/get") return answer(400, { message: "no order for Ada Lovelace at 12 Example Street, Bondi Beach" });
     const upstream = await fetch(`${STAND_IN}${path}`, {
       method: request.method, headers: { authorization: request.headers.authorization ?? "", "content-type": "application/json" }, body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
     });
@@ -152,8 +153,18 @@ test.describe("prints:webhook", () => {
   });
 });
 
-/** prints:check against a store (the prints server's own, read only) */
-const printCheck = (base: string, store = ".wrangler/prints") => run(["scripts/print-check.mjs", "--local", "--persist-to", store], { ARTELO_API_BASE: base, PRINTS_CHECK_PACE_MS: "0", PRINTS_CHECK_RETRY_MS: "0" });
+/**
+ * prints:check against a store (the prints server's own, read only). Two readers opening one local store at once can fail
+ * with wrangler's "internal error" (as printsD1 knows); the script reads D1 before it asks Artelo anything, so a run that
+ * failed there did nothing, and that failure alone is run again
+ */
+async function printCheck(base: string, store = ".wrangler/prints") {
+  for (let attempt = 1; ; attempt++) {
+    const result = await run(["scripts/print-check.mjs", "--local", "--persist-to", store], { ARTELO_API_BASE: base, PRINTS_CHECK_PACE_MS: "0", PRINTS_CHECK_RETRY_MS: "0" });
+    if (attempt >= 4 || result.stdout !== "" || !/internal error/i.test(result.stderr)) return result;
+    await new Promise((resolve) => setTimeout(resolve, 200 + Math.floor(Math.random() * 600)));
+  }
+}
 
 test.describe("prints:check", () => {
   // One at a time: each opens the prints server's store beside the running server
@@ -174,23 +185,23 @@ test.describe("prints:check", () => {
     const result = await printCheck(STAND_IN);
     // The stand-in's US$40.00 production a print sinks the small unframed margin, so the run fails, as it should
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain("rate a$1.50 per us$1, buffer 8%");
-    expect(result.stdout).toMatch(/FAIL 2:3 small x8x12 unframed to sydney opera house: the margin is -?\d+%, under 15%/);
+    expect(result.stdout, result.stderr).toContain("rate a$1.50 per us$1, buffer 8%");
+    expect(result.stdout, result.stderr).toMatch(/FAIL 2:3 small x8x12 unframed to sydney opera house: the margin is -?\d+%, under 15%/);
     // A loss reads as one, rather than stopping the run
-    expect(result.stdout).toMatch(/2:3 small x8x12 unframed to sydney opera house: production us\$40\.00 \(\$61\.80\), price \$59, card fee \$2\.37, freight shortfall \$0, margin -\$5\.17 \(-9%\), delivery \$49/);
-    expect(result.stdout).toContain("two prints to the white house: freight us$30.00 together; alone us$30.00 and us$30.00");
-    expect(result.stdout).toContain("antarctica: artelo answered 400 artelo doesn't deliver to antarctica");
+    expect(result.stdout, result.stderr).toMatch(/2:3 small x8x12 unframed to sydney opera house: production us\$40\.00 \(\$61\.80\), price \$59, card fee \$2\.37, freight shortfall \$0, margin -\$5\.17 \(-9%\), delivery \$49/);
+    expect(result.stdout, result.stderr).toContain("two prints to the white house: freight us$30.00 together; alone us$30.00 and us$30.00");
+    expect(result.stdout, result.stderr).toContain("antarctica: artelo answered 400 artelo doesn't deliver to antarctica");
     // The test order's artelo id, so george can find it there
-    expect(result.stdout).toMatch(/^lookup check: test order artelo-\d+ created \(Received\)$/m);
-    expect(result.stdout).toContain("lookup check: ok");
+    expect(result.stdout, result.stderr).toMatch(/^lookup check: test order artelo-\d+ created \(Received\)$/m);
+    expect(result.stdout, result.stderr).toContain("lookup check: ok");
     expect(result.stdout + result.stderr).not.toContain(FIXTURE_SECRETS.ARTELO_API_KEY);
   });
 
   test("passes when every margin clears and get orders finds the just-created order by name, with our id under orderId", async () => {
     const result = await through("cheap");
-    expect(result.stdout).not.toContain("FAIL");
-    expect(result.stdout).toContain("lookup check: ok");
-    expect(result.stdout).toMatch(/\n0 failed, \d+ warnings?\n$/);
+    expect(result.stdout, result.stderr).not.toContain("FAIL");
+    expect(result.stdout, result.stderr).toContain("lookup check: ok");
+    expect(result.stdout, result.stderr).toMatch(/\n0 failed, \d+ warnings?\n$/);
     expect(result.status).toBe(0);
   });
 
@@ -198,29 +209,31 @@ test.describe("prints:check", () => {
     ["missing", /^FAIL lookup check: get orders' name filter didn't find check-\d+ just after it was created, so placing could create an order twice: don't open prints$/m],
     ["renamed", /^FAIL lookup check: get orders listed 1 entry, the first with keys id, status, name, customerAddress; none holds check-\d+ under orderId, so placing can't match it: don't open prints$/m],
     ["unreadable", /^FAIL lookup check: get orders' answer for check-\d+ couldn't be read \(an object with keys orders, customer\), so every order would stall at its lookup: don't open prints$/m],
+    // Its status alone: an error body is artelo's text, which could echo anything
+    ["refused", /^FAIL lookup check: couldn't check the lookup of check-\d+ \(artelo answered 400\): don't open prints$/m],
   ] as const) {
-    test(`fails on the lookup alone, printing no buyer's details, when get orders ${{ missing: "doesn't find the order by name", renamed: "lists it without our id under orderId", unreadable: "answers no list" }[mode]} (spec 25 assumption 8)`, async () => {
+    test(`fails on the lookup alone, printing no buyer's details, when get orders ${{ missing: "doesn't find the order by name", renamed: "lists it without our id under orderId", unreadable: "answers no list", refused: "answers an error whose message names a buyer" }[mode]} (spec 25 assumption 8)`, async () => {
       const result = await through(mode);
-      expect(result.stdout).toMatch(line);
-      expect(result.stdout).not.toContain("lookup check: ok");
+      expect(result.stdout, result.stderr).toMatch(line);
+      expect(result.stdout, result.stderr).not.toContain("lookup check: ok");
       // Only the answer's shape: never a value from what get orders listed
       expect(result.stdout + result.stderr).not.toMatch(/Lovelace|Example Street|Bondi/);
-      expect(result.stdout).toMatch(/\n1 failed, \d+ warnings?\n$/);
+      expect(result.stdout, result.stderr).toMatch(/\n1 failed, \d+ warnings?\n$/);
       expect(result.status).toBe(1);
     });
   }
 
   test("a 429 or 5xx is asked once more, so a busy moment doesn't fail the run", async () => {
     const result = await through("flaky");
-    expect(result.stdout).not.toContain("FAIL");
-    expect(result.stdout).toContain("lookup check: ok");
+    expect(result.stdout, result.stderr).not.toContain("FAIL");
+    expect(result.stdout, result.stderr).toContain("lookup check: ok");
     expect(result.status).toBe(0);
   });
 
   test("an answer that never comes reads as couldn't check, never as artelo refusing the size table", async () => {
     const result = await through("busy");
-    expect(result.stdout).toContain("FAIL 2:3 small x8x12 unframed: couldn't check its catalogue costs to AU (503: unavailable)");
-    expect(result.stdout).not.toContain("refused its catalogue costs");
+    expect(result.stdout, result.stderr).toContain("FAIL 2:3 small x8x12 unframed: couldn't check its catalogue costs to AU (503: unavailable)");
+    expect(result.stdout, result.stderr).not.toContain("refused its catalogue costs");
     expect(result.status).toBe(1);
   });
 

@@ -174,7 +174,8 @@ else {
   const lookup = await call("GET", `/orders/get?limit=5&name=${encodeURIComponent(checkId)}`);
   const list = lookup.ok ? ordersList(lookup.body) : null;
   // Only the answer's shape, never a value: when the name filter is ignored, Get Orders lists real buyers' orders
-  if (!lookup.ok) fail(`lookup check: ${trouble(lookup, `the lookup of ${checkId}`)}: don't open prints`);
+  // A failed lookup gives its status alone: an error body is Artelo's text, which could echo anything
+  if (!lookup.ok) fail(`lookup check: couldn't check the lookup of ${checkId} (artelo answered ${lookup.status ?? "nothing"}): don't open prints`);
   else if (!list) fail(`lookup check: get orders' answer for ${checkId} couldn't be read (${shapeOf(lookup.body)}), so every order would stall at its lookup: don't open prints`);
   else if (list.length === 0) fail(`lookup check: get orders' name filter didn't find ${checkId} just after it was created, so placing could create an order twice: don't open prints`);
   else if (!list.some((entry) => readArteloOrder(entry)?.orderId === checkId)) fail(`lookup check: get orders listed ${shapeOf(list)}; none holds ${checkId} under orderId, so placing can't match it: don't open prints`);
