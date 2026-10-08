@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { expectSaved, openAdmin } from "./admin";
+import { ADMIN, expectSaved, openAdmin, unique } from "./admin";
 import { adminD1 } from "./photo-store";
 
 test.skip(({ browserName }) => browserName !== "chromium", "writes to the admin store: checked once, in chromium");
@@ -96,4 +96,25 @@ test("a place and a title are saved; a place the fonts can't draw comes back wit
   await title.getByRole("button", { name: "save", exact: true }).click();
   await expectSaved(page, "photographs", "gallery");
   await expect(page.locator("#photo-fixture-c-01-title")).toHaveValue("the long jetty");
+});
+
+test("an edited place and title show on the gallery and the photo's page", async ({ page }) => {
+  await openPost(page, "fixture-c");
+  const place = intent(post(page, "fixture-c"), "post.place");
+  await place.getByLabel("place").fill("cottesloe, perth");
+  await place.getByRole("button", { name: "save", exact: true }).click();
+  await expectSaved(page, "photographs", "gallery");
+  await openPost(page, "fixture-c");
+  const title = intent(page.locator("#photo-fixture-c-01"), "photo.title");
+  await title.getByLabel("title").fill("the long jetty");
+  await title.getByRole("button", { name: "save", exact: true }).click();
+  await expectSaved(page, "photographs", "gallery");
+  // A fresh query misses any cached copy: local runs have no purge
+  // The gallery lists two entries a page, so fixture-c is on the page after fixture-b (posted 14 june 2026)
+  await page.goto(`${ADMIN}/photos?before=${Date.parse("2026-06-14T09:15:00+10:00") / 1000}&fresh=${unique()}`);
+  await expect(page.locator("#post-fixture-c .entry-head")).toHaveText("01.03.26 · cottesloe, perth");
+  await expect(page.locator("#post-fixture-c img")).toHaveAttribute("alt", "the long jetty");
+  await page.goto(`${ADMIN}/photos/fixture-c-01?fresh=${unique()}`);
+  await expect(page.locator("h1")).toHaveText("the long jetty");
+  await expect(page.locator(".photo-page .where")).toHaveText("01.03.26 · cottesloe, perth");
 });

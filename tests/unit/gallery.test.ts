@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { dateAndPlace, EAGER_FRAMES, frameNumber, frameSizes, frameView, longDate, photoAlt, previewOf, srcsetOf } from "../../src/lib/photos/gallery";
+import { dateAndPlace, EAGER_FRAMES, frameNumber, frameSizes, frameView, longDate, photoAlt, photoName, photoSizes, previewOf, srcsetOf } from "../../src/lib/photos/gallery";
 import type { PublicPhoto } from "../../src/lib/photos/store";
 
 const ID = "DFkL1xrsnOH-02";
@@ -58,5 +58,17 @@ describe("frames", () => {
     });
     expect(frameView(portrait({ previews: portrait().previews.slice(2) }), 0, 1)).toBeNull();
     expect(EAGER_FRAMES).toBe(8);
+  });
+});
+
+describe("the photo page", () => {
+  test("sizes follow the photograph's ratio under the 82svh cap", () => {
+    expect(photoSizes(4000, 6000)).toBe("(max-width: 679px) min(calc(100vw - 48px), calc(82svh * 0.6667)), min(710px, calc(82svh * 0.6667))");
+    expect(photoSizes(6000, 4000)).toBe("(max-width: 679px) min(calc(100vw - 48px), calc(82svh * 1.5)), min(710px, calc(82svh * 1.5))");
+  });
+
+  test("a photograph's name is its title in quotes, or which photo of the post it is", () => {
+    expect(photoName(portrait({ title: "the long jetty" }), 0, 1)).toBe('"the long jetty"');
+    expect(photoName(portrait(), 1, 14)).toBe("photo 2 of 14 from 02.02.25");
   });
 });

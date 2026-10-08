@@ -145,6 +145,31 @@ export async function entryPage(db: D1Database, before: number | null, limit: nu
   };
 }
 
+/** One photograph's page (spec 4): the photograph, and where it sits among its post's published photographs */
+export interface PhotoPage {
+  photo: PublicPhoto;
+  /** The post's time, for the link back to its entry */
+  publishedAt: number;
+  index: number;
+  total: number;
+  previous: string | null;
+  next: string | null;
+}
+
+/** A published photograph with only its 960 and 1600 previews, and its neighbours; null for anything else */
+export async function photoPageData(db: D1Database, id: string): Promise<PhotoPage | null> {
+  if (!PHOTO_ID.test(id)) return null;
+  const [found, siblings] = await db.batch([
+    db.prepare(`${PUBLIC} WHERE photos.id = ? AND photos.published = 1`).bind(id),
+    db.prepare("SELECT id FROM photos WHERE published = 1 AND collection = (SELECT collection FROM photos WHERE id = ?) ORDER BY position").bind(id),
+  ]);
+  const row = (found.results as unknown as PublicPhotoRow[])[0];
+  if (!row) return null;
+  const ids = (siblings.results as unknown as { id: string }[]).map((sibling) => sibling.id);
+  const index = ids.indexOf(id);
+  return { photo: publicPhoto(row, [960, 1600]), publishedAt: row.published_at, index, total: ids.length, previous: ids[index - 1] ?? null, next: ids[index + 1] ?? null };
+}
+
 export async function grantIsActive(db: D1Database, token: PhotoToken, now: number): Promise<boolean> {
   const row = await db.prepare("SELECT photo_id, expires_at, revoked_at FROM photo_download_grants WHERE id = ?").bind(token.grantId)
     .first<{ photo_id: string | null; expires_at: number; revoked_at: number | null }>();

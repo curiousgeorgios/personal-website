@@ -83,3 +83,17 @@ export function frameView(photo: PublicPhoto, index: number, total: number): Fra
 
 /** Only the first row of the page's first entry loads eagerly: eight frames at most (spec 3.3) */
 export const EAGER_FRAMES = 8;
+
+/**
+ * The photo page's sizes (spec 4). The picture is capped at 82svh, which narrows a portrait, so its width follows its
+ * ratio: a 2:3 portrait on a 900px-tall laptop is about 492px wide and fetches the 960, not the 1600.
+ */
+export function photoSizes(width: number, height: number): string {
+  const ratio = Number((width / height).toFixed(4));
+  return `(max-width: 679px) min(calc(100vw - 48px), calc(82svh * ${ratio})), min(710px, calc(82svh * ${ratio}))`;
+}
+
+/** How one photograph is named in a line of text (spec 4; plan B's checkout, order page and emails): its title in quotes, or photo 2 of 14 from 02.02.25 */
+export function photoName(photo: Pick<PublicPhoto, "title" | "date">, index: number, total: number): string {
+  return photo.title ? `"${photo.title}"` : `photo ${index + 1} of ${total} from ${formatLogDate(photo.date, "day")}`;
+}

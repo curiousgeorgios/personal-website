@@ -15,7 +15,7 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
-    { name: "phone", use: { ...devices["iPhone 13 Mini"] }, testMatch: /\/(smoke|logbook|labels|layout|log|deck-list|admin-layout|gallery)\.spec\.ts$/ },
+    { name: "phone", use: { ...devices["iPhone 13 Mini"] }, testMatch: /\/(smoke|logbook|labels|layout|log|deck-list|admin-layout|gallery|photo-page)\.spec\.ts$/ },
   ],
   webServer: remote
     ? undefined

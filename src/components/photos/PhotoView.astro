@@ -1,0 +1,34 @@
+---
+import Row from "../Row.astro";
+import SayHi from "../SayHi.astro";
+import { dateAndPlace, photoAlt, photoSizes, previewOf, srcsetOf } from "../../lib/photos/gallery";
+import type { PhotoPage } from "../../lib/photos/store";
+
+interface Props {
+  page: PhotoPage;
+}
+
+const { photo, index, total, previous, next, publishedAt } = Astro.props.page;
+const large = previewOf(photo, 1600, "webp");
+const medium = previewOf(photo, 960, "webp");
+const line = dateAndPlace(photo.date, photo.place);
+const sizes = photoSizes(photo.width, photo.height);
+---
+<main class="book photo-page">
+  <Row label="photo" head>
+    {/* width and height from the 1600, so the box is known before the image loads; no zoom, the 1600 is the largest the site serves (spec 4) */}
+    <picture class="photo">
+      <source type="image/avif" srcset={srcsetOf(photo, [960, 1600], "avif")} sizes={sizes} />
+      <img src={medium?.url} srcset={srcsetOf(photo, [960, 1600], "webp")} sizes={sizes} width={large?.width} height={large?.height}
+        alt={photoAlt(photo, index, total)} loading="eager" fetchpriority="high" decoding="async" />
+    </picture>
+    <h1>{photo.title || line}</h1>
+    {photo.title && <p class="where">{line}</p>}
+    {/* Each step is a nowrap unit with its separator, so a phone wraps between steps and never strands a dot or splits a name */}
+    <p class="photo-nav">photo {index + 1} of {total}
+      {previous && <> <span class="step">· <a href={`/photos/${previous}`} rel="prev"><span class="chev back" aria-hidden="true"></span>previous</a></span></>}
+      {next && <> <span class="step">· <a href={`/photos/${next}`} rel="next">next<span class="chev ahead" aria-hidden="true"></span></a></span></>}
+      {" "}<span class="step">· <a href={`/photos?before=${publishedAt + 1}#post-${photo.collection}`}>the whole entry</a></span></p>
+  </Row>
+  <Row label="say hi" id="say-hi"><SayHi /></Row>
+</main>

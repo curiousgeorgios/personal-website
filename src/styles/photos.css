@@ -15,6 +15,16 @@
 }
 .photos a.more { text-decoration: none; }
 .down { margin-top: 18px; color: var(--muted); }
+/* One photograph (spec 4): the box is known before the image loads, and a tall portrait fits the viewport, letterboxed on paper */
+.photo-page .photo img { display: block; width: 100%; height: auto; max-height: 82svh; object-fit: contain; }
+.photo-page h1 { margin-top: 20px; }
+.photo-page .where { margin-top: 8px; }
+.photo-nav { margin-top: 14px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
+/* On a phone the line wraps between steps: a step is its dot and its link */
+.photo-nav .step { white-space: nowrap; }
+/* Drawn chevrons, as the log's: DM Mono has no arrow glyphs */
+.photo-nav .chev { display: inline-block; width: 6px; height: 6px; border: solid currentColor; border-width: 0 0 1px 1px; transform: translateY(-1px) rotate(45deg); margin: 0 6px 0 2px; }
+.photo-nav .chev.ahead { transform: translateY(-1px) rotate(-135deg); margin: 0 2px 0 6px; }
 /* The notebook's phone breakpoint, as PHONE_MEDIA in gallery.ts */
 @media (max-width: 680px) {
   .frame-link img { height: 88px; }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { entryOptions } from "../../src/lib/photos/http";
-import { entryPage, photoById, photoPage } from "../../src/lib/photos/store";
+import { entryPage, photoById, photoPage, photoPageData } from "../../src/lib/photos/store";
 import { sqliteD1 } from "./sqlite-d1";
 
 const SHA = "d4".repeat(32);
@@ -74,6 +74,21 @@ describe("entryPage", () => {
     const page = await photoPage(db, -1, 48);
     expect(page.photos[0]).toMatchObject({ id: "oldest-01", date: "2025-02-02", place: "valletta, malta" });
     expect(page.photos[0].previews).toHaveLength(8);
+  });
+});
+
+describe("photoPageData", () => {
+  test("gives a published photo with only its 960 and 1600 previews, and its place among the post's published photos", async () => {
+    const page = (await photoPageData(db, "middle-03"))!;
+    expect(page).toMatchObject({ index: 1, total: 2, previous: "middle-01", next: null, publishedAt: Date.parse("2025-08-09T16:45:00+10:00") / 1000 });
+    expect(page.photo).toMatchObject({ id: "middle-03", date: "2025-08-09", place: null });
+    expect(page.photo.previews.map((p) => p.url.split("/").at(-1))).toEqual(["960.webp", "960.avif", "1600.webp", "1600.avif"]);
+    expect(await photoPageData(db, "middle-01")).toMatchObject({ index: 0, total: 2, previous: null, next: "middle-03" });
+  });
+
+  test("a hidden, unknown, malformed or orphaned photo has no page", async () => {
+    await photo("orphan-01", "orphan", true);
+    for (const id of ["middle-02", "nobody-01", "../x", "orphan-01"]) expect(await photoPageData(db, id)).toBeNull();
   });
 });
 
