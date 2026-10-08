@@ -179,16 +179,18 @@ async function succeed(deps: PrintDeps, order: OrderRow, found: ArteloOrder): Pr
   if (result.meta.changes === 0) {
     // The order left paid while this attempt held the lease: a full refund landed. Artelo has it all the same, so it
     // keeps Artelo's id and needs George to cancel it there, never silently printed for a refunded buyer. An id already
-    // recorded is never replaced: a second Artelo order is logged by both ids, so neither is lost
+    // recorded is never replaced: a second Artelo order is logged by both ids, so neither is lost. The id kept comes back
+    // from the write itself (RETURNING), so the two-orders line never hangs on a read afterwards
+    let recorded: string | null = null;
     try {
-      await deps.db
-        .prepare("UPDATE print_orders SET artelo_order_id = COALESCE(artelo_order_id, ?), artelo_status = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_status END, artelo_cost = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_cost END, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ?")
+      const kept = await deps.db
+        .prepare("UPDATE print_orders SET artelo_order_id = COALESCE(artelo_order_id, ?), artelo_status = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_status END, artelo_cost = CASE WHEN artelo_order_id IS NULL OR artelo_order_id = ? THEN ? ELSE artelo_cost END, status = CASE WHEN status = 'refunded' THEN 'needs_attention' ELSE status END, attention_reason = CASE WHEN status = 'refunded' THEN ? ELSE attention_reason END, attention_notified_at = CASE WHEN status = 'refunded' THEN NULL ELSE attention_notified_at END, lease_until = NULL, updated_at = ? WHERE id = ? RETURNING artelo_order_id")
         .bind(found.id, found.id, found.status, found.id, cost, REFUND_REASON, now, order.id)
-        .run();
+        .first<{ artelo_order_id: string | null }>();
+      recorded = kept?.artelo_order_id ?? null;
     } catch (error) {
       throw new Unrecorded(error instanceof Error ? error.name : typeof error);
     }
-    const recorded = (await getOrder(deps.db, order.id))?.artelo_order_id;
     if (recorded && recorded !== found.id) console.error("prints: order", order.id, "has two artelo orders,", recorded, "and", `${found.id}: cancel one in artelo`);
     else console.error("prints: order", order.id, "reached artelo after it left paid: artelo's id is kept, and a refunded order is flagged for george");
     await mailNow(deps);
@@ -267,15 +269,23 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
       .bind(deps.now() + LEASE_SECONDS, orderId, now + LEASE_SECONDS)
       .run();
     if (fenced.meta.changes === 0) {
-      // Only this attempt's own links, which nothing has: the run that took over may be using its own
+      // Only this attempt's own links, which nothing has: the run that took over may be using its own. A refunded
+      // order keeps whatever lease it has here: Task 14's daily job looks for refunded orders with a lapsed lease and no
+      // Artelo id (an attempt that stopped after it may have created), so this lease must stay as it is
       await revokeLinks(deps, orderId, grantIds, false);
       await revokeIfRefunded(deps, orderId);
       console.error("prints: order", orderId, "wasn't created: its lease was taken over or it left paid");
       return "not-due";
     }
-    // The last attempts' links go: the lookup found nothing at Artelo and the fence holds, so nothing needs them
-    await revokeLinks(deps, orderId, grantIds, true);
+    // Nothing but building the body sits between the fence and the request: any wait there would reopen the takeover
     const result = await artelo(deps, "POST", "/orders/create", createBody(order, items, links, address, deps.config));
+    // Then, whatever Artelo answered, the last attempts' links go: the lookup found nothing at Artelo and the fence
+    // held, so nothing needs them. A failure here only leaves them for the next attempt to revoke
+    try {
+      await revokeLinks(deps, orderId, grantIds, true);
+    } catch (error) {
+      console.error("prints: order", orderId, "kept its earlier links for now: revoking them failed", error instanceof Error ? error.name : typeof error);
+    }
     if (!result.ok) throw refusal(result, address);
     const created = readArteloOrder(result.body);
     if (!created) throw new Retryable("artelo's answer had no order id");
@@ -284,6 +294,8 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
     return "placed";
   } catch (error) {
     if (error instanceof Unrecorded) {
+      // Nothing is cleared, and the lease above all stays: a refunded order with a lapsed lease and no Artelo id is what
+      // Task 14's daily job looks for, to find the order at Artelo and flag it for George
       console.error("prints: order", orderId, "is at artelo but recording that failed, so nothing was cleared and its lease is left to lapse", error.message);
       throw error;
     }

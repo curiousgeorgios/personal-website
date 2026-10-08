@@ -445,6 +445,77 @@ describe("the money path's further guards", () => {
       expect(working.sort()).toEqual(sent.sort());
     });
 
+    test("a stall on revoking the last attempts' links can't let a takeover create a second order (re-review important 1)", async () => {
+      captureLogs();
+      const db = await printDb();
+      await insertOrder(db, { id: ORDER, stripe_payment_intent: "pi_test_place" });
+      // A stand-in that remembers what it made, so a lookup finds it
+      const made: { id: string; orderId: string; status: string }[] = [];
+      const fake = world({
+        [CREATE]: async (request) => {
+          const order = { id: `artelo-${made.length + 1}`, orderId: ((await request.json()) as { orderId: string }).orderId, status: "Received" };
+          made.push(order);
+          return json(order);
+        },
+        [LOOKUP]: () => json(made),
+      });
+      const later: PlaceOutcome[] = [];
+      let stalled = false;
+      const stalling = new Proxy(db, {
+        get(target, key) {
+          if (key === "prepare") return (sql: string) => {
+            const statement = target.prepare(sql);
+            if (stalled || !sql.includes("NOT IN (SELECT value FROM json_each")) return statement;
+            stalled = true;
+            // The first attempt's revoke stalls past its lease while a second run claims the order and does its work
+            return { bind: (...values: unknown[]) => ({ run: async () => {
+              later.push(await placeOrder(testDeps(db, { fetch: fake.fetch, now: () => NOW + LEASE_SECONDS + 1 }), ORDER));
+              return statement.bind(...values).run();
+            } }) };
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const first = await placeOrder(testDeps(stalling, { fetch: fake.fetch }), ORDER);
+      expect(stalled).toBe(true);
+      expect(creates(fake)).toHaveLength(1);
+      expect([first, ...later]).toEqual(["placed", "adopted"]);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-1" });
+      // The links artelo fetches are the ones it was sent
+      const sent = await Promise.all((JSON.parse(creates(fake)[0].body).items as { productInfo: { designs: { sourceImage: { url: string } }[] } }[]).map(async (item) => (await verifyPhotoToken(PHOTO_KEY, new URL(item.productInfo.designs[0].sourceImage.url).searchParams.get("token")!, NOW))!.grantId));
+      const working = (await db.prepare("SELECT id FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).all()).results.map((row) => row.id);
+      expect(working.sort()).toEqual(sent.sort());
+    });
+
+    test("a duplicate is logged by both ids even when reading the order back would fail (re-review minor)", async () => {
+      const logs = captureLogs();
+      const db = await printDb();
+      await insertOrder(db, { id: ORDER, stripe_payment_intent: "pi_test_place" });
+      let fellBack = false;
+      const unreadable = new Proxy(db, {
+        get(target, key) {
+          if (key === "prepare") return (sql: string) => {
+            if (sql.includes("COALESCE(artelo_order_id")) fellBack = true;
+            if (fellBack && sql === "SELECT * FROM print_orders WHERE id = ?") throw new Error("D1 is down");
+            return target.prepare(sql);
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const fake = world({
+        [CREATE]: async (request) => {
+          await db.prepare("UPDATE print_orders SET status = 'placed', artelo_order_id = 'artelo-0' WHERE id = ?").bind(ORDER).run();
+          return accepted(request);
+        },
+      });
+      await placeOrder(testDeps(unreadable, { fetch: fake.fetch }), ORDER);
+      expect(fellBack).toBe(true);
+      expect(logs()).toContain(`prints: order ${ORDER} has two artelo orders, artelo-0 and artelo-1: cancel one in artelo`);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "placed", artelo_order_id: "artelo-0" });
+    });
+
     test("another run's lease on a still-paid order fences the create out, and is left in place", async () => {
       captureLogs();
       const holder: { db?: D1Database } = {};
@@ -515,7 +586,8 @@ describe("the money path's further guards", () => {
       });
       await expect(placeOrder(testDeps(failing, { fetch: fake.fetch }), ORDER)).rejects.toThrow();
       expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", lease_until: NOW + LEASE_SECONDS });
-      // Its links stay working: artelo has the order and may still be fetching them
+      // Placement leaves its links alone here; for a refunded order it is the refund webhook that revokes them (Task 10),
+      // and the kept lease is what Task 14's daily job finds this order by
       expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants WHERE order_id = ? AND revoked_at IS NULL").bind(ORDER).first("n")).toBe(2);
     });
 
