@@ -10,13 +10,17 @@ import LatelyAdmin from "../../components/admin/LatelyAdmin.astro";
 import SnapshotsAdmin from "../../components/admin/SnapshotsAdmin.astro";
 import PhotographsAdmin from "../../components/admin/PhotographsAdmin.astro";
 import LinksAdmin from "../../components/admin/LinksAdmin.astro";
+import OrdersAdmin from "../../components/admin/OrdersAdmin.astro";
 import { sessionEnds } from "../../lib/admin/access";
 import type { ActionFailure, AdminSection, IssuedLink } from "../../lib/admin/actions";
 import { loadAdmin } from "../../lib/admin/store";
 import { submitForm } from "../../lib/admin/submit";
+import { loadOrdersAdmin, type OrdersAdmin as OrdersData } from "../../lib/prints/admin";
+import { printConfig, printDeps } from "../../lib/prints/config";
+import { placeOrder } from "../../lib/prints/place";
 import "../../styles/admin.css";
 
-const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records", "snapshots", "photographs", "links"];
+const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records", "snapshots", "photographs", "links", "orders"];
 
 // Every write (spec 7). Success redirects with 303 (post, redirect, get), so a reload never repeats a write; a failure
 // renders the page again below with its status (422, or 500 when something unexpected broke) and the failed form open.
@@ -25,11 +29,19 @@ let failure: ActionFailure | null = null;
 let issued: IssuedLink | null = null;
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData().catch(() => null);
+  const waitUntil = (promise: Promise<unknown>) => Astro.locals.cfContext.waitUntil(promise);
+  const prints = printDeps(env, waitUntil);
   const deps = {
     db: env.DB, media: env.MEDIA, images: env.IMAGES, snapshots: env.SNAPSHOTS, prints: env.PHOTO_PRINTS,
     photoLinkSecret: env.PHOTO_LINK_SECRET, origin: Astro.url.origin,
+    // retry now places in the background, only through placeOrder; the saved line asks George to refresh (spec 20)
+    orders: {
+      placeLater: (orderId: string) =>
+        waitUntil(placeOrder(prints, orderId).catch((error: unknown) => console.error("admin: retrying order", orderId, "failed outright; the cron will pick it up", error instanceof Error ? error.name : typeof error))),
+      retryWindow: prints.config.retryWindow,
+    },
   };
-  const outcome = await submitForm(form, deps, Astro.cache, (promise) => Astro.locals.cfContext.waitUntil(promise));
+  const outcome = await submitForm(form, deps, Astro.cache, waitUntil);
   if ("redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
   if ("issued" in outcome) issued = outcome.issued;
   else {
@@ -39,10 +51,18 @@ if (Astro.request.method === "POST") {
 }
 
 const data = await loadAdmin(env.DB);
+// Its own read, so a prints problem (migration 0007 not applied, say) can't take the rest of the admin down
+let orders: OrdersData | null = null;
+try {
+  orders = await loadOrdersAdmin(env.DB, printConfig(env), Math.floor(Date.now() / 1000));
+} catch (error) {
+  console.error("admin: the orders section couldn't load", error instanceof Error ? error.message : String(error));
+}
 const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url.searchParams.get("saved")) ?? null);
 // Photographs show on the gallery, everything else on the logbook (spec 6.2)
 const later = Astro.url.searchParams.has("later");
 const savedLine = (section: AdminSection) => {
+  if (section === "orders") return Astro.url.searchParams.get("note") === "retry" ? "retrying - refresh in a minute to see how it went." : "saved - it applies to the next quote.";
   if (section === "links") return "saved - that link no longer works.";
   const where = section === "photographs" ? "gallery" : "logbook";
   return later ? `saved - the ${where} may show the old version for a little while.` : `saved - it's on the ${where} now.`;
@@ -67,5 +87,6 @@ const until = Astro.locals.adminUntil === undefined ? null : sessionEnds(Astro.l
     <AdminRow label="snapshots" id="snapshots" notice={notice("snapshots")}><SnapshotsAdmin items={[...data.now, ...data.before]} failure={failure} /></AdminRow>
     <AdminRow label="photographs" id="photographs" notice={notice("photographs")}><PhotographsAdmin posts={data.photographs} failure={failure} /></AdminRow>
     <AdminRow label="links" id="links" notice={notice("links")}><LinksAdmin links={data.links} failure={failure} issued={issued} /></AdminRow>
+    <AdminRow label="orders" id="orders" notice={notice("orders")}><OrdersAdmin data={orders} failure={failure} /></AdminRow>
   </main>
 </Notebook>

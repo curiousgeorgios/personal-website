@@ -17,6 +17,8 @@ const PURGES: Record<AdminSection, string[]> = {
   snapshots: ["logbook"],
   photographs: ["photos", "logbook"],
   links: [],
+  // The buffer is read by the next quote and retry now changes no page: nothing cached shows either (spec 20)
+  orders: [],
 };
 
 /**
@@ -40,7 +42,7 @@ export async function submitForm(
       if (result.issued) return { issued: result.issued };
       const tags = [...PURGES[result.section], ...(result.purge ?? [])];
       const purged = tags.length === 0 || (await purgeTags(cache, tags));
-      return { redirect: `/admin/?saved=${result.section}${purged ? "" : "&later=1"}#${result.section}` };
+      return { redirect: `/admin/?saved=${result.section}${result.note ? `&note=${result.note}` : ""}${purged ? "" : "&later=1"}#${result.section}` };
     } catch (error) {
       console.error("admin: a save failed unexpectedly", error);
       return { failure: UNEXPECTED, status: 500 };

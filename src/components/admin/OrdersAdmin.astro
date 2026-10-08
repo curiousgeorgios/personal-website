@@ -1,0 +1,85 @@
+---
+import Field from "./Field.astro";
+import { formState } from "../../lib/admin/form-state";
+import type { ActionFailure } from "../../lib/admin/actions";
+import { refundHref, STATUS_WORDS, stamp, trackingHref, type OrdersAdmin } from "../../lib/prints/admin";
+import { aud, rateText, usd } from "../../lib/prints/money";
+import { formatLogDate } from "../../lib/text";
+
+// The print orders section (spec 20): the state of prints, the buffer, then the orders. It purges nothing. Everything
+// Artelo or Stripe sent (reasons, ids, tracking) renders as text, escaped; only an https tracking address becomes a link
+interface Props {
+  data: OrdersAdmin | null;
+  failure: ActionFailure | null;
+}
+
+const { data, failure } = Astro.props;
+const buffer = formState(failure, "buffer", { buffer: data ? String(Math.round(data.buffer * 100)) : "8" });
+const frameWord = (frame: string) => (frame === "oak" ? "oak" : "unframed");
+---
+{data === null ? (
+  <p class="empty">orders aren't loading right now. try again in a bit.</p>
+) : (
+  <>
+    <ul class="orders-status">
+      <li>{data.status.open ? "prints are open" : `prints are closed: ${data.status.reason}`}</li>
+      <li>{data.rate === null ? "no exchange rate yet" : `us$1 = ${rateText(data.rate)}${data.rateDate ? ` · ecb rate of ${formatLogDate(data.rateDate, "day")}` : ""}${data.stale ? " - older than a week, check the rate job" : ""}`}</li>
+      <li>{data.webhookMissing ? "artelo webhook: missing - run bun run prints:webhook --remote" : data.webhookAt !== null ? `artelo webhook: connected · last heard ${stamp(data.webhookAt)}` : "artelo webhook: not heard from yet"}</li>
+    </ul>
+    <form method="post" action="/admin/#buffer" id="buffer" class="admin-form">
+      <h3>delivery buffer</h3>
+      {buffer.errors.form && <p class="error" role="alert">{buffer.errors.form}</p>}
+      <input type="hidden" name="intent" value="prints.buffer" />
+      <Field form="buffer" name="buffer" label="buffer (%)" value={buffer.values.buffer} error={buffer.errors.buffer} required plain inputmode="numeric" maxlength={2}
+        hint="added to artelo's delivery cost for exchange-rate movement. it applies to the next quote." />
+      <button type="submit" class="button">save</button>
+    </form>
+    {data.orders.length === 0 ? (
+      <p class="empty">no print orders yet.</p>
+    ) : (
+      <ol class="entries orders-admin">
+        {data.orders.map((order) => {
+          const id = `order-${order.id}`;
+          const { errors } = formState(failure, id, {});
+          const count = order.lines.reduce((sum, line) => sum + line.quantity, 0);
+          const stuck = order.status === "needs_attention";
+          const refund = refundHref(order);
+          return (
+            <li class:list={["entry", { attention: stuck }]} id={id}>
+              <div>
+                <p class="order-line">{stuck && <span class="attention-dot" aria-hidden="true"></span>}{order.paidAt !== null && `${stamp(order.paidAt)} · `}<span class="mono">{order.id}</span></p>
+                <p class="order-prints">{count} {count === 1 ? "print" : "prints"}: {order.lines.map((line, index) => <>{index > 0 && ", "}<a href={`/photos/${encodeURIComponent(line.photoId)}`}>{line.photoId}</a> {line.tier} {frameWord(line.frame)}{line.quantity > 1 && ` × ${line.quantity}`}</>)}</p>
+                <p class="order-sums">to {order.country.toLowerCase()} · {aud(order.printTotal)} + {aud(order.deliveryAmount)} = {aud(order.printTotal + order.deliveryAmount)} · {STATUS_WORDS[order.status]}{!order.livemode && " · test"}{order.refundedAmount ? ` · refunded ${aud(order.refundedAmount)}` : ""}{order.arteloId && ` · artelo ${order.arteloId}${order.arteloCost !== null ? ` ${usd(order.arteloCost)}` : ""}`}</p>
+                {stuck && order.reason && <p class="reason">{order.reason}</p>}
+                {order.status === "shipped" && order.shipments.length > 0 && (
+                  <p class="order-tracking">{order.shipments.map((shipment, index) => {
+                    const href = trackingHref(shipment.url);
+                    return <>{index > 0 && " · "}{href ? <a href={href} rel="noopener noreferrer">{shipment.carrier} {shipment.number}<span class="chev" aria-hidden="true"></span></a> : `${shipment.carrier} ${shipment.number}`}</>;
+                  })}</p>
+                )}
+                {(refund || (stuck && order.arteloId)) && (
+                  <p class="order-actions">
+                    {refund && <a class="refund" href={refund} target="_blank" rel="noopener noreferrer">refund in stripe<span class="chev" aria-hidden="true"></span></a>}
+                    {stuck && order.arteloId && <span class="open-in-artelo">open it in artelo (order {order.arteloId})</span>}
+                  </p>
+                )}
+                {stuck && !order.arteloId ? (
+                  <form method="post" action={`/admin/#${id}`} class="admin-form retry-form">
+                    {errors.form && <p class="error" role="alert">{errors.form}</p>}
+                    <input type="hidden" name="intent" value="order.retry" />
+                    <input type="hidden" name="id" value={order.id} />
+                    <button type="submit" class="button quiet">retry now</button>
+                  </form>
+                ) : (
+                  // A retry refused because the order moved on meanwhile: its form is gone, so the message stands on its own
+                  errors.form && <p class="error" role="alert">{errors.form}</p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    )}
+    <p class="hint orders-hint">refunds happen in stripe. a refund doesn't cancel the artelo order, and an artelo cancellation doesn't refund the buyer; a full refund of a placed order shows here as needs attention until it's cancelled in artelo.</p>
+  </>
+)}

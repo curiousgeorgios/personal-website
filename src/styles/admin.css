@@ -124,3 +124,20 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .issued .field { width: 100%; }
 .links-admin .entry { grid-template-columns: minmax(0, 1fr); }
 .links-admin .entry p { padding-top: 8px; font-size: 14.5px; }
+
+/* Print orders (spec 20): the state of prints, then the orders, needs attention first with a red dot. Nothing here moves */
+.orders-status { display: grid; gap: 2px; margin-bottom: 8px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.orders-admin .entry { grid-template-columns: minmax(0, 1fr); }
+.orders-admin .entry p { padding-top: 6px; font-size: 14.5px; overflow-wrap: anywhere; }
+.orders-admin .order-line { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+/* A photo id never splits at its hyphen */
+.orders-admin .order-prints a { white-space: nowrap; }
+.orders-admin .mono { color: var(--ink); }
+.orders-admin .reason { color: var(--error); }
+.attention-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-right: 8px; vertical-align: 1px; }
+.orders-admin .order-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.orders-admin .open-in-artelo { color: var(--muted); }
+/* Drawn chevrons, as the log's and the photo page's: DM Mono has no arrow glyphs. The rotation draws it; it never animates */
+.orders-admin .chev { display: inline-block; width: 5px; height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; transform: translateY(-1px) rotate(-135deg); margin-left: 5px; }
+.orders-admin .retry-form { padding: 6px 0 10px; }
+.orders-hint { margin-top: 10px; max-width: 40rem; }

@@ -142,4 +142,22 @@ describe("submitForm", () => {
     expect(outcome).toEqual({ redirect: "/admin/?saved=links#links" });
     expect(purge.invalidate).not.toHaveBeenCalled();
   });
+
+  test("a retry redirects to the orders section with its note, purging nothing", async () => {
+    await db.prepare("INSERT INTO print_orders (id, country, print_total, delivery_amount, status, livemode, created_at, updated_at) VALUES ('01k6x00000000000000000000a', 'AU', 1, 1, 'needs_attention', 0, 1, 1)").run();
+    const purge = cache();
+    const placeLater = vi.fn();
+    const outcome = await submitForm(formOf({ intent: "order.retry", id: "01k6x00000000000000000000a" }), { ...deps(), orders: { placeLater, retryWindow: 86_400 } }, purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=orders&note=retry#orders" });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+    expect(placeLater).toHaveBeenCalledWith("01k6x00000000000000000000a");
+  });
+
+  test("a buffer save redirects to the orders section and purges nothing: only the next quote reads it", async () => {
+    const purge = cache();
+    const outcome = await submitForm(formOf({ intent: "prints.buffer", buffer: "10" }), deps(), purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=orders#orders" });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+    expect(await db.prepare("SELECT value FROM print_settings WHERE key = 'delivery_buffer'").first("value")).toBe("0.1");
+  });
 });

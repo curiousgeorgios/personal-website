@@ -233,3 +233,14 @@ export function checkLink(fields: Fields): Checked<LinkInput> {
   tooLong(errors, fields, "note", 60);
   return finish(errors, () => ({ days: Number(fields.days), note: orNull(fields.note) }));
 }
+
+// Print orders (spec 20)
+
+export const BUFFER_FIELDS = ["buffer"] as const;
+
+/** The delivery buffer as a whole percent from 0 to 20: anything else is refused, never clamped */
+export function checkBuffer(fields: Fields): Checked<number> {
+  const errors: Fields = {};
+  if (!/^\d{1,2}$/.test(fields.buffer) || Number(fields.buffer) > 20) errors.buffer = "a whole number from 0 to 20";
+  return finish(errors, () => Number(fields.buffer));
+}

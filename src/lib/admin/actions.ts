@@ -4,10 +4,13 @@ import { photoCacheTag } from "../media";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
 import { insertGrant, revokeCatalogueLink } from "../photos/store";
 import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
+import { writeSetting } from "../prints/store";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
 import {
+  BUFFER_FIELDS,
+  checkBuffer,
   checkFact,
   checkItem,
   checkLink,
@@ -26,7 +29,7 @@ import {
   type Fields,
 } from "./validate";
 
-export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs" | "links";
+export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs" | "links" | "orders";
 
 /** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
 export interface SnapshotsService {
@@ -47,6 +50,8 @@ export interface ActionDeps {
   photoLinkSecret?: string;
   /** The site's origin, for a new link's address */
   origin?: string;
+  /** Print orders (spec 20): retry now places in the background, with a fresh window of this many seconds */
+  orders?: { placeLater(orderId: string): void; retryWindow: number };
 }
 
 export interface ActionFailure {
@@ -62,11 +67,11 @@ export interface ActionFailure {
 /** A new link exists only in the response that made it (spec 6.3): its address, or word that the same form already made one */
 export type IssuedLink = { url: string } | { repeat: true };
 
-/** `purge`: cache tags this save purges beyond its section's own (a hidden photograph's previews) */
-export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[] } | ActionFailure;
+/** `purge`: cache tags this save purges beyond its section's own (a hidden photograph's previews); `note`: which saved line to show */
+export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[]; note?: "retry" } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
-const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link") => fail(null, "", { form: `that ${what} no longer exists` });
+const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link" | "order") => fail(null, "", { form: `that ${what} no longer exists` });
 const CONFIRM = { confirm: "tick the box to remove it" };
 
 function idOf(form: FormData): number | null {
@@ -126,6 +131,10 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return issueLink(form, deps);
     case "link.revoke":
       return revokeLink(form, deps);
+    case "prints.buffer":
+      return saveBuffer(form, deps);
+    case "order.retry":
+      return retryOrder(form, deps);
     default:
       return fail(null, "", { form: "that action isn't recognised" });
   }
@@ -484,4 +493,43 @@ async function revokeLink(form: FormData, { db }: ActionDeps): Promise<ActionRes
   // Only a catalogue link: a photo grant isn't this screen's to switch off. Already revoked counts as saved (ADR-0012)
   if ((await revokeCatalogueLink(db, id)) === "photo") return gone("link");
   return { ok: true, section: "links" };
+}
+
+// Print orders (spec 20)
+
+/** A lowercase ULID: an order's id */
+const ORDER_ID = /^[0-9a-hjkmnp-tv-z]{26}$/;
+
+async function saveBuffer(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, BUFFER_FIELDS);
+  const checked = checkBuffer(fields);
+  if (!checked.ok) return fail("orders", "buffer", checked.errors, fields);
+  // Read afresh by the next quote, so it needs no deploy and no purge; a quote already sealed keeps its own (spec 16.2)
+  await writeSetting(db, "delivery_buffer", String(checked.value / 100), Math.floor(Date.now() / 1000));
+  return { ok: true, section: "orders" };
+}
+
+/**
+ * retry now (spec 20): one conditional write sets an attention order Artelo doesn't have back to paid, with a fresh
+ * window, and only then does placeOrder run it, with its claim, lookup and fence (ADR-0026); nothing here talks to
+ * Artelo. A live lease means an attempt is still running, so it is left alone. Any other status is never touched: a
+ * refunded order's lease is the marker that Artelo may have it, and stays
+ */
+async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!ORDER_ID.test(id)) return gone("order");
+  const now = Math.floor(Date.now() / 1000);
+  const result = await db
+    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND artelo_order_id IS NULL AND (lease_until IS NULL OR lease_until < ?)")
+    .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, now)
+    .run();
+  if (result.meta.changes > 0) {
+    orders?.placeLater(id);
+    return { ok: true, section: "orders", note: "retry" };
+  }
+  const row = await db.prepare("SELECT status FROM print_orders WHERE id = ?").bind(id).first<{ status: string }>();
+  if (!row) return gone("order");
+  // Already set going by an earlier tap counts as saved, and starts nothing: the first tap's attempt, or the cron, has it (ADR-0012)
+  if (row.status === "paid") return { ok: true, section: "orders", note: "retry" };
+  return fail("orders", `order-${id}`, { form: "that order can't be retried from here." });
 }
