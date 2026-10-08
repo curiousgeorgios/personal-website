@@ -36,7 +36,8 @@ test("a catalogue link lists every published photo and downloads the master, pri
   expect(files).toEqual(expect.arrayContaining(["fixture-01.jpg", "fixture-02.jpg", "fixture-f-01.jpg"]));
   expect(files).not.toContain("fixture-03.jpg");
   const first = page.locator('a[download="fixture-01.jpg"]');
-  await expect(first).toHaveText(/^download · \d+\.\d mb$/);
+  await expect(first).toHaveText(/^download · \d+\.\d mb, "a test photograph"$/);
+  await expect(first.locator(".sr-only")).toHaveCSS("position", "absolute");
   const [download] = await Promise.all([page.waitForEvent("download"), first.click()]);
   const bytes = await readFile((await download.path())!);
   const [{ print_sha256: sha }] = adminD1<{ print_sha256: string }>("SELECT print_sha256 FROM photos WHERE id = 'fixture-01'");

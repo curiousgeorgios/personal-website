@@ -18,11 +18,11 @@ describe("Downloads", () => {
     expect(text(doc.querySelector("#post-post .entry-head"))).toBe("02.02.25 · bondi, sydney");
     const links = [...doc.querySelectorAll(".download-list a")];
     expect(links.map((a) => [a.getAttribute("href"), a.getAttribute("download"), text(a)])).toEqual([
-      ["/photos/downloads/post-01?token=a.b%2Bc%2Fd", "post-01.jpg", "download · 12.4 mb"],
-      ["/photos/downloads/post-02?token=a.b%2Bc%2Fd", "post-02.jpg", "download · 1.0 mb"],
+      ["/photos/downloads/post-01?token=a.b%2Bc%2Fd", "post-01.jpg", "download · 12.4 mb, photo 1 of 2 from 02.02.25"],
+      ["/photos/downloads/post-02?token=a.b%2Bc%2Fd", "post-02.jpg", "download · 1.0 mb, photo 2 of 2 from 02.02.25"],
     ]);
-    // Each link is described by its preview's alt text, so a screen reader can tell them apart
-    expect(links[0].getAttribute("aria-describedby")).toBe("download-post-01");
+    // Each link's name says which photograph, in text only a screen reader reads, so a list of links tells them apart
+    expect(links[0].querySelector(".sr-only")!.textContent).toBe(", photo 1 of 2 from 02.02.25");
     expect(doc.querySelector("#download-post-01")!.getAttribute("alt")).toBe("photo 1 of 2 from 2 february 2025, bondi, sydney");
     const img = doc.querySelector(".download-list img")!;
     expect([img.getAttribute("loading"), img.getAttribute("alt"), img.getAttribute("src")]).toEqual(["lazy", "photo 1 of 2 from 2 february 2025, bondi, sydney", "/media/photos/previews/post-01/s/240.webp"]);

@@ -44,7 +44,7 @@ Measured on a store shaped like the real catalogue (two entries, 36 frames): 198
 
 `/admin` has two sections for photographs (spec 6):
 
-- **photographs:** one post per row, newest first, with its counts and a `raw` pill for photographs awaiting RAW review. Inside: the post's place (the place rule: lowercase, at most 60 characters, printable Latin-1; saving marks it edited, so an import keeps it), `publish all` and `hide all`, each photograph's title and its own publish or hide. Publishing checks every photograph's private JPEG and eight previews first (`src/lib/photos/publish.ts`, ten R2 checks at a time) and publishes all or none, naming the master or preview that failed for each photograph. Saves purge `photos` and `logbook`.
+- **photographs:** one post per row, newest first, with its counts and a `raw` pill for hidden photographs awaiting RAW review (publishing one is its review, so the pill goes). Inside: the post's place (the place rule: lowercase, at most 60 characters, printable Latin-1; saving marks it edited, so an import keeps it), `publish all` and `hide all`, each photograph's title and its own publish or hide. Publishing checks every photograph's private JPEG and eight previews first (`src/lib/photos/publish.ts`, ten R2 checks at a time) and publishes all or none, naming the master or preview that failed for each photograph. Saves purge `photos` and `logbook`.
 
   **What hide does:** a hidden photograph leaves every page, list and downloads page, and its previews stop being served to anyone new. `/media` checks in D1 that a preview's photograph is published and answers 404 otherwise; a hide also purges the photograph's `photo-<id>` tag, so the edge drops its cached previews (if that purge fails, the saved line says the gallery may show the old version for a little while). Publishing again brings them back. What hide can't recall: a copy already in a visitor's browser (previews are cached for a year), a saved or shared image, or a search engine's copy of one. It is the way to take a photograph down from the site, not a promise that no copy exists anywhere.
 - **links:** issue a catalogue link for 1 to 30 days with a note; it is shown once with a copy button and never stored (a nonce stops a repeated form making a second). Working links are listed with a revoke form, which switches off catalogue links only.
@@ -72,7 +72,9 @@ bun run photos:import \
 
 `photos:import` validates the whole manifest (eight previews per photograph, a post for every photograph, places by the rule, images by format, size, SHA-256 and profile, no private metadata) before touching storage. It writes posts first (a post's place only until George edits it), then uploads each photograph's objects before its row. A title comes from the manifest only when a row is first inserted; afterwards only `/admin` changes it. New or changed masters stay unpublished; an unchanged master keeps its publication. `raw_review` comes from the manifest's `needsRawReview`. No prepared photo file is committed to Git, and the prepared folder must live outside the checkout.
 
-For production the same import runs with `--remote` from the Mac, after the deploy has applied migration 0006.
+For production the same import runs with `--remote` from the Mac, after the deploy has applied migrations 0005 and 0006.
+
+The import never purges cached pages, so after a re-import that hides a changed master, moves a post's time or changes an unedited place, `/photos` and `/photos/<id>` can show the old state until their cache goes stale (five minutes, then one revalidating request). A publish or hide in `/admin` purges at once.
 
 ## Issuing links from the Mac
 
@@ -84,7 +86,7 @@ bun run photos:link --local \
   --output /Users/curiousgeorge/Documents/ChatGPT/photo-printing/recovery/private-link.json
 ```
 
-The link opens the downloads page, `/photos/downloads?token=…`. The private JSON file contains the URL, grant identifier and expiry; its mode is 0600, and the command refuses to save links into tracked areas of the website. George shares the link himself. To revoke it:
+The link opens the downloads page, `/photos/downloads?token=…`. The private JSON file contains the URL, grant identifier and expiry; its mode is 0600, and the command refuses to save links into tracked areas of the website. George shares the link himself. To revoke it (catalogue links only: a print order's photo-scoped grant is refused and keeps working, as in the admin):
 
 ```bash
 bun run photos:link --local --revoke <grant-id>
@@ -97,7 +99,7 @@ For production, use `--remote` and set `PHOTO_LINK_SECRET` in the process enviro
 In this order, because the branch binds a bucket and needs a migration the moment it deploys:
 
 1. Create the `curiousgeorge-photo-prints` R2 bucket **before this branch deploys**, because `wrangler.jsonc` binds it: `bunx wrangler r2 bucket create curiousgeorge-photo-prints --location oc`. Confirm it has no `r2.dev` URL and no custom domain; the application has no public route for its objects.
-2. Apply migration 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`), never `d1 execute --file`. The deploy job does this before it deploys, so merging is enough.
+2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`), never `d1 execute --file`. The deploy job does this before it deploys, so merging is enough. Production has never had Codex's photo backend, so both migrations, the photo routes (the owner's JSON routes included) and the bucket binding all reach production with this merge. If step 1 was missed, the job applies both migrations and then `wrangler deploy` fails on the binding: the migrations are additive and harmless, so that is a failed deploy, not a failed migration; create the bucket and rerun the job.
 3. Set `PHOTO_LINK_SECRET` as a fresh Worker secret of 64 lowercase hex characters, not the local one: `bunx wrangler secret put PHOTO_LINK_SECRET`. Without it the downloads page answers 503.
 4. From the Mac, run `photos:prepare` (the manifest is now version 2; fill `scripts/photo-cities.json` wherever it stops), then `photos:import --remote` with the same manifest and selection.
 5. In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates, which carry `raw` pills.

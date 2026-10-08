@@ -84,7 +84,7 @@ With no published photographs the `entries` row holds one line, `no photos up ye
 
 One entry per post (`photos.collection`) that has at least one published photograph, ordered by `photo_posts.published_at` descending.
 
-- `<li class="entry" id="post-<collection>">`, headed `<h2 class="entry-head"><time datetime="2025-02-02">02.02.25</time> · bondi, sydney</h2>` in DM Mono 12px, the date in `--muted`, the place in `--ink`. The ` · place` part is left out when the place is `null`. The date is the day the post went up, in the post's own time zone (section 7), formatted like log dates (R4.2, `formatLogDate`).
+- `<li class="entry" id="post-<collection>">`, headed `<h3 class="entry-head"><time datetime="2025-02-02">02.02.25</time> · bondi, sydney</h3>` (an h3, under the `entries` row's h2) in DM Mono 12px, the date in `--muted`, the place in `--ink`. The ` · place` part is left out when the place is `null`. The date is the day the post went up, in the post's own time zone (section 7), formatted like log dates (R4.2, `formatLogDate`).
 - Below it, the contact sheet: `<ol class="sheet">` of frames in post order (`photos.position`). Frames sit in rows like a contact sheet, wrapping onto as many rows as the post needs (a post holds 1 to 20 photographs): each frame image is 120px tall on screens 680px and wider and 88px below, its width following its aspect ratio, with a 6px gap. Under each frame its number in DM Mono 11.5px `--muted`: the slide number from the id (`-02` shows `02`), like the edge numbers on a contact sheet, which stays the slide number even when other slides are hidden.
 - Each frame is a link to `/photos/<id>`. Hover (fine pointers only, 200ms `ease`): the frame number turns `--ink` and a 1px `--red` outline appears around the image; no transforms. Focus-visible outlines as R12.2.
 - Alt text: the title when George has written one, otherwise `photo 2 of 14 from 2 february 2025, bondi, sydney` (place left out when unknown). `<n> of <m>` counts published photographs in post order.
@@ -191,13 +191,13 @@ Saves in `photographs` purge `photos` and `logbook` through the existing `purgeL
 
 ### 6.2 Photographs
 
-One `<details>` per post, newest first, closed unless it holds the failed form. Summary line: `02.02.25 · bondi, sydney · 14 photos, 12 published`, plus a `raw` pill with a count when any photograph in it awaits RAW review (`photos.raw_review`, section 7).
+One `<details>` per post, newest first, closed unless it holds the failed form. Summary line: `02.02.25 · bondi, sydney · 14 photos, 12 published`, plus a `raw` pill with a count when any photograph in it awaits RAW review: `photos.raw_review` (section 7) and still hidden, since publishing a RAW render is its review.
 
 Inside:
 
 - **Place:** a text field `place` with the hint `area, city. leave it empty to show no place.` Saving sets `photo_posts.place` and `place_edited = 1`, so a later import never overwrites George's edit (section 7). The **place rule**, shared with prepare (7.2): lowercased with `en-AU` rules, trimmed, at most 60 characters, printable Latin-1 only, so it renders in the subset fonts of R3; empty stores `null`. Intent `post.place`.
 - **Publish or hide the post:** `publish all 14` (intent `post.publish`) and `hide all` (intent `post.hide`). Publishing verifies every photograph in the post first (`setPublished`, the backend's checks of the private JPEG and eight previews); if any fails, nothing is published and the form says `2 photos couldn't be checked: DFkL1xrsnOH-03, DFkL1xrsnOH-07. publish the others one at a time.` with status 422.
-- **Each photograph:** its 240 preview (lazy), id, `raw` pill, a `title` field (at most 80 characters, plain text, empty allowed; intent `photo.title`) and a `publish` or `hide` button for that photograph alone (intent `photo.publish` or `photo.hide`), with the same verification.
+- **Each photograph:** its 240 preview (lazy), id, `raw` pill while it awaits review, a `title` field (at most 80 characters, plain text, empty allowed; intent `photo.title`) and a `publish` or `hide` button for that photograph alone (intent `photo.publish` or `photo.hide`), with the same verification.
 - **What hide does:** a hidden photograph leaves every page, list, feed and downloads page, and its previews stop being served: `/media/photos/previews/<id>/…` checks the photograph is published (one primary-key read in D1) and answers a hidden one's 404, `no-store`. Published previews keep `public, max-age=31536000, immutable` and carry the cache tag `photo-<id>`, and a hide purges that tag with `photos` and `logbook`, so the edge stops serving them too. Publishing again restores them. What hide can't do: a copy already in a visitor's browser cache (up to a year) or saved by someone stays theirs, so hide stops anyone new loading the photograph rather than recalling every copy (ADR-0020 as amended). The admin's thumbnails come through `/admin/media/…`, behind the admin gate and never cached, so hidden photographs still show there.
 - Saved line: `saved - the gallery may show the old version for a little while.` when the purge failed (after a hide, the edge may also keep serving its previews until the tag's purge runs), otherwise `saved - it's on the gallery now.`
 
@@ -289,7 +289,7 @@ Only George can do these:
 
 - [ ] Create the R2 bucket **before this branch deploys**, because `wrangler.jsonc` already binds it: `bunx wrangler r2 bucket create curiousgeorge-photo-prints --location oc`; confirm it has no `r2.dev` URL and no custom domain.
 - [ ] Set `PHOTO_LINK_SECRET` (64 lowercase hex characters, fresh, not the local one): `bunx wrangler secret put PHOTO_LINK_SECRET`.
-- [ ] After the deploy has applied migration 0006 (the deploy job runs `migrations apply`), run the photo import from the Mac: `photos:prepare` (now with places, dates and 240 previews, and a version 2 manifest, so a folder prepared earlier is prepared again; filling `scripts/photo-cities.json` where it stops) then `photos:import --remote`, as in docs/photo-gallery-backend.md.
+- [ ] After the deploy has applied migrations 0005 and 0006 (the deploy job runs `migrations apply`; production has never had the photo backend, so both arrive with this merge), run the photo import from the Mac: `photos:prepare` (now with places, dates and 240 previews, and a version 2 manifest, so a folder prepared earlier is prepared again; filling `scripts/photo-cities.json` where it stops) then `photos:import --remote`, as in docs/photo-gallery-backend.md.
 - [ ] Review every post in `/admin` (places included, ADR-0022) and publish what should be public, looking hardest at the 96 RAW candidates (`raw` pills).
 
 After launch (agent or George): issue the first catalogue link from `/admin` and open it on a phone.

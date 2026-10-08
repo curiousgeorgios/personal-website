@@ -21,8 +21,14 @@ try {
   if (arg("--revoke")) {
     const id = arg("--revoke");
     if (!GRANT_ID.test(id)) throw new Error("Invalid grant identifier");
-    const result = await platform.env.DB.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(Math.floor(Date.now()/1000), id).run();
-    console.log(result.meta.changes ? "Download link revoked." : "Grant unavailable or already revoked.");
+    // Catalogue links only, as revokeCatalogueLink in src/lib/photos/store.ts (which plain Node can't import): a print
+    // order's photo-scoped grant is revoked only by print code (spec 5.1)
+    const result = await platform.env.DB.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE id = ? AND photo_id IS NULL AND revoked_at IS NULL").bind(Math.floor(Date.now()/1000), id).run();
+    if (result.meta.changes) console.log("Download link revoked.");
+    else {
+      const row = await platform.env.DB.prepare("SELECT photo_id FROM photo_download_grants WHERE id = ?").bind(id).first();
+      console.log(row && row.photo_id !== null ? "That grant belongs to a print order, so it stays working; only print code revokes it." : "Grant unavailable or already revoked.");
+    }
   } else {
     let secret = process.env.PHOTO_LINK_SECRET;
     if (!secret && args.includes("--local")) {

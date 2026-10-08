@@ -17,7 +17,8 @@ describe("PhotographsAdmin", () => {
   test("each post's summary gives its date, place, counts and how many await RAW review", async () => {
     const doc = await render(PhotographsAdmin, { posts, failure: null });
     expect([...doc.querySelectorAll("details > summary .what")].map(text)).toEqual(["27.09.26 · bondi, sydney · 3 photos, 2 published", "02.02.25 · 1 photo, 1 published"]);
-    expect(text(doc.querySelector("#post-newer > summary .tagged"))).toBe("2 raw");
+    // newer-03 is a RAW render too, but published, so it counts as reviewed
+    expect(text(doc.querySelector("#post-newer > summary .tagged"))).toBe("1 raw");
     expect(doc.querySelector("#post-older > summary .tagged")).toBeNull();
   });
 
@@ -32,6 +33,7 @@ describe("PhotographsAdmin", () => {
     expect(doc.querySelector("#photo-newer-01 button[aria-label]")!.getAttribute("aria-label")).toBe("hide newer-01");
     expect(doc.querySelector("#photo-newer-02 button[aria-label]")!.getAttribute("aria-label")).toBe("publish newer-02");
     expect(text(doc.querySelector("#photo-newer-02 .tagged"))).toBe("raw");
+    expect(doc.querySelector("#photo-newer-03 .tagged")).toBeNull();
     expect(doc.querySelector<HTMLInputElement>("#photo-older-01-title")!.getAttribute("value")).toBe("the long jetty");
   });
 

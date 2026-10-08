@@ -1,7 +1,7 @@
 ---
 import Row from "../Row.astro";
 import EntryHead from "./EntryHead.astro";
-import { photoAlt, previewOf, type DownloadsView } from "../../lib/photos/gallery";
+import { photoAlt, photoName, previewOf, type DownloadsView } from "../../lib/photos/gallery";
 import { formatLogDate } from "../../lib/text";
 import { sydneyDate, sydneyTime } from "../../lib/time";
 
@@ -58,8 +58,9 @@ const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
                           <img id={`download-${photo.id}`} src={webp.url} width={webp.width} height={webp.height} alt={photoAlt(photo, index, entry.photos.length)} loading="lazy" decoding="async" />
                         </picture>
                       )}
-                      {/* The token lives only in these links (spec 5.2) */}
-                      <a href={`/photos/downloads/${photo.id}?token=${encodeURIComponent(list.token)}`} download={`${photo.id}.jpg`} aria-describedby={webp ? `download-${photo.id}` : undefined}>download · {megabytes(photo.downloadBytes)}</a>
+                      {/* The token lives only in these links (spec 5.2). Each link's name says which photograph, so a
+                          screen reader's list of links tells them apart */}
+                      <a href={`/photos/downloads/${photo.id}?token=${encodeURIComponent(list.token)}`} download={`${photo.id}.jpg`}>download · {megabytes(photo.downloadBytes)}<span class="sr-only">, {photoName(photo, index, entry.photos.length)}</span></a>
                     </li>
                   );
                 })}

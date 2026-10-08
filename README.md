@@ -29,18 +29,19 @@ bun run check
 
 ## Photographs
 
-The photo gallery: `/photos`, a page for each photograph and a private downloads page behind catalogue links, with the owner's photographs and links sections in `/admin`. How the pages, the catalogue, the preparation and the import work: [photo gallery guide](docs/photo-gallery-backend.md). The e2e gallery server (4335) gets the six-post photo fixture afresh on every run (`scripts/seed-photo-test.mjs`), and every local test server passes the fixture signing key explicitly (`PHOTO_KEY_VAR` in `playwright.config.ts`), because `build:test` copies `.dev.vars` into `dist/server`.
+The photo gallery: `/photos`, a page for each photograph and a private downloads page behind catalogue links, with the owner's photographs and links sections in `/admin`. How the pages, the catalogue, the preparation and the import work: [photo gallery guide](docs/photo-gallery-backend.md). The e2e gallery server (4335) gets the six-post photo fixture afresh on every run (`scripts/seed-photo-test.mjs`), and every local test server passes the fixture signing key explicitly (`PHOTO_KEY_VAR` in `playwright.config.ts`), because `build:test` copies `.dev.vars` into `dist/server`. No test server is reused, so stop your own `bun run serve` before `bun run test:e2e` (Playwright says the port is already used otherwise).
 
 Decisions: [ADR-0020](docs/adr/0020-photo-downloads-use-revocable-signed-links.md) (amended; revocable signed links), [ADR-0022](docs/adr/0022-photo-places-are-area-and-city-only.md) (amended; area and city only), [ADR-0023](docs/adr/0023-the-gallery-stays-light-on-phones.md) (the gallery stays light on phones) and [ADR-0024](docs/adr/0024-test-servers-never-hold-the-real-signing-key.md) (test servers never hold the real signing key).
 
 Launch steps for the gallery, all George's, in this order:
 
 1. Create the `curiousgeorge-photo-prints` R2 bucket before this branch deploys, because `wrangler.jsonc` binds it.
-2. Apply migration 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`; the deploy job runs it).
+2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`; the deploy job runs it). Production has never had the photo backend, so both arrive with this merge, along with the owner's JSON photo routes.
 3. Set `PHOTO_LINK_SECRET` as a fresh Worker secret.
 4. From the Mac, run `bun run photos:prepare` and then `bun run photos:import --remote` (the manifest is now version 2).
 5. In `/admin`, review and publish the photographs, including the 96 RAW candidates.
 6. Issue the first catalogue link from `/admin`.
+7. Once something is published, run the post-publish check against the live site (the image gate and the photo pages' privacy check, then Lighthouse): `PLAYWRIGHT_BASE_URL=https://curiousgeorge.dev bunx playwright test tests/e2e/budgets.spec.ts tests/e2e/privacy.spec.ts -g "images before any scroll|photo pages" --project=chromium` and `bun run lighthouse https://curiousgeorge.dev/`.
 
 Details, and what is still open: the guide's launch steps and [the plan 6 follow-ups](docs/superpowers/plans/2026-10-08-plan-6-followups.md).
 

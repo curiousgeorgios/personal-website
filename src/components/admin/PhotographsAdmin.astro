@@ -24,7 +24,9 @@ const heading = (post: AdminPost) => (post.place ? `${formatLogDate(post.date, "
       // A failed form anywhere in the post opens it: the post's own, or one of its photographs'
       const open = place.open || post.photos.some((photo) => failure?.form === `photo-${photo.id}`);
       const published = post.photos.filter((photo) => photo.published).length;
-      const raw = post.photos.filter((photo) => photo.rawReview).length;
+      // A RAW render awaits review only while hidden: publishing it is the review, and the import never clears the flag
+      const awaitsReview = (photo: AdminPost["photos"][number]) => photo.rawReview && !photo.published;
+      const raw = post.photos.filter(awaitsReview).length;
       return (
         <li class="post-admin">
           <details id={id} open={open}>
@@ -57,7 +59,7 @@ const heading = (post: AdminPost) => (post.place ? `${formatLogDate(post.date, "
                   <li class="photo-admin" id={formId}>
                     {photo.thumb ? <img src={photo.thumb.url} width={photo.thumb.width} height={photo.thumb.height} alt="" loading="lazy" decoding="async" /> : <span class="no-thumb"></span>}
                     <div class="photo-admin-body">
-                      <p class="photo-id"><span class="mono">{photo.id}</span> <span class="status">· {photo.published ? "published" : "hidden"}{photo.rawReview && <span class="tagged">raw</span>}</span></p>
+                      <p class="photo-id"><span class="mono">{photo.id}</span> <span class="status">· {photo.published ? "published" : "hidden"}{awaitsReview(photo) && <span class="tagged">raw</span>}</span></p>
                       {state.errors.form && <p class="error" role="alert">{state.errors.form}</p>}
                       <form method="post" action={`/admin/#${formId}`} class="admin-form">
                         <input type="hidden" name="intent" value="photo.title" />

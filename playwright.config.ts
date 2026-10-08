@@ -24,12 +24,14 @@ export default defineConfig({
   webServer: remote
     ? undefined
     : [
-        { command: `bun run serve ${PHOTO_KEY_VAR}`, url: "http://localhost:4331", reuseExistingServer: !process.env.CI, timeout: 90_000 },
+        // Never reused, like every server here that loads dist/server: a `bun run serve` left running holds George's
+        // real local key (ADR-0024), so Playwright stops with "port already used" until it's closed
+        { command: `bun run serve ${PHOTO_KEY_VAR}`, url: "http://localhost:4331", reuseExistingServer: false, timeout: 90_000 },
         // A second server with an empty D1 store, for the degraded-render spec
         {
           command: `wrangler dev -c dist/server/wrangler.json --port 4332 --persist-to .wrangler/empty ${PHOTO_KEY_VAR}`,
           url: "http://localhost:4332",
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 90_000,
         },
         // A third server with its own store for the admin specs, which write: deleted and migrated (with the seed)

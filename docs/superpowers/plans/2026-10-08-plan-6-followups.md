@@ -7,7 +7,7 @@ What plan 6 (the photo gallery) found or left for later: the launch steps, what 
 In this order. The first matters most: `wrangler.jsonc` binds the photo bucket, so a deploy without it fails.
 
 1. Create the `curiousgeorge-photo-prints` R2 bucket before this branch deploys (`bunx wrangler r2 bucket create curiousgeorge-photo-prints --location oc`). Confirm it has no `r2.dev` URL and no custom domain.
-2. Apply migration 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`), never `d1 execute --file`. The deploy job runs it before it deploys the Worker.
+2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`), never `d1 execute --file`. The deploy job runs it before it deploys the Worker. Main has never had the photo backend, so 0005, the photo routes (the owner's JSON routes too) and the bucket binding first reach production here. If step 1 was missed, the job applies both migrations and then fails at `wrangler deploy`: the migrations are additive, so it's a failed deploy, not a failed migration.
 3. Set `PHOTO_LINK_SECRET` (64 lowercase hex characters, fresh, not the local one): `bunx wrangler secret put PHOTO_LINK_SECRET`. Without it the downloads page answers 503.
 4. From the Mac, under Node 24, run `bun run photos:prepare` and then `bun run photos:import --remote`. The manifest is now version 2, so a folder prepared before this plan needs `photos:prepare` again (checkpoints and the places cache are reused). Fill `scripts/photo-cities.json` wherever prepare stops and lists a missing key.
 5. In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates, which carry `raw` pills.
@@ -27,7 +27,7 @@ Locally, before launch, the Lighthouse run on the fixture servers gave largest c
 
 ## The RAW review queue
 
-96 photographs have no Photos edit, so prepare rendered their RAW originals through Core Image. A rendered RAW is a candidate edit, not proof that its colour or crop matches the Instagram post. Each carries `raw_review` (from the manifest's `needsRawReview`) and a `raw` pill beside its post in `/admin`. Nothing publishes automatically. The queue is a read-through: compare each against the Instagram original and publish, or hide and re-edit in Photos and prepare again (a changed master stays unpublished). The admin has no filter for these; the pill is the only marker. If the queue is awkward to work through, a `raw only` view is the cheap follow-up.
+96 photographs have no Photos edit, so prepare rendered their RAW originals through Core Image. A rendered RAW is a candidate edit, not proof that its colour or crop matches the Instagram post. Each carries `raw_review` (from the manifest's `needsRawReview`) and, while it is hidden, a `raw` pill beside its post in `/admin`: publishing one is its review, so the pills count what is left (one kept hidden on purpose keeps its pill). Nothing publishes automatically. The queue is a read-through: compare each against the Instagram original and publish, or hide and re-edit in Photos and prepare again (a changed master stays unpublished). The admin has no filter for these; the pill is the only marker. If the queue is awkward to work through, a `raw only` view is the cheap follow-up.
 
 ## Deferred by reviews
 
@@ -40,6 +40,7 @@ Product and design:
 - Thumbnails are a little soft on 3× phones, by design (ADR-0023). If George dislikes it, the trade is 480 previews on phones against the image budget, and four entries become two screens of images.
 - The repeat notice on the links screen says the link is in the list below even if it has since been revoked or expired. A double tap without JavaScript shows that notice and never the link; the hint tells George to revoke and reissue.
 - `og:image` is the 1600 WebP; a few link-preview services do not read WebP and show no image (spec 4).
+- Phones held sideways get the general sources: `PHONE_MEDIA` keys on width alone, so a 3× phone in landscape (812px wide) picks the 480 previews, roughly four times the bytes (about 670KB for a two-entry page by Task 7's figures). Accepted: the budget is defined at 375 × 812, and widening the phone sources to `(max-width: 680px), (max-height: 500px)` would also need `frameSizes` to agree. Revisit if landscape phone visits show up.
 
 Admin:
 

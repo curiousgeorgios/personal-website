@@ -6349,8 +6349,8 @@ George's photographs on the site: `/photos`, a page for each photograph, a priva
 
 | Route | Behaviour |
 | --- | --- |
-| `/photos` | The gallery: one entry per Instagram post with a published photograph, newest first, four to a page. Works without JavaScript; `src/scripts/photo-sheet.ts` appends older entries near the end. Edge-cached, tag `photos`. |
-| `/photos?before=<seconds>` | The next four entries posted before that time; `noindex`. Anything but 1 to 10 digits is the notebook 404. |
+| `/photos` | The gallery: one entry per Instagram post with a published photograph, newest first, two to a page (ADR-0023). Works without JavaScript; `src/scripts/photo-sheet.ts` appends older entries (four at a time) once the visitor scrolls. Edge-cached, tag `photos`. |
+| `/photos?before=<seconds>` | The next two entries posted before that time; `noindex`. Anything but 1 to 10 digits is the notebook 404. |
 | `/photos/<id>` | One published photograph, its date and place, its neighbours in the post and its own share image (the 1600 WebP). Unpublished or unknown: the notebook 404. |
 | `/photos/downloads?token=<token>` | Every published photograph at full resolution, for a catalogue link. Private headers, no script, no referrer, never cached or counted. Invalid, expired and revoked links get the same 403 page. |
 | `GET` or `HEAD /photos/downloads/<id>?token=<token>` | One full-resolution JPEG attachment, with byte ranges and conditional requests. |

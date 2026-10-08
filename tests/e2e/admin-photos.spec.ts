@@ -16,13 +16,26 @@ async function openPost(page: Page, collection: string) {
   await post(page, collection).locator("summary").click();
 }
 
-test("posts are listed newest first, each with its date, place, counts and RAW pill", async ({ page }) => {
+test("posts are listed newest first, each with its date, place and counts", async ({ page }) => {
   await openAdmin(page);
   expect(await page.locator("#photographs details").evaluateAll((all) => all.map((details) => details.id))).toEqual([
     "post-fixture", "post-fixture-b", "post-fixture-c", "post-fixture-d", "post-fixture-e", "post-fixture-f",
   ]);
   await expect(post(page, "fixture").locator("summary .what")).toHaveText("27.09.26 · bondi, sydney · 3 photos, 2 published");
+  // fixture-c-01 is a RAW render but published, so it counts as reviewed and has no pill
+  await expect(post(page, "fixture-c").locator("summary .tagged")).toHaveCount(0);
+});
+
+test("a RAW photo carries its pill only while it is hidden", async ({ page }) => {
+  await openPost(page, "fixture-c");
+  await page.getByRole("button", { name: "hide fixture-c-01", exact: true }).click();
+  await expectSaved(page, "photographs", "gallery");
   await expect(post(page, "fixture-c").locator("summary .tagged")).toHaveText("1 raw");
+  await expect(page.locator("#photo-fixture-c-01 .tagged")).toHaveText("raw");
+  await openPost(page, "fixture-c");
+  await page.getByRole("button", { name: "publish fixture-c-01", exact: true }).click();
+  await expectSaved(page, "photographs", "gallery");
+  await expect(post(page, "fixture-c").locator("summary .tagged")).toHaveCount(0);
 });
 
 test("hiding and publishing a whole post, then one photo", async ({ page }) => {
