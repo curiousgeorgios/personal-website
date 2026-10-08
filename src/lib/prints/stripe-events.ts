@@ -129,10 +129,10 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
   const { db } = deps;
   const record = db.prepare("INSERT INTO stripe_events (id, type, received_at) VALUES (?, ?, ?)").bind(event.id, event.type, deps.now());
   const object = event.data.object;
-  // A checkout that isn't this order's own is recorded and answered 200: no retry will ever make it ours
+  // An event that isn't for one of this site's print orders is recorded and answered 200: no retry will ever make it ours
   const ignore = async () => {
     await record.run();
-    console.log("prints: stripe event", event.id, event.type, "isn't for one of this site's print checkouts; recorded and ignored");
+    console.log("prints: stripe event", event.id, event.type, "isn't for one of this site's print orders; recorded and ignored");
     return 200 as const;
   };
   try {
@@ -151,7 +151,12 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
       const id = printOrderOf(session);
       if (!id) return await ignore();
       const order = await getOrder(db, id);
-      if (!order) throw new Error("no order for this session");
+      if (!order) {
+        // Our own session, its row gone (it never should be): no redelivery can bring the row back, so it is said once, loudly
+        await record.run();
+        console.error("prints: stripe event", event.id, "expired the session of order", id, "but there is no such order; recorded");
+        return 200;
+      }
       if (order.stripe_session_id !== null && order.stripe_session_id !== session.id) return await ignore();
       await db.batch([record, db.prepare("UPDATE print_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'checkout' AND (stripe_session_id IS NULL OR stripe_session_id = ?)").bind(deps.now(), id, session.id)]);
       return 200;
@@ -159,7 +164,14 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
     if (event.type === "charge.refunded") {
       const intent = typeof object.payment_intent === "string" ? object.payment_intent : null;
       const order = intent ? await db.prepare("SELECT * FROM print_orders WHERE stripe_payment_intent = ?").bind(intent).first<OrderRow>() : null;
-      if (!order) throw new Error("no order for this payment");
+      if (!order) {
+        // Stripe copies the payment intent's metadata to its charge once, so a print order's charge names its order. One
+        // that does is waiting for the paid transition to store its intent, and Stripe's redelivery will find it; any
+        // other charge (a sale from another integration on the account) never will
+        const metadata = object.metadata as { order_id?: unknown } | null | undefined;
+        if (typeof metadata?.order_id === "string" && metadata.order_id !== "") throw new Error("no order holds this payment yet");
+        return await ignore();
+      }
       const now = deps.now();
       const refunded = cents(object.amount_refunded);
       const statements = [record, db.prepare(`UPDATE print_orders SET refunded_at = ?, refunded_amount = ${REFUNDED_AMOUNT}, updated_at = ? WHERE id = ?`).bind(now, refunded, now, order.id)];

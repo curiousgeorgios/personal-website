@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, printsD1, runCron, setMode, unique, waitForStatus } from "./prints";
+import { arteloOrdersFor, asTestClient, checkoutOrder, deliverStripe, mailFor, payAtStandIn, printsD1, refundAtStandIn, runCron, setMode, unique, waitForStatus } from "./prints";
 import { PRINTS } from "./prints-site";
 
 // Whole orders through the stand-ins on 4337: checkout, a paid session, Stripe's event, Artelo's order (spec 23.2)
@@ -70,6 +70,28 @@ test("an amount that differs from the quote is paid but needs attention, and is 
   await waitForStatus(orderId, "needs_attention");
   expect(printsD1(`SELECT attention_reason FROM print_orders WHERE id = '${orderId}'`)).toEqual([{ attention_reason: "the amount paid differs from the quote" }]);
   expect(await arteloOrdersFor(orderId)).toEqual([]);
+});
+
+test("a full refund of a placed order needs attention to cancel it at artelo; a refund of a charge that isn't a print order's changes nothing", async ({ page }) => {
+  await asTestClient(page);
+  const { orderId, sessionId } = await checkoutOrder(page, `Ada ${unique()}`);
+  const { event: paid } = await payAtStandIn(sessionId);
+  expect(await deliverStripe(PRINTS, paid)).toBe(200);
+  await waitForStatus(orderId, "placed");
+  // The charge names its order: Stripe copied the payment intent's metadata to it
+  const { event: partly } = await refundAtStandIn(sessionId, 4900);
+  expect(partly.data.object.metadata).toEqual({ order_id: orderId });
+  expect(await deliverStripe(PRINTS, partly)).toBe(200);
+  expect(printsD1(`SELECT status, refunded_amount FROM print_orders WHERE id = '${orderId}'`)).toEqual([{ status: "placed", refunded_amount: 4900 }]);
+  const { event: fully } = await refundAtStandIn(sessionId);
+  expect(await deliverStripe(PRINTS, fully)).toBe(200);
+  await waitForStatus(orderId, "needs_attention");
+  expect(printsD1(`SELECT attention_reason, refunded_amount FROM print_orders WHERE id = '${orderId}'`)).toEqual([{ attention_reason: "refunded in stripe: cancel it in artelo if it hasn't printed.", refunded_amount: 28700 }]);
+  await expect.poll(async () => (await mailFor(`print order ${orderId} needs attention`)).length).toBe(1);
+  // Another integration's sale on the same account: answered, recorded and ignored, never retried
+  const foreign = { id: `evt_test_shop_${unique()}`, object: "event", type: "charge.refunded", livemode: false, data: { object: { id: "ch_test_shop", object: "charge", payment_intent: "pi_test_shop", amount: 1000, amount_refunded: 1000, refunded: true, metadata: {} } } };
+  expect(await deliverStripe(PRINTS, foreign)).toBe(200);
+  expect(printsD1(`SELECT COUNT(*) AS n FROM stripe_events WHERE id = '${foreign.id}'`)).toEqual([{ n: 1 }]);
 });
 
 test("an unsigned or wrongly signed event is refused before anything is read", async () => {

@@ -80,12 +80,43 @@ describe("the guard", () => {
     expect(await events(db)).toEqual([{ id: "evt_1" }, { id: "evt_2" }]);
   });
 
-  test("an event whose order can't be found isn't recorded and answers 500, so stripe sends it again", async () => {
+  test("our refund that arrives before its order holds the payment isn't recorded and answers 500; stripe's redelivery then applies it", async () => {
     captureLogs();
     const { db, deps } = await setup();
-    expect(await handleStripeEvent(deps, event("checkout.session.expired", session({ id: "cs_none", client_reference_id: "01k6x0000000000000000000zz", metadata: { order_id: "01k6x0000000000000000000zz" } })))).toBe(500);
-    expect(await handleStripeEvent(deps, event("charge.refunded", { payment_intent: "pi_none", amount: 100, amount_refunded: 100, refunded: true }, "evt_2"))).toBe(500);
+    await checkout(db);
+    const refund = event("charge.refunded", { payment_intent: "pi_test_1", amount: 28700, amount_refunded: 4900, refunded: false, metadata: { order_id: ORDER } }, "evt_r");
+    expect(await handleStripeEvent(deps, refund)).toBe(500);
     expect(await events(db)).toEqual([]);
+    expect((await getOrder(db, ORDER))?.refunded_amount).toBeNull();
+    await handleStripeEvent(deps, event("checkout.session.completed", session()));
+    expect(await handleStripeEvent(deps, refund)).toBe(200);
+    expect(await getOrder(db, ORDER)).toMatchObject({ stripe_payment_intent: "pi_test_1", refunded_amount: 4900, refunded_at: NOW });
+    expect(await events(db)).toEqual([{ id: "evt_1" }, { id: "evt_r" }]);
+  });
+
+  test("a refund of a charge that isn't a print order's is recorded, answered 200 and changes nothing", async () => {
+    for (const metadata of [undefined, null, {}, { order_id: "" }, { other: "x" }]) {
+      const logs = captureLogs();
+      const { db, deps } = await setup();
+      await insertOrder(db, { id: ORDER });
+      expect(await handleStripeEvent(deps, event("charge.refunded", { payment_intent: "pi_shop", amount: 100, amount_refunded: 100, refunded: true, receipt_email: "someone@example.com", ...(metadata === undefined ? {} : { metadata }) }, "evt_shop"))).toBe(200);
+      expect(await events(db)).toEqual([{ id: "evt_shop" }]);
+      expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", refunded_amount: null, refunded_at: null });
+      expect(logs()).toContain("prints: stripe event evt_shop charge.refunded isn't for one of this site's print orders; recorded and ignored");
+      expect(logs()).not.toContain("someone@example.com");
+      vi.restoreAllMocks();
+    }
+  });
+
+  test("an expiry for our own session whose order row is missing is recorded, logged as an error with the order id and answered 200", async () => {
+    const logs = captureLogs();
+    const { db, deps } = await setup();
+    const missing = "01k6x0000000000000000000zz";
+    expect(await handleStripeEvent(deps, event("checkout.session.expired", session({ id: "cs_none", status: "expired", payment_status: "unpaid", client_reference_id: missing, metadata: { order_id: missing } })))).toBe(200);
+    expect(await events(db)).toEqual([{ id: "evt_1" }]);
+    expect(await getOrder(db, missing)).toBeNull();
+    expect(vi.mocked(console.error)).toHaveBeenCalledWith("prints: stripe event", "evt_1", "expired the session of order", missing, "but there is no such order; recorded");
+    expect(logs()).toContain(missing);
   });
 
   test("a paid session whose order is missing recreates it from the metadata, straight into needs attention", async () => {
@@ -156,7 +187,7 @@ describe("only this site's own checkout", () => {
       await unchanged(db, "expired", "cs_test_1");
       expect(deps.waited).toHaveLength(0);
       expect(await events(db)).toEqual([{ id: "evt_1" }]);
-      expect(logs()).toContain("prints: stripe event evt_1 checkout.session.completed isn't for one of this site's print checkouts; recorded and ignored");
+      expect(logs()).toContain("prints: stripe event evt_1 checkout.session.completed isn't for one of this site's print orders; recorded and ignored");
       vi.restoreAllMocks();
     }
   });
@@ -430,6 +461,21 @@ describe("Stripe's signature", () => {
     expect(await verifyStripeSignature("", `t=${NOW},v1=${good}`, body, NOW)).toBe(false);
   });
 
+  test("a value one byte short of the HMAC is refused, even when the HMAC's last byte is zero", async () => {
+    // A timestamp within tolerance whose HMAC ends in a zero byte: a compare that ran over the HMAC's length would read the
+    // missing byte as 0 and accept the 31-byte prefix. The search is deterministic: the secret, bodies and times are fixed
+    let found: { body: string; t: number; mac: string } | null = null;
+    for (let i = 0; !found; i++) {
+      const body = `{"id":"evt_${i}"}`;
+      for (let t = NOW - 300; t <= NOW + 300 && !found; t++) {
+        const mac = await sign(body, t);
+        if (mac.endsWith("00")) found = { body, t, mac };
+      }
+    }
+    expect(await verifyStripeSignature(SECRET, `t=${found.t},v1=${found.mac}`, found.body, NOW)).toBe(true);
+    expect(await verifyStripeSignature(SECRET, `t=${found.t},v1=${found.mac.slice(0, 62)}`, found.body, NOW)).toBe(false);
+  });
+
   test("a timestamp more than five minutes ahead is refused too", async () => {
     const body = '{"id":"evt_1"}';
     expect(await verifyStripeSignature(SECRET, `t=${NOW + 301},v1=${await sign(body, NOW + 301)}`, body, NOW)).toBe(false);
@@ -449,6 +495,8 @@ describe("Stripe's signature", () => {
     expect(await verifyStripeSignature(SECRET, `t=${NOW},v1=${good},v1=${wrong}`, body, NOW)).toBe(true);
     // A prefix of the right HMAC is not the HMAC
     expect(await verifyStripeSignature(SECRET, `t=${NOW},v1=${good.slice(0, 2)}`, body, NOW)).toBe(false);
+    // A part with no = is skipped, never read as a t that hides the real one
+    expect(await verifyStripeSignature(SECRET, `t5,t=${NOW},v1=${good}`, body, NOW)).toBe(true);
     expect(await verifyStripeSignature(SECRET, `tt=${NOW},v1=${good}`, body, NOW)).toBe(false);
   });
 });

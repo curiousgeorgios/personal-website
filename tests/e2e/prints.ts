@@ -115,6 +115,11 @@ export async function payAtStandIn(sessionId: string, extra: Record<string, unkn
   return standIn<{ event: { id: string } & Record<string, unknown> }>("/__stripe/pay", { method: "POST", body: JSON.stringify({ session: sessionId, ...extra }) });
 }
 
+/** Refunds a paid session's charge at the stand-in (the whole of it unless an amount is given); its charge.refunded event */
+export async function refundAtStandIn(sessionId: string, amount?: number) {
+  return standIn<{ event: { id: string; data: { object: Record<string, unknown> } } & Record<string, unknown> }>("/__stripe/refund", { method: "POST", body: JSON.stringify({ session: sessionId, amount }) });
+}
+
 export function stripeSignature(body: string, secret: string, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${body}`).digest("hex")}`;
 }

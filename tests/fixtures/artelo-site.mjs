@@ -68,7 +68,7 @@ route("POST", "/orders/price-check", ({ body, headers }) => {
 // Stripe's three endpoints (spec 23.3, "Decisions"): sessions are kept with the form that made them, so the specs can
 // read what the site sent. /__stripe/pay completes one as Checkout would and answers its checkout.session.completed
 // event, which the spec signs and delivers itself
-const stripe = { sessions: new Map(), intents: new Map(), keys: new Map(), count: 0 };
+const stripe = { sessions: new Map(), intents: new Map(), charges: new Map(), keys: new Map(), count: 0, refunds: 0 };
 const stripeAuth = (headers) => keyed(headers, FIXTURE_STRIPE_KEY) && headers["stripe-version"] === "2025-09-30.clover";
 route("POST", "/stripe/v1/checkout/sessions", ({ body, headers }) => {
   if (!stripeAuth(headers)) return [401, { error: { message: "invalid api key or version" } }];
@@ -112,14 +112,27 @@ route("POST", "/__stripe/pay", ({ body }) => {
   const { session, form } = found;
   const intent = `pi_test_standin_${stripe.count}_${id.split("_").at(-1)}`;
   const field = (name) => form[`payment_intent_data[shipping]${name}`] ?? null;
+  const metadata = Object.fromEntries(Object.entries(form).flatMap(([name, value]) => (/^payment_intent_data\[metadata\]\[(.+)\]$/.test(name) ? [[/^payment_intent_data\[metadata\]\[(.+)\]$/.exec(name)[1], value]] : [])));
   stripe.intents.set(intent, {
-    id: intent, object: "payment_intent",
+    id: intent, object: "payment_intent", metadata,
     shipping: { name: field("[name]"), phone: field("[phone]"), address: { line1: field("[address][line1]"), line2: field("[address][line2]"), city: field("[address][city]"), state: field("[address][state]"), postal_code: field("[address][postal_code]"), country: field("[address][country]") } },
   });
+  // The payment's charge, which takes a copy of the intent's metadata once, when it is made, as Stripe's does
+  stripe.charges.set(intent, { id: `ch_test_standin_${id.split("_").at(-1)}`, object: "charge", payment_intent: intent, amount: amount ?? session.amount_total, amount_refunded: 0, refunded: false, metadata: { ...metadata } });
   Object.assign(session, { status: "complete", payment_status: "paid", payment_intent: intent, customer_details: { email }, ...(amount === undefined ? {} : { amount_total: amount }), ...(conversion ? { currency_conversion: { amount_total: 12345, source_currency: "usd" } } : {}) });
   return [200, { event: { id: `evt_test_standin_${id.split("_").at(-1)}`, object: "event", type: "checkout.session.completed", livemode: false, created: Math.floor(Date.now() / 1000), data: { object: session } } }];
 });
 route("GET", "/__stripe/sessions", () => [200, [...stripe.sessions.values()]]);
+// Refunds a paid session's charge as the dashboard would: { session, amount? } (the whole charge by default). Answers its
+// charge.refunded event, for the spec to sign and deliver
+route("POST", "/__stripe/refund", ({ body }) => {
+  const { session: id, amount } = JSON.parse(body);
+  const charge = stripe.charges.get(stripe.sessions.get(id)?.session.payment_intent);
+  if (!charge) return [404, { message: "no charge for that session" }];
+  charge.amount_refunded = Math.min(charge.amount, charge.amount_refunded + (amount ?? charge.amount));
+  charge.refunded = charge.amount_refunded === charge.amount;
+  return [200, { event: { id: `evt_test_standin_refund_${++stripe.refunds}`, object: "event", type: "charge.refunded", livemode: false, created: Math.floor(Date.now() / 1000), data: { object: { ...charge, metadata: { ...charge.metadata } } } } }];
+});
 
 // The email sink: test builds post here instead of using the EMAIL binding (spec 23.3)
 route("POST", "/__mail", ({ body }) => {
