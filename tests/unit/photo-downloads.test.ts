@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
 import { SignJWT } from "jose";
 import { sqliteD1 } from "./sqlite-d1";
 import { downloadPhoto } from "../../src/lib/photos/download";
-import { grantIsActive, insertGrant, photoPage, revokeGrant } from "../../src/lib/photos/store";
+import { grantIsActive, insertGrant, photoPage, revokeCatalogueLink } from "../../src/lib/photos/store";
 import { signPhotoToken, verifyPhotoToken, photoSigningKey, MAX_LINK_SECONDS } from "../../src/lib/photos/tokens";
 import { pageOptions } from "../../src/lib/photos/http";
 import { isMediaKey } from "../../src/lib/media";
@@ -100,8 +100,8 @@ describe("private R2 download delivery", () => {
     for (const id of [ID, OTHER]) expect((await downloadPhoto(db, b, KEY, id, request(all.token), NOW)).status).toBe(200);
   });
   test("revocation applies before even a conditional 304 or HEAD response", async () => {
-    const { grant, token } = await issue(db);
-    await revokeGrant(db, grant.grantId, NOW);
+    const { grant, token } = await issue(db, null);
+    expect(await revokeCatalogueLink(db, grant.grantId, NOW)).toBe("revoked");
     const b = bucket();
     for (const method of ["GET", "HEAD"]) expect((await downloadPhoto(db, b, KEY, ID, request(token, { "If-None-Match": ETAG }, method), NOW)).status).toBe(403);
     expect(b.head).not.toHaveBeenCalled();

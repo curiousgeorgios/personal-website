@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { loadAdmin } from "../../src/lib/admin/store";
 import { downloadPhoto } from "../../src/lib/photos/download";
-import { insertGrant, issueOrderGrant, revokeCatalogueLink, revokeOrderGrants } from "../../src/lib/photos/store";
+import { insertGrant, issueOrderGrant, ORDER_GRANT_SECONDS, revokeCatalogueLink, revokeOrderGrants } from "../../src/lib/photos/store";
 import { signPhotoToken, verifyPhotoToken } from "../../src/lib/photos/tokens";
 import { NOW, PHOTO_KEY, printDb } from "./prints-fakes";
 
@@ -52,6 +52,27 @@ describe("order grants", () => {
     expect(await revokeOrderGrants(db, ORDER, NOW)).toBe(1);
     expect(await revokeOrderGrants(db, ORDER, NOW)).toBe(0);
     expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(link.href), NOW)).status).toBe(403);
+  });
+
+  test("revoking one order's grants leaves another order's and a catalogue link working", async () => {
+    const mine = new URL(await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW));
+    const other = new URL(await issueOrderGrant(db, PHOTO_KEY, "01k6x00000000000000000000b", "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW));
+    const grant = { grantId: crypto.randomUUID(), photoId: null, expiresAt: NOW + 3600 };
+    await insertGrant(db, grant);
+    const catalogue = `https://curiousgeorge.dev/photos/downloads/fixture-b-01?token=${await signPhotoToken(PHOTO_KEY, grant, NOW)}`;
+    expect(await revokeOrderGrants(db, ORDER, NOW)).toBe(1);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(mine.href), NOW)).status).toBe(403);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(other.href), NOW)).status).toBe(200);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(catalogue), NOW)).status).toBe(200);
+  });
+
+  test("a grant lives at most 72 hours, and nothing is written for a refused one", async () => {
+    expect(ORDER_GRANT_SECONDS).toBe(72 * 3600);
+    await expect(issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", ORDER_GRANT_SECONDS + 1, "https://curiousgeorge.dev", NOW)).rejects.toThrow("Invalid order grant lifetime");
+    await expect(issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 0, "https://curiousgeorge.dev", NOW)).rejects.toThrow("Invalid order grant lifetime");
+    await expect(issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 1.5, "https://curiousgeorge.dev", NOW)).rejects.toThrow("Invalid order grant lifetime");
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM photo_download_grants").first("n")).toBe(0);
+    await expect(issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", ORDER_GRANT_SECONDS, "https://curiousgeorge.dev", NOW)).resolves.toContain("/photos/downloads/fixture-b-01");
   });
 
   test("order grants never appear among the admin's working links", async () => {

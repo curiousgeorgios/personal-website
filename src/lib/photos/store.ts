@@ -201,11 +201,16 @@ export async function photoMaster(db: D1Database, id: string): Promise<PhotoRow 
   return db.prepare("SELECT * FROM photos WHERE id = ?").bind(id).first<PhotoRow>();
 }
 
+/** The longest an order's link may work: Artelo fetches the master within this, then the grant is revoked (spec 18.2) */
+export const ORDER_GRANT_SECONDS = 72 * 3600;
+
 /**
  * The internal link Artelo fetches a paid print's master from (spec 18.2 step 4): a photo-scoped grant carrying its
- * order, signed for `seconds`. Only print fulfilment calls this; no person ever receives the link (ADR-0020 as amended).
+ * order, signed for `seconds`, which can't
+ * exceed ORDER_GRANT_SECONDS. Only print fulfilment calls this; no person ever receives the link (ADR-0020 as amended).
  */
 export async function issueOrderGrant(db: D1Database, secret: string, orderId: string, photoId: string, seconds: number, origin: string, now = Math.floor(Date.now() / 1000)): Promise<string> {
+  if (!Number.isInteger(seconds) || seconds <= 0 || seconds > ORDER_GRANT_SECONDS) throw new Error("Invalid order grant lifetime");
   const grant = { grantId: crypto.randomUUID(), photoId, expiresAt: now + seconds };
   const token = await signPhotoToken(secret, grant, now);
   await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, order_id) VALUES (?, ?, ?, ?)").bind(grant.grantId, photoId, grant.expiresAt, orderId).run();
@@ -240,10 +245,4 @@ export async function revokeCatalogueLink(db: D1Database, id: string, now = Math
   if (result.meta.changes > 0) return "revoked";
   const row = await db.prepare("SELECT photo_id FROM photo_download_grants WHERE id = ?").bind(id).first<{ photo_id: string | null }>();
   return row && row.photo_id !== null ? "photo" : "already";
-}
-
-export async function revokeGrant(db: D1Database, id: string, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
-  if (!GRANT_ID.test(id)) return false;
-  const result = await db.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, id).run();
-  return result.meta.changes > 0;
 }

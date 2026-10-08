@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { getOrder, loadPrices, readSettings, shipmentsOf, toPrices, toSettings, writeSetting } from "../../src/lib/prints/store";
-import { insertOrder, NOW } from "./prints-fakes";
+import { insertOrder, NOW, printDb } from "./prints-fakes";
 import { sqliteD1 } from "./sqlite-d1";
 
 let db: D1Database;
@@ -24,8 +24,24 @@ describe("migration 0007", () => {
     await expect(insertOrder(db, { id: "01k0000000000000000000000b", stripe_session_id: "cs_test_same" })).rejects.toThrow();
   });
 
+  test("the schema refuses a fractional or negative amount in any money column", async () => {
+    for (const column of ["print_total", "delivery_amount", "artelo_cost", "refunded_amount"]) {
+      await expect(insertOrder(db, { [column]: 23800.5 })).rejects.toThrow();
+      await expect(insertOrder(db, { [column]: -1 })).rejects.toThrow();
+      await expect(insertOrder(db, { [column]: "twelve" })).rejects.toThrow();
+    }
+    const id = await insertOrder(db, { artelo_cost: 0, refunded_amount: 0, print_total: 0, delivery_amount: 0 });
+    for (const amount of [5900.5, -5900]) {
+      await expect(db.prepare("INSERT INTO print_order_items (order_id, line, photo_id, tier, size, frame, quantity, unit_amount) VALUES (?, 9, 'fixture-b-01', 'small', 'x8x12', 'oak', 1, ?)").bind(id, amount).run()).rejects.toThrow();
+    }
+    // Whole cents, nothing, or null where the column allows it
+    await insertOrder(db, { artelo_cost: 6140, refunded_amount: 23800, print_total: 23800, delivery_amount: 4900 });
+    await insertOrder(db, { artelo_cost: null, refunded_amount: null });
+  });
+
   test("grants carry an order id", async () => {
-    await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, order_id) VALUES ('g', NULL, 1, 'o')").run();
+    db = await printDb();
+    await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, order_id) VALUES ('g', 'fixture-01', 1, 'o')").run();
     expect(await db.prepare("SELECT order_id FROM photo_download_grants").first("order_id")).toBe("o");
   });
 });
@@ -59,5 +75,8 @@ test("an order reads back whole, with its shipments", async () => {
   expect(order).toMatchObject({ id, status: "paid", print_total: 23800, delivery_amount: 4900, delivery_taxed: 0, livemode: 0 });
   expect(shipmentsOf(order!)).toEqual([{ carrier: "ups", number: "1Z", url: "https://www.ups.com/track?tracknum=1Z" }]);
   expect(shipmentsOf({ shipments: null })).toEqual([]);
+  // Only well-formed parcels survive: they render on the buyer's page
+  expect(shipmentsOf({ shipments: JSON.stringify([{ carrier: "ups", number: "1Z", url: "https://x.test" }, { carrier: "ups", number: 5, url: "u" }, null, "x", { carrier: "ups" }]) })).toEqual([{ carrier: "ups", number: "1Z", url: "https://x.test" }]);
+  expect(shipmentsOf({ shipments: "{}" })).toEqual([]);
   expect(await getOrder(db, "missing")).toBeNull();
 });

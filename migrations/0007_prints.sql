@@ -16,8 +16,8 @@ INSERT INTO print_settings (key, value, updated_at) VALUES ('delivery_buffer', '
 CREATE TABLE print_orders (
   id TEXT PRIMARY KEY,                       -- lowercase ULID; Artelo's orderId and Stripe's client_reference_id
   country TEXT NOT NULL CHECK (length(country) = 2),
-  print_total INTEGER NOT NULL,              -- AUD cents
-  delivery_amount INTEGER NOT NULL,          -- AUD cents
+  print_total INTEGER NOT NULL CHECK (typeof(print_total) = 'integer' AND print_total >= 0),  -- AUD cents
+  delivery_amount INTEGER NOT NULL CHECK (typeof(delivery_amount) = 'integer' AND delivery_amount >= 0),  -- AUD cents
   delivery_taxed INTEGER NOT NULL DEFAULT 0 CHECK (delivery_taxed IN (0, 1)),  -- the line reads "delivery and destination taxes"
   status TEXT NOT NULL CHECK (status IN ('checkout', 'expired', 'paid', 'needs_attention', 'placed',
     'in_production', 'shipped', 'delivered', 'cancelled', 'refunded')),
@@ -27,9 +27,9 @@ CREATE TABLE print_orders (
   stripe_payment_intent TEXT UNIQUE,
   artelo_order_id TEXT UNIQUE,
   artelo_status TEXT,
-  artelo_cost INTEGER,                       -- US cents, production plus shipping and any tax
+  artelo_cost INTEGER CHECK (artelo_cost IS NULL OR (typeof(artelo_cost) = 'integer' AND artelo_cost >= 0)),  -- US cents, production plus shipping and any tax
   shipments TEXT CHECK (shipments IS NULL OR json_valid(shipments)),  -- [{ carrier, number, url }]
-  refunded_amount INTEGER,
+  refunded_amount INTEGER CHECK (refunded_amount IS NULL OR (typeof(refunded_amount) = 'integer' AND refunded_amount >= 0)),  -- AUD cents
   attempts INTEGER NOT NULL DEFAULT 0,
   next_attempt_at INTEGER,
   retry_until INTEGER,
@@ -42,11 +42,11 @@ CREATE TABLE print_orders (
   status_checked_at INTEGER,
   shipped_email_at INTEGER,
   attention_notified_at INTEGER,
-  admin_notified_at INTEGER,                 -- 0 while an email to George is due (an artelo cancellation, a missed webhook), then when it went
+  admin_notified_at INTEGER,                 -- 0 while an email to George is due (an artelo cancellation, or a payment whose stripe webhook never arrived), then when it went
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX print_orders_due ON print_orders(status, next_attempt_at);
-CREATE INDEX print_orders_recent ON print_orders(paid_at);
+CREATE INDEX print_orders_recent ON print_orders(paid_at);  -- the admin list also orders by needs_attention first, so it scans; trivial at this volume
 
 CREATE TABLE print_order_items (
   order_id TEXT NOT NULL REFERENCES print_orders(id) ON DELETE CASCADE,
@@ -56,7 +56,7 @@ CREATE TABLE print_order_items (
   size TEXT NOT NULL,                        -- Artelo ProductSize, e.g. x12x18
   frame TEXT NOT NULL CHECK (frame IN ('unframed', 'oak')),
   quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 10),
-  unit_amount INTEGER NOT NULL,              -- AUD cents
+  unit_amount INTEGER NOT NULL CHECK (typeof(unit_amount) = 'integer' AND unit_amount >= 0),  -- AUD cents
   PRIMARY KEY (order_id, line)
 );
 

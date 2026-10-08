@@ -6764,6 +6764,12 @@ function mismatch(order: OrderRow, session: StripeSession): string | null {
   return null;
 }
 
+/** Whole non-negative cents from metadata text, else 0: migration 0007 refuses a fractional or negative amount, and a refused insert would lose a paid order */
+const cents = (value: string | undefined): number => {
+  const rounded = Math.round(Number(value));
+  return Number.isSafeInteger(rounded) && rounded >= 0 ? rounded : 0;
+};
+
 /** A missing order rebuilt from the session's metadata, straight into needs_attention (it never should happen) */
 async function recreate(deps: PrintDeps, session: StripeSession, orderId: string, livemode: boolean): Promise<D1PreparedStatement[]> {
   const { db } = deps;
@@ -6772,7 +6778,7 @@ async function recreate(deps: PrintDeps, session: StripeSession, orderId: string
   const prices = await loadPrices(db);
   const statements = [
     db.prepare("INSERT INTO print_orders (id, country, print_total, delivery_amount, delivery_taxed, status, attention_reason, livemode, stripe_session_id, stripe_payment_intent, attempts, retry_until, next_attempt_at, created_at, paid_at, updated_at) VALUES (?, ?, ?, ?, ?, 'needs_attention', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-      .bind(orderId, /^[A-Z]{2}$/.test(meta.country ?? "") ? meta.country : "ZZ", Number(meta.print_total) || 0, Number(meta.delivery_amount) || 0, meta.delivery_taxed === "1" ? 1 : 0, MISSING_REASON, livemode ? 1 : 0, session.id, session.payment_intent, now + deps.config.retryWindow, now, now, now, now),
+      .bind(orderId, /^[A-Z]{2}$/.test(meta.country ?? "") ? meta.country : "ZZ", cents(meta.print_total), cents(meta.delivery_amount), meta.delivery_taxed === "1" ? 1 : 0, MISSING_REASON, livemode ? 1 : 0, session.id, session.payment_intent, now + deps.config.retryWindow, now, now, now, now),
   ];
   for (let line = 1; line <= 10; line++) {
     const [photoId = "", tier = "", frame = "", quantity = ""] = (meta[`line_${line}`] ?? "").split(":");

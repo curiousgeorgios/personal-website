@@ -112,7 +112,7 @@ export interface OrderRow {
   status_checked_at: number | null;
   shipped_email_at: number | null;
   attention_notified_at: number | null;
-  /** 0 while George's cancellation or missed-webhook email is due, then when it went; null when none is due */
+  /** 0 while George's cancellation email or his payment-whose-stripe-webhook-never-arrived email is due, then when it went; null when none is due */
   admin_notified_at: number | null;
   updated_at: number;
 }
@@ -124,5 +124,7 @@ export async function getOrder(db: D1Database, id: string): Promise<OrderRow | n
 export function shipmentsOf(order: Pick<OrderRow, "shipments">): Shipment[] {
   if (!order.shipments) return [];
   const parsed: unknown = JSON.parse(order.shipments);
-  return Array.isArray(parsed) ? (parsed as Shipment[]) : [];
+  if (!Array.isArray(parsed)) return [];
+  // These render on the buyer's page and in /admin: keep only parcels with all three fields as strings
+  return parsed.filter((item): item is Shipment => !!item && typeof item === "object" && ["carrier", "number", "url"].every((key) => typeof (item as Record<string, unknown>)[key] === "string"));
 }
