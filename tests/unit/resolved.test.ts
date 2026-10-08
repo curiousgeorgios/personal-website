@@ -22,7 +22,8 @@ const formOf = (entries: Record<string, string>) => {
   return form;
 };
 const depsOf = (db: D1Database, placeLater = vi.fn()): ActionDeps & { orders: { placeLater: ReturnType<typeof vi.fn>; retryWindow: number } } => ({ db, media: {} as R2Bucket, images: {} as ImagesBinding, orders: { placeLater, retryWindow: 86_400 } });
-const resolve = (db: D1Database, id = ORDER) => runAction(formOf({ intent: "order.resolve", id }), depsOf(db));
+/** The form as the view posts it: the order's id and the reason the page showed */
+const resolve = (db: D1Database, id = ORDER, reason = "stuck") => runAction(formOf({ intent: "order.resolve", id, reason }), depsOf(db));
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -55,6 +56,21 @@ describe("mark resolved", () => {
     expect(await resolve(db)).toEqual({ ok: true, section: "orders", note: "resolved" });
     expect(await getOrder(db, ORDER)).toEqual(before);
     for (const id of ["01k6x0000000000000000000zz", "../x"]) expect(await resolve(db, id)).toMatchObject({ ok: false, section: null, errors: { form: "that order no longer exists" } });
+  });
+
+  test("resolving is bound to the reason the page showed: an order flagged again since does nothing and says it changed", async () => {
+    const db = await printDb();
+    // Refunded in stripe while artelo had it, after the page loaded showing artelo's hold
+    await insertOrder(db, { id: ORDER, status: "needs_attention", attention_reason: REFUND_REASON, artelo_order_id: "artelo-1" });
+    const before = await getOrder(db, ORDER);
+    expect(await resolve(db, ORDER, PENDING_REASON)).toEqual({ ok: false, section: "orders", form: `order-${ORDER}`, errors: { form: "that order changed. look again before resolving." }, values: {} });
+    expect(await getOrder(db, ORDER)).toEqual(before);
+    // A form with no reason, or a reason the order never had, is refused the same way
+    for (const reason of ["", "something else"]) expect(await resolve(db, ORDER, reason)).toMatchObject({ ok: false, errors: { form: "that order changed. look again before resolving." } });
+    expect(await getOrder(db, ORDER)).toEqual(before);
+    // With the reason it has, it resolves
+    expect(await resolve(db, ORDER, REFUND_REASON)).toEqual({ ok: true, section: "orders", note: "resolved" });
+    expect((await getOrder(db, ORDER))?.resolved_at).not.toBeNull();
   });
 
   test("a resolved order can't be retried: the view hides it and the action's guard refuses it", async () => {
@@ -93,7 +109,7 @@ describe("mark resolved", () => {
     expect(stuck.querySelector(".resolved-on")).toBeNull();
     expect(stuck.querySelector('input[value="order.retry"]')).not.toBeNull();
     const form = stuck.querySelector('input[value="order.resolve"]')!.closest("form")!;
-    expect([form.getAttribute("method"), form.getAttribute("action"), form.querySelector<HTMLInputElement>('input[name="id"]')!.value, text(form.querySelector("button"))]).toEqual(["post", "/admin/#order-01k6x00000000000000000000a", "01k6x00000000000000000000a", "mark resolved"]);
+    expect([form.getAttribute("method"), form.getAttribute("action"), form.querySelector<HTMLInputElement>('input[name="id"]')!.value, form.querySelector<HTMLInputElement>('input[name="reason"]')!.value, text(form.querySelector("button"))]).toEqual(["post", "/admin/#order-01k6x00000000000000000000a", "01k6x00000000000000000000a", "stuck", "mark resolved"]);
     // A resolved_at left from an earlier episode shows nothing once the order has moved on
     expect(data.orders.find((order) => order.id.endsWith("b"))?.resolvedAt).toBeNull();
   });

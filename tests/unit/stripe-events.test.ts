@@ -94,6 +94,36 @@ describe("the guard", () => {
     expect(await events(db)).toEqual([{ id: "evt_1" }, { id: "evt_r" }]);
   });
 
+  test("a refund racing the paid transition is never lost: paid between the handler's two reads, it answers 500 and the redelivery applies it", async () => {
+    captureLogs();
+    const { db, deps } = await setup();
+    await checkout(db);
+    const refund = event("charge.refunded", { payment_intent: "pi_test_1", amount: 28700, amount_refunded: 28700, refunded: true, metadata: { order_id: ORDER } }, "evt_r");
+    let paid = false;
+    // The webhook's paid transition commits after the refund's look by payment intent found nothing, before its second read
+    const racing = new Proxy(db, {
+      get(target, property) {
+        if (property !== "prepare") return Reflect.get(target, property);
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (paid || !sql.startsWith("SELECT 1 AS waiting")) return statement;
+          return { bind: (...values: unknown[]) => ({ first: async () => {
+            paid = true;
+            expect(await handleStripeEvent(deps, event("checkout.session.completed", session()))).toBe(200);
+            return statement.bind(...values).first();
+          } }) };
+        };
+      },
+    });
+    expect(await handleStripeEvent({ ...deps, db: racing }, refund)).toBe(500);
+    expect(paid).toBe(true);
+    expect(await events(db)).toEqual([{ id: "evt_1" }]);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "paid", stripe_payment_intent: "pi_test_1", refunded_amount: null });
+    // Stripe's redelivery finds the order by its payment intent and applies the refund
+    expect(await handleStripeEvent(deps, refund)).toBe(200);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "refunded", refunded_amount: 28700 });
+  });
+
   test("a refund of a charge that isn't a print order's is recorded, answered 200 and changes nothing", async () => {
     for (const metadata of [undefined, null, {}, { order_id: "" }, { other: "x" }]) {
       const logs = captureLogs();

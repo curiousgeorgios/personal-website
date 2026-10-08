@@ -545,21 +545,27 @@ async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<A
 }
 
 /**
- * mark resolved (spec 20): George has dealt with a needs_attention order outside the site. One conditional write; the
- * order stays listed, out of the needs-attention-first ordering and without its red dot or retry now. Any write that moves
- * it into needs_attention again clears resolved_at, so a new problem shows again
+ * mark resolved (spec 20): George has dealt with a needs_attention order outside the site. One conditional write, bound
+ * to the reason the page showed him (the form carries it), so an order flagged again since the page loaded is never
+ * resolved unseen; the order stays listed, out of the needs-attention-first ordering and without its red dot or retry
+ * now. Any write that moves it into needs_attention again clears resolved_at, so a new problem shows again
  */
 async function resolveOrder(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
   const id = String(form.get("id") ?? "");
   if (!ORDER_ID.test(id)) return gone("order");
+  // The view writes no reason as an empty field; a reason is never empty
+  const shown = form.get("reason");
+  const reason = typeof shown === "string" && shown !== "" ? shown : null;
   const now = Math.floor(Date.now() / 1000);
-  const result = await db.prepare("UPDATE print_orders SET resolved_at = ?, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND resolved_at IS NULL").bind(now, now, id).run();
+  const result = await db.prepare("UPDATE print_orders SET resolved_at = ?, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND resolved_at IS NULL AND attention_reason IS ?").bind(now, now, id, reason).run();
   if (result.meta.changes > 0) return { ok: true, section: "orders", note: "resolved" };
-  const row = await db.prepare("SELECT status, resolved_at FROM print_orders WHERE id = ?").bind(id).first<{ status: string; resolved_at: number | null }>();
+  const row = await db.prepare("SELECT status, attention_reason, resolved_at FROM print_orders WHERE id = ?").bind(id).first<{ status: string; attention_reason: string | null; resolved_at: number | null }>();
   if (!row) return gone("order");
-  // Already resolved by an earlier tap counts as saved and writes nothing (ADR-0012)
-  if (row.status === "needs_attention") return { ok: true, section: "orders", note: "resolved" };
-  return fail("orders", `order-${id}`, { form: "that order doesn't need attention any more." });
+  if (row.status !== "needs_attention") return fail("orders", `order-${id}`, { form: "that order doesn't need attention any more." });
+  // Flagged again with another reason since the page loaded: George hasn't seen this one
+  if (row.attention_reason !== reason) return fail("orders", `order-${id}`, { form: "that order changed. look again before resolving." });
+  // Already resolved by an earlier tap, for this same reason, counts as saved and writes nothing (ADR-0012)
+  return { ok: true, section: "orders", note: "resolved" };
 }
 
 /** send me a test email (spec 20): proves the EMAIL binding before prints open, so it works while they are closed */

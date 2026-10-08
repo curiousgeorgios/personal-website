@@ -88,6 +88,8 @@ const frameWord = (frame: string) => (frame === "oak" ? "oak" : "unframed");
                     <form method="post" action={`/admin/#${id}`} class="admin-form resolve-form">
                       <input type="hidden" name="intent" value="order.resolve" />
                       <input type="hidden" name="id" value={order.id} />
+                      {/* The reason shown above: the action resolves the order only while it still has this one */}
+                      <input type="hidden" name="reason" value={order.reason ?? ""} />
                       <button type="submit" class="button quiet">mark resolved</button>
                     </form>
                   </div>

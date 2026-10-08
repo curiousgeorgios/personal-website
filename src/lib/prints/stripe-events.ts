@@ -170,10 +170,12 @@ export async function handleStripeEvent(deps: PrintDeps, event: StripeEvent): Pr
         // Stripe copies the payment intent's metadata to its charge once, so a print order's charge names its order. Only
         // a charge naming an order that is still waiting for the paid transition to store its intent is retried: Stripe's
         // redelivery will find it. Any other charge never will: order_id is a common key (WooCommerce's gateway sets it),
-        // so an id of another shape, or one no waiting order has, is another integration's sale
+        // so an id of another shape, or one no waiting order has, is another integration's sale. The order holding this
+        // intent counts too: a paid transition that commits between the first read and this one has just stored it, and
+        // the redelivery applies the refund, where answering 200 would record it and lose it
         const metadata = object.metadata as { order_id?: unknown } | null | undefined;
         const named = isOrderId(metadata?.order_id) ? metadata.order_id : null;
-        const waiting = named ? await db.prepare("SELECT 1 AS waiting FROM print_orders WHERE id = ? AND status IN ('checkout', 'expired')").bind(named).first() : null;
+        const waiting = named ? await db.prepare("SELECT 1 AS waiting FROM print_orders WHERE id = ? AND (status IN ('checkout', 'expired') OR stripe_payment_intent = ?)").bind(named, intent).first() : null;
         if (waiting) throw new Error("no order holds this payment yet");
         return await ignore();
       }
