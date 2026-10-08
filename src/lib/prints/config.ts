@@ -46,8 +46,8 @@ export function printConfig(env: Cloudflare.Env): PrintConfig {
       console.error("prints: a test build refuses a live stripe key");
       secrets.STRIPE_SECRET_KEY = "";
     }
-    const window = text(vars.PRINT_RETRY_WINDOW);
-    if (/^\d{1,6}$/.test(window)) retryWindow = Number(window);
+    const retryText = text(vars.PRINT_RETRY_WINDOW);
+    if (/^\d{1,6}$/.test(retryText)) retryWindow = Number(retryText);
     if (text(vars.EMAIL_SINK)) emailSink = text(vars.EMAIL_SINK);
   }
   return {

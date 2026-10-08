@@ -10,11 +10,10 @@
   "preview_urls": false,
   "assets": { "directory": "./dist", "binding": "ASSETS" },
   "observability": { "redact_query_string": true, "logs": { "enabled": true } },
-  // Cloudflare Access for /admin (spec 7), and the one address it
-  // lets in (ADR-0016; empty refuses everyone); and PostHog's US ingestion host for the /ingest proxy, whose project key
-  // is a secret (wrangler secret put POSTHOG_KEY).
-  // Prints (spec 21.4): closed until launch; the seller and GST mode are configuration, so registering for GST later
-  // changes no code. SITE_ORIGIN is for the cron, which has no request. Tests point the three provider URLs at the stand-in.
+  // Cloudflare Access for /admin (spec 7) and the one address it lets in (ADR-0016; empty refuses everyone); PostHog's US
+  // ingestion host for the /ingest proxy, whose project key is a secret (wrangler secret put POSTHOG_KEY); and prints
+  // (spec 21.4), closed until launch. The seller and GST mode are configuration, so registering for GST later changes no
+  // code; SITE_ORIGIN is for the cron, which has no request; tests point the three provider URLs at the stand-in.
   "vars": {
     "ACCESS_TEAM_DOMAIN": "digitalnachos.cloudflareaccess.com",
     "ACCESS_AUD": "ce587b3b3fbc4cbda410abd08f68a66dbc10a6379a99a6a162832246146c90fa",
