@@ -18,6 +18,8 @@
     "photos:import": "node scripts/import-photos.mjs",
     "photos:key": "node scripts/photo-key.mjs",
     "photos:link": "node scripts/photo-links.mjs",
+    "prints:check": "node scripts/print-check.mjs",
+    "prints:webhook": "node scripts/artelo-webhook.mjs",
     "seed:media": "node scripts/seed-media.mjs",
     "seed:snapshots": "node scripts/seed-snapshots.mjs",
     "poster": "node scripts/poster.mjs",

@@ -1,5 +1,6 @@
 import { pollStatuses } from "./artelo-updates";
 import type { PrintDeps } from "./config";
+import { checkArteloWebhook, cleanUp, lookUpStrandedRefunds } from "./daily";
 import { refreshRate } from "./fx";
 import { sendDueMail } from "./mail";
 import { placeDue } from "./place";
@@ -42,6 +43,10 @@ export function cronSteps(deps: PrintDeps): CronStep[] {
     ["unsent emails", () => sendDueMail(deps)],
     ["artelo statuses", () => pollStatuses(deps)],
     ["exchange rate", () => daily(deps, "fx", async () => (await refreshRate(deps)) !== "failed")],
+    ["artelo webhook check", () => daily(deps, "webhook_check", () => checkArteloWebhook(deps))],
+    ["clean-up", () => daily(deps, "cleanup", () => cleanUp(deps))],
+    // ADR-0026: a refunded order Artelo may still have, which nothing else would ever look up
+    ["stranded refunds", () => daily(deps, "refund_lookup", () => lookUpStrandedRefunds(deps))],
   ];
 }
 

@@ -217,5 +217,24 @@ route("POST", "/__status", ({ body }) => {
   return [204, ""];
 });
 
+// Catalogue costs (US$40.00 production and US$20.00 shipping for everything) and webhooks, for the two scripts
+const hooks = [];
+route("POST", "/catalog/get-costs", ({ body, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  // The fields Artelo's reference marks required, so the margin check can't drift from them unnoticed
+  const query = JSON.parse(body);
+  const booleans = ["includeMats", "includeFramingService", "includeHangingPins"].every((name) => typeof query[name] === "boolean");
+  if (!query.shippingDestination || !booleans || !["PremiumMetal", "PremiumOak", "Unframed", "Metal", "Oak"].includes(query.frameStyle)) return [400, { message: "shippingDestination, includeMats, includeFramingService, includeHangingPins and a listed frameStyle are required" }];
+  return [200, { productionCost: 40, shippingCost: 20 }];
+});
+route("POST", "/webhooks/save", ({ body, headers }) => {
+  if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
+  const hook = { ...JSON.parse(body), id: `hook-${hooks.length + 1}`, secret: `artelo-hook-secret-${hooks.length + 1}-${Date.now().toString(36)}` };
+  hooks.push(hook);
+  return [200, hook];
+});
+route("GET", "/webhooks/get", ({ headers }) => (keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY) ? [200, hooks.map(({ secret, ...hook }) => hook)] : [401, { message: "invalid api key" }]));
+route("GET", "/__hooks", () => [200, hooks]);
+
 // Routes added by later tasks go above this line
 start();

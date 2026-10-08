@@ -27,7 +27,7 @@ export async function loadPrices(db: D1Database): Promise<PriceList> {
 }
 
 /** The daily jobs of spec 18.6, each with its own timestamp in print_settings (daily_<job>_at) */
-export type DailyJob = "fx" | "webhook_check" | "cleanup";
+export type DailyJob = "fx" | "webhook_check" | "cleanup" | "refund_lookup";
 
 export const DEFAULT_BUFFER = 0.08;
 
@@ -64,7 +64,7 @@ export function toSettings(rows: readonly { key: string; value: string }[]): Pri
     rateDate: rateDate !== null && /^\d{4}-\d{2}-\d{2}$/.test(rateDate) ? rateDate : null,
     arteloWebhookAt: number("artelo_webhook_at"),
     webhookMissing: values.get("artelo_webhook_missing") === "1",
-    daily: { fx: number("daily_fx_at") ?? 0, webhook_check: number("daily_webhook_check_at") ?? 0, cleanup: number("daily_cleanup_at") ?? 0 },
+    daily: { fx: number("daily_fx_at") ?? 0, webhook_check: number("daily_webhook_check_at") ?? 0, cleanup: number("daily_cleanup_at") ?? 0, refund_lookup: number("daily_refund_lookup_at") ?? 0 },
   };
 }
 

@@ -62,7 +62,12 @@ export function scrub(message: string, address: Address | null): string {
   return parts.length > 0 ? message.replace(new RegExp(parts.join("|"), "giu"), "[address]") : message;
 }
 
-async function lookUp(deps: PrintDeps, orderId: string): Promise<ArteloOrder | null> {
+/**
+ * Our order at Artelo, found by its id with Get Orders' name filter: null only when Artelo answers an empty list. Anything
+ * else it can't match throws, so a caller never takes a failed lookup for "not there". The daily stranded-refund lookup
+ * (daily.ts) asks the same way
+ */
+export async function lookUp(deps: PrintDeps, orderId: string): Promise<ArteloOrder | null> {
   const result = await artelo(deps, "GET", `/orders/get?limit=5&name=${encodeURIComponent(orderId)}`);
   if (!result.ok) throw new Retryable(`the lookup at artelo failed (${result.status ?? "no answer"})`);
   const list = ordersList(result.body);
@@ -231,9 +236,10 @@ interface Attempt {
 /**
  * A failure's guarded write found the order no longer this attempt's: another run holds the lease, or it left paid (a
  * refund landed). Another run's order is left exactly as it is. An order that left paid under this attempt's lease keeps
- * its status; its lease goes only when Artelo can't have it (no create was sent, or Artelo refused it), because a
- * refunded order with a lease and no Artelo id is the marker Task 14's daily job looks up at Artelo. A refunded order's
- * links go, as the refund webhook revokes them: this attempt may have issued them after it did
+ * its status; its lease goes only when Artelo can't have it (no create was sent, or Artelo refused it). Otherwise the
+ * lease stays until the daily stranded-refund lookup (daily.ts) finds the order at Artelo or clears it; that lookup asks
+ * about every recent refunded order with no Artelo id, lease or not (ADR-0026). A refunded order's links go, as the
+ * refund webhook revokes them: this attempt may have issued them after it did
  */
 async function leftPaid(deps: PrintDeps, id: string, attempt: Attempt, arteloMayHaveIt: boolean): Promise<PlaceOutcome> {
   const row = await getOrder(deps.db, id);
@@ -312,8 +318,8 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
       .run();
     if (fenced.meta.changes === 0) {
       // Only this attempt's own links, which nothing has: the run that took over may be using its own. A refunded
-      // order keeps whatever lease it has here: Task 14's daily job looks for refunded orders with a lapsed lease and no
-      // Artelo id (an attempt that stopped after it may have created), so this lease must stay as it is
+      // order keeps whatever lease it has here (an attempt that stopped after it may have created): the daily
+      // stranded-refund lookup (daily.ts) asks Artelo about it either way, and clears the lease once Artelo clearly hasn't it
       await revokeLinks(deps, orderId, grantIds, false);
       await revokeIfRefunded(deps, orderId);
       console.error("prints: order", orderId, "wasn't created: its lease was taken over or it left paid");
@@ -339,8 +345,8 @@ export async function placeOrder(deps: PrintDeps, orderId: string): Promise<Plac
     return "placed";
   } catch (error) {
     if (error instanceof Unrecorded) {
-      // Nothing is cleared, and the lease above all stays: a refunded order with a lapsed lease and no Artelo id is what
-      // Task 14's daily job looks for, to find the order at Artelo and flag it for George
+      // Nothing is cleared, and the lease above all stays. A refunded order left with no Artelo id is found at Artelo and
+      // flagged for George by the daily stranded-refund lookup (daily.ts)
       console.error("prints: order", orderId, "is at artelo but recording that failed, so nothing was cleared and its lease is left to lapse", error.message);
       throw error;
     }
