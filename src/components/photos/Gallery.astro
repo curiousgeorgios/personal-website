@@ -1,6 +1,7 @@
 ---
 import Row from "../Row.astro";
 import Entry from "./Entry.astro";
+import Frame from "./Frame.astro";
 import type { Entry as EntryData } from "../../lib/photos/store";
 
 interface Props {
@@ -31,7 +32,12 @@ const { entries, next, older } = Astro.props;
             {entries.map((entry, index) => <Entry entry={entry} first={index === 0} />)}
           </ol>
           {next !== null ? (
-            <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl" aria-live="polite">older entries</span></a>
+            <>
+              <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl" aria-live="polite">older entries</span></a>
+              {/* The same components, empty: photo-sheet.ts clones these, so an entry's markup lives in one place (spec 3.4) */}
+              <template id="entry-template"><Entry entry={null} /></template>
+              <template id="frame-template"><Frame view={null} /></template>
+            </>
           ) : (
             <p class="more-end">that's every entry.</p>
           )}

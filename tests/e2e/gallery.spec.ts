@@ -107,3 +107,155 @@ test("the gallery works under the CSP, with every script inline", async ({ page 
   await expect(page.locator("script[src]")).toHaveCount(0);
   expect(violations).toEqual([]);
 });
+
+test.describe("with JavaScript", () => {
+  const entryIds = (page: import("@playwright/test").Page) => page.locator("ol.entries > li.entry").evaluateAll((all) => all.map((li) => li.id));
+  // The End key, so the script sees a visitor's scroll even where the fixture's short page can't move (and mobile WebKit has no wheel)
+  const toBottom = (page: import("@playwright/test").Page) => page.keyboard.press("End");
+
+  test("nothing is fetched on load, even with the link inside the margin, until the visitor scrolls", async ({ page }) => {
+    const queries: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/photos") queries.push(url.search);
+    });
+    await page.goto("/photos");
+    // The test means something only if the observer would have fired: the link is within 800px of the viewport's bottom
+    const gap = await page.locator("a.more").evaluate((link) => link.getBoundingClientRect().top - window.innerHeight);
+    expect(gap).toBeLessThan(800);
+    await page.waitForTimeout(500);
+    expect(queries).toEqual([]);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(2);
+    await expect(page.locator("a.more")).toHaveText("older entries");
+    await toBottom(page);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    expect(queries).toEqual(["?by=entry&before=1781392500&limit=4"]);
+  });
+
+  test("nearing the end loads the next entries in place once and ends the list", async ({ page }) => {
+    const queries: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/photos") queries.push(url.search);
+    });
+    await page.goto("/photos");
+    await toBottom(page);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    expect(await entryIds(page)).toEqual(["post-fixture", "post-fixture-b", "post-fixture-c", "post-fixture-d", "post-fixture-e", "post-fixture-f"]);
+    await expect(page.locator(".more-end")).toHaveText("that's every entry.");
+    await expect(page.locator("a.more")).toHaveCount(0);
+    expect(queries).toEqual(["?by=entry&before=1781392500&limit=4"]);
+    await expect(page).toHaveURL(/\/photos$/);
+    await expect(page.locator("#post-fixture-f .entry-head")).toHaveText("02.02.25 · valletta, malta");
+    await expect(page.locator("#post-fixture-f img")).toHaveAttribute("loading", "lazy");
+    await expect(page.locator("#post-fixture-f img")).toHaveAttribute("alt", "photo 1 of 1 from 2 february 2025, valletta, malta");
+    await expect(page.locator("#post-fixture-f a.frame-link")).toHaveAttribute("href", "/photos/fixture-f-01");
+    await expect(page.locator("#post-fixture-f .frame-no")).toHaveText("01");
+  });
+
+  test("while a batch loads the link says so and can't be followed, and a click fetches nothing more", async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    let calls = 0;
+    await page.route((url) => url.pathname === "/api/photos", async (route) => {
+      calls++;
+      await held;
+      await route.continue();
+    });
+    await page.goto("/photos");
+    await toBottom(page);
+    const more = page.locator("a.more");
+    await expect(more).toHaveText("loading older entries…");
+    await expect(more).toHaveAttribute("aria-disabled", "true");
+    // force: Playwright waits for an aria-disabled link to be enabled; a visitor's click arrives regardless
+    await more.click({ force: true });
+    await expect(page).toHaveURL(/\/photos$/);
+    release();
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    expect(calls).toBe(1);
+  });
+
+  test("focus stays where it was when a batch arrives, and the end line keeps it from the link", async ({ page }) => {
+    await page.goto("/photos");
+    await page.locator("a.frame-link").first().focus();
+    await toBottom(page);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("href"))).toBe("/photos/fixture-01");
+    // From the link itself: the line that replaces it takes the focus, so it doesn't fall back to the page
+    await page.goto("/photos?before=1781392500");
+    await page.locator("a.more").focus();
+    await toBottom(page);
+    await expect(page.locator(".more-end")).toHaveText("that's every entry.");
+    expect(await page.evaluate(() => document.activeElement?.className)).toBe("more-end");
+  });
+
+  test("an appended entry has exactly the server's markup for the same post", async ({ page, browser, baseURL }) => {
+    // Tag names, sorted attributes and leaf text: attribute order differs between a clone and a parse, nothing else may
+    const shape = (root: Element) => {
+      const walk = (el: Element): unknown => [el.tagName.toLowerCase(), [...el.attributes].map((a) => `${a.name}=${a.value}`).sort(), el.children.length > 0 ? [...el.children].map(walk) : el.textContent];
+      return JSON.stringify(walk(root));
+    };
+    const plain = await browser.newContext({ javaScriptEnabled: false, baseURL });
+    const server = await plain.newPage();
+    // fixture-f is the second entry there, so lazy like an appended one
+    await server.goto("/photos?before=1766610000");
+    const rendered = await server.locator("#post-fixture-f").evaluate(shape);
+    await plain.close();
+    await page.goto("/photos");
+    await toBottom(page);
+    await expect(page.locator("#post-fixture-f")).toHaveCount(1);
+    expect(await page.locator("#post-fixture-f").evaluate(shape)).toBe(rendered);
+    // The shape holds the two phone sources, so a frame with a missing or different one fails above
+    expect(rendered).toContain("(max-width: 680px)");
+  });
+
+  test("a loaded batch takes only the 240s on a phone, as the server's frames do", async ({ page }) => {
+    test.skip(page.viewportSize()!.width > 680, "the phone project (a 3× iPhone)");
+    await page.goto("/photos", { waitUntil: "networkidle" });
+    await toBottom(page);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    await page.waitForLoadState("networkidle");
+    const chosen = await page.locator("#post-fixture-c img, #post-fixture-d img, #post-fixture-e img, #post-fixture-f img").evaluateAll((all) => all.map((img) => (img as HTMLImageElement).currentSrc));
+    for (const src of chosen) expect(src).toMatch(/\/240\.(avif|webp)$/);
+  });
+
+  test("a batch arriving shifts nothing a visitor was looking at", async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { shifts: number }).shifts = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const shift = entry as PerformanceEntry & { value: number; hadRecentInput: boolean };
+          // Counted whether or not the wheel was recent: a batch arrives on its own schedule
+          (window as unknown as { shifts: number }).shifts += shift.value;
+        }
+      }).observe({ type: "layout-shift", buffered: true });
+    });
+    await page.goto("/photos", { waitUntil: "networkidle" });
+    await toBottom(page);
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => (window as unknown as { shifts: number }).shifts)).toBeLessThan(0.01);
+  });
+
+  test("when a batch fails the link is a plain link again, and nothing more is fetched", async ({ page }) => {
+    let calls = 0;
+    await page.route((url) => url.pathname === "/api/photos", (route) => {
+      calls++;
+      return route.abort();
+    });
+    await page.goto("/photos");
+    await toBottom(page);
+    await expect.poll(() => calls).toBe(1);
+    const more = page.locator("a.more");
+    await expect(more).toHaveText("older entries");
+    await expect(more).not.toHaveAttribute("aria-disabled");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await toBottom(page);
+    await page.waitForTimeout(300);
+    expect(calls).toBe(1);
+    await more.click();
+    await expect(page).toHaveURL(/\/photos\?before=1781392500$/);
+    expect(await entryIds(page)).toEqual(["post-fixture-c", "post-fixture-d"]);
+  });
+});

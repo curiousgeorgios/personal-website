@@ -29,4 +29,8 @@ if (page) {
 <Notebook title="photos · george vlachos" description="photos george vlachos has taken, one entry per instagram post." noindex={before !== null}>
   <Gallery entries={page?.entries ?? null} next={page?.next ?? null} older={before !== null} />
   <Beacon />
+  <script>
+    // Its own entry: it shares no module with any other script, so the build inlines it
+    import "../../scripts/photo-sheet";
+  </script>
 </Notebook>
