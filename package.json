@@ -9,6 +9,7 @@
     "build": "astro build",
     "build:test": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro build",
     "typecheck": "astro check",
+    "check:worker": "node scripts/check-built-worker.mjs",
     "cf-typegen": "wrangler types --strict-vars=false -c wrangler.jsonc -c workers/snapshots/wrangler.jsonc",
     "fonts": "node scripts/build-fonts.mjs",
     "og": "node scripts/og-image.mjs",
@@ -26,7 +27,7 @@
     "serve": "wrangler dev -c dist/server/wrangler.json --port 4331 --persist-to .wrangler/state",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run seed:snapshots --local && bun run build:test && bun run test:e2e"
+    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run seed:snapshots --local && bun run build:test && bun run check:worker && bun run test:e2e"
   },
   "dependencies": {
     "@astrojs/cloudflare": "14.3.3",

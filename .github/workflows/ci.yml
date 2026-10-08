@@ -32,6 +32,7 @@ jobs:
       - run: bun run seed:media --local
       - run: bun run seed:snapshots --local
       - run: bun run build:test
+      - run: bun run check:worker
       # Local Browser Rendering (the snapshot specs) downloads Chrome on first use; keep it between runs. Saved after the
       # e2e step whether it passed or failed, so a red run doesn't make the next one download Chrome again, but not when the run
       # was cancelled: a cancelled run may never have launched Chrome, and would save the previous one under the new key
@@ -80,8 +81,9 @@ jobs:
           bun-version: 1.2.21
       - run: bun install --frozen-lockfile
       - run: bun run build
-      # Test hooks and the admin bypass must never reach production
-      - run: if grep -rqE "__deck|admin-bypass" dist; then echo "test hooks or the admin bypass leaked into the production build"; exit 1; fi
+      # Test hooks, the admin bypass and the test-only print vars must never reach production
+      - run: if grep -rqE "__deck|admin-bypass|EMAIL_SINK|PRINT_RETRY_WINDOW" dist; then echo "test hooks, the admin bypass or a test-only var leaked into the production build"; exit 1; fi
+      - run: bun run check:worker
       # All the fallible setup happens before anything touches production
       - run: bunx playwright install --with-deps chromium
       # A missing zone id would otherwise surface only after production has been deployed
