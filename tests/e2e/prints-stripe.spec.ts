@@ -6,6 +6,8 @@ import { PRINTS_STRIPE } from "./prints-site";
 // webhooks can't reach a local server, so the spec fetches the real event from Stripe's API and delivers it itself
 test.use({ baseURL: PRINTS_STRIPE });
 test.skip(!process.env.STRIPE_TEST_SECRET_KEY, "needs STRIPE_TEST_SECRET_KEY, a key for stripe's test mode");
+// A live key is never used here: the server blanks one (spec 21.4), and this spec's own calls to Stripe's API would use it
+test.skip(!!process.env.STRIPE_TEST_SECRET_KEY && !/^(sk|rk)_test_/.test(process.env.STRIPE_TEST_SECRET_KEY), "STRIPE_TEST_SECRET_KEY isn't a test-mode key");
 test.skip(({ browserName }) => browserName !== "chromium", "the print specs run in chromium");
 
 const STORE = ".wrangler/stripe";
@@ -31,11 +33,12 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
 
   await page.getByRole("button", { name: "continue to payment" }).click();
   await page.waitForURL(/^https:\/\/checkout\.stripe\.com\//, { timeout: 60_000 });
-  // Stripe's page: the address read-only in the custom text, two print lines and one delivery line, no shipping form
-  await expect(page.getByText(`posting to: ${name}, 12 Example Street, Unit 3, Bondi Beach NSW 2026, australia.`)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("delivery to australia, 2 prints")).toBeVisible();
-  await expect(page.getByText(/print of photo 1 of 2 from 14\.06\.26 · medium, 12 × 18 in · oak frame/)).toBeVisible();
-  await expect(page.getByText(/print of photo 2 of 2 from 14\.06\.26 · small, 8 × 12 in · unframed/)).toBeVisible();
+  // Stripe's page: the address read-only in the custom text, two print lines and one delivery line, no shipping form.
+  // Stripe may render a line twice (a collapsed summary and the full list), so each needs only its first visible copy
+  await expect(page.getByText(`posting to: ${name}, 12 Example Street, Unit 3, Bondi Beach NSW 2026, australia.`).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("delivery to australia, 2 prints").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(/print of photo 1 of 2 from 14\.06\.26 · medium, 12 × 18 in · oak frame/).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(/print of photo 2 of 2 from 14\.06\.26 · small, 8 × 12 in · unframed/).filter({ visible: true }).first()).toBeVisible();
   await expect(page.locator("#shippingName, #shippingAddressLine1")).toHaveCount(0);
   await page.locator("#email").fill("buyer@example.com");
   await page.locator("#cardNumber").fill("4242 4242 4242 4242");
@@ -48,7 +51,8 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
   if (await postal.isVisible().catch(() => false)) await postal.fill("2026");
   // Events from a minute before paying on: the test account may be shared with other runs
   const started = Math.floor(Date.now() / 1000) - 60;
-  await page.locator("button[type=submit]").click();
+  // The pay button by its words (submit_type=pay), not any submit button: the page may hold another, for a wallet or a sign-in
+  await page.locator("button[type=submit]").filter({ hasText: /^\s*pay\b/i, visible: true }).first().click();
   await page.waitForURL(new RegExp(`^${PRINTS_STRIPE}/prints/[0-9a-z]{26}\\?key=`), { timeout: 90_000 });
   const orderId = new URL(page.url()).pathname.split("/").at(-1)!;
   await expect(page.locator("h1")).toHaveText("your prints");

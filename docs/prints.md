@@ -63,7 +63,7 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
    ```bash
    gh secret set STRIPE_TEST_SECRET_KEY
    ```
-   From then on every CI run, this branch's pull request included, runs the full order through `checkout.stripe.com` in test mode on its own server (4338). It must pass before merging. It has never run against Stripe's real page, so a first failure is likely to be a renamed field on Stripe's page (plan 7, assumption 20); that is fixed in `tests/e2e/prints-stripe.spec.ts` alone.
+   From then on every CI run, this branch's pull request included, runs the full order through `checkout.stripe.com` in test mode on its own server (4338). It must pass before merging. A pull request that is already open picks up a newly added secret only on its next run, so re-run its checks (or push a commit) after adding it. It has never run against Stripe's real page, so a first failure is likely to be a renamed field on Stripe's page (plan 7, assumption 20); that is fixed in `tests/e2e/prints-stripe.spec.ts` alone.
 8. **One Stripe test-mode order and refund.** Run the full order once on the Mac, so you can see Stripe's page:
    ```bash
    read -rs STRIPE_TEST_SECRET_KEY && export STRIPE_TEST_SECRET_KEY
@@ -76,6 +76,8 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
    - In Stripe's dashboard, in test mode, open the payment (its description reads `print order <id> · prices include no gst…`) and refund it in full.
    - Open the `charge.refunded` event for that charge (Developers, Events) and confirm `data.object.metadata.order_id` holds the order id. A refund that arrives before the site has recorded the payment finds its order only through it ([ADR-0027](adr/0027-a-stripe-event-acts-only-when-provably-ours.md)); if it is missing, don't open prints until the refund handling is changed.
 
+   Then take the key out of the shell: `unset STRIPE_TEST_SECRET_KEY`.
+
 ### After merge
 
 9. **Watch the deploy.** The job applies migrations (none left after step 3), deploys both Workers, purges the `logbook` and `photos` cache tags and checks the visitor info's promises on the live site. The Worker now has the five-minute cron and the three rate limits. Within a few minutes the orders section of `/admin` reads `prints are closed: PRINTS_OPEN isn't "true"`, and after the first cron run it shows an exchange rate (`us$1 = a$… · ecb rate of …`).
@@ -83,6 +85,7 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
     ```bash
     bunx wrangler secret put STRIPE_WEBHOOK_SECRET
     ```
+    Then prove the secret: send a test event to the endpoint from Stripe's dashboard (any of the three events) and check it is answered 200. A signed event that isn't one of the site's orders is recorded and answered 200, while a wrong secret answers 400; otherwise a wrong secret would show only as a missed-webhook email 65 minutes after the first real order.
 11. **Artelo.** Open the account, connect the API integration and set up billing on George's card (no foreign transaction fee). Then set the key and save Artelo's webhook straight after, so the cron's daily webhook check never finds a key with no webhook:
     ```bash
     read -rs ARTELO_API_KEY && export ARTELO_API_KEY
@@ -95,9 +98,12 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
     bun run prints:check --remote
     ```
     - It must end with `lookup check: ok` and `0 failed`. Any `FAIL lookup check` line means don't open prints: placing depends on Artelo finding an order the moment it is created ([ADR-0026](adr/0026-a-print-order-is-fenced-not-keyed.md)).
-    - Read every indented `orderCosts` line. The site assumes Artelo's `total` is `productionCost` plus `arteloShipping`, the taxes, `branding`, `holidayFees` and `customPricingAdjustment`, less `wholesaleDiscount`. Check those four fields count towards `total` that way in the real answers; if they don't, every quote will be refused as unreadable, so get `src/lib/prints/quote.ts` changed before opening.
+    - Read every indented `orderCosts` line. The site assumes Artelo's `total` is `productionCost` plus `arteloShipping`, the taxes, `branding`, `holidayFees` and `customPricingAdjustment`, less `wholesaleDiscount`. Check those four fields count towards `total` that way in the real answers; if they don't, every quote will be refused as unreadable, so get `src/lib/prints/quote.ts` changed before opening. If all four are 0 in every answer, the assumption is unproven rather than confirmed, which is safe: should one ever be non-zero and not reconcile, `readOrderCosts` refuses that quote, so the buyer sees delivery as unavailable, never a wrong price. Note it in the follow-ups either way.
     - Fix anything it fails on, and look at every warning (a margin under 30%, or Price Check more than 5% from the catalogue's costs). The Antarctica line shows Artelo's real refusal.
     - It creates one free Artelo test order, which is never produced, and prints `lookup check: test order <artelo id> created (<status>)`. Cancel it in Artelo if you like.
+    - Prove Artelo's webhook secret: once that test order changes status at Artelo, `/admin` should read `artelo webhook: connected · last heard …` (any delivery that passes the signature check stamps it; a wrong secret answers 400, and Artelo eventually deletes a webhook that keeps failing). If it still reads `not heard from yet` an hour or so later, Artelo may not send a test order's changes; then check Artelo's webhook delivery log, and watch for `last heard` to change during the first real order (step 16).
+
+    Then take the key out of the shell: `unset ARTELO_API_KEY`.
 13. **The photographs** (plan 6's steps):
     - From the Mac, under Node 24: `bun run photos:prepare`, filling `scripts/photo-cities.json` wherever it stops, then `bun run photos:import --remote`.
     - In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates with `raw` pills.
@@ -108,7 +114,7 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
     bun run lighthouse https://curiousgeorge.dev/
     ```
     Also confirm a catalogue link's download works and that Workers Logs hold no `token=`.
-15. **Open prints, last.** Set `"PRINTS_OPEN": "true"` in `wrangler.jsonc` and merge it to `main`. The deploy job purges the `logbook` and `photos` cache tags, which is what makes cached photo pages show the print row and the home page's line end `some come as prints`. Confirm its `Purge the cached pages` step passed; if it didn't, purge the tags `photos` and `logbook` in the Cloudflare dashboard (Caching, Purge cache, Custom purge, Tags). Then `/admin` reads `prints are open`; if it lists secrets that aren't set or says no exchange rate has been fetched yet, prints stay closed until that is fixed.
+15. **Open prints, last.** In one change, set `"PRINTS_OPEN": "true"` in `wrangler.jsonc` and delete the `PRINTS_OPEN` check from `scripts/check-built-worker.mjs`: the line `if (config.vars?.PRINTS_OPEN !== "false") problems.push(…)` (line 15) and the comment above it. That check makes `bun run check:worker` fail any build with prints switched on, so that a merge can never open them by accident; both CI jobs run it, so with the check still in place the pull request goes red and the deploy job stops before deploying. The change touches code, so an agent can make the pull request. Merge it to `main`. The deploy job purges the `logbook` and `photos` cache tags, which is what makes cached photo pages show the print row and the home page's line end `some come as prints`. Confirm its `Purge the cached pages` step passed; if it didn't, purge the tags `photos` and `logbook` in the Cloudflare dashboard (Caching, Purge cache, Custom purge, Tags). Then `/admin` reads `prints are open`; if it lists secrets that aren't set or says no exchange rate has been fetched yet, prints stay closed until that is fixed.
 16. **The first real order.** Buy two prints in one order (one small unframed, one framed) with a real card, shipped to yourself. Watch it reach `shipped` in `/admin`, with the tracking email and Stripe's receipt showing the GST sentence, and compare Artelo's cost on the order (`artelo us$…`) with the quote. Then decide whether to keep or refund them. This is the only check of Artelo's real image fetch, address handling, combined freight and webhooks (spec 25).
 
 ## Operating
@@ -136,10 +142,10 @@ All go to `ADMIN_EMAIL` (`hello@curiousgeorge.dev`). An email that fails is retr
 
 - **`print order <id> needs attention`**: its body is the reason and a link to `/admin/#orders`. Read the reason (below) and act on it.
 - **`print order <id> was cancelled by artelo`**: Artelo cancelled the order. Refund the buyer in Stripe from the order's `refund in stripe ›` link, and email them if it helps. Not sent when the buyer was already refunded in full.
-- **`print order <id>: stripe's webhook never arrived`**: the cron found the order paid at Stripe with no webhook, applied the payment itself and is placing it, so the order needs nothing. Check the webhook in Stripe's dashboard: the endpoint is enabled, its recent deliveries succeed and its signing secret is the one in `STRIPE_WEBHOOK_SECRET`.
+- **`print order <id>: stripe's webhook never arrived`**: the cron found the order paid at Stripe with no webhook, applied the payment itself and is placing it, so the order needs nothing unless a needs-attention email for it comes too. Check the webhook in Stripe's dashboard: the endpoint is enabled, its recent deliveries succeed and its signing secret is the one in `STRIPE_WEBHOOK_SECRET`.
 - **`the artelo webhook is missing`**: the daily check found no webhook at Artelo for the site, so status changes arrive only through the twelve-hourly poll. Run `bun run prints:webhook --remote` (step 11). It comes once a day until fixed.
 
-The buyer gets Stripe's receipt and, from the site, one email when the order ships (`your prints are on their way`).
+The buyer gets Stripe's receipt and, from the site, one email when the order ships (`your prints are on their way`, or `your print is on its way` for one print).
 
 ### Reading a needs-attention reason
 
