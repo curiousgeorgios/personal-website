@@ -15,6 +15,7 @@ const full: Data = {
     { id: 2, date: "2026-10-01", precision: "month", text: "two." },
   ],
   records: [],
+  photos: false,
 };
 
 const labels = (doc: Document) => [...doc.querySelectorAll(".row > .label")].map((el) => text(el));
@@ -48,9 +49,17 @@ describe("Logbook", () => {
   });
 
   test("omits rows with no data and the last-entry note", async () => {
-    const doc = await render(Logbook, { data: { now: [], before: [], facts: [], log: [], records: [] } });
+    const doc = await render(Logbook, { data: { now: [], before: [], facts: [], log: [], records: [], photos: false } });
     expect(labels(doc)).toEqual(["logbook of", "on the turntable", "say hi", "visitor info"]);
     expect(text(doc.querySelector(".where"))).not.toContain("last entry");
+  });
+
+  test("a line points to the photos, between the log and the turntable, only while something is published", async () => {
+    const doc = await render(Logbook, { data: { ...full, photos: true } });
+    expect(labels(doc)).toEqual(["logbook of", "now", "lately", "log", "photos", "on the turntable", "before", "say hi", "visitor info"]);
+    expect(text(doc.querySelector("#photos .body"))).toBe("photos i've taken, kept like this log.");
+    expect(doc.querySelector("#photos a")!.getAttribute("href")).toBe("/photos");
+    expect(labels(await render(Logbook, { data: full }))).not.toContain("photos");
   });
 
   test("renders only the static sections when D1 is unavailable", async () => {

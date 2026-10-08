@@ -48,6 +48,8 @@ export interface Logbook {
   facts: Fact[];
   log: LogEntry[];
   records: Track[];
+  /** Whether anything is published, for the photos line (spec 3.7) */
+  photos: boolean;
 }
 
 export const LOG_LIMIT = 50;
@@ -96,13 +98,15 @@ function toItem(row: ItemRow): Item {
 }
 
 export async function loadLogbook(db: D1Database): Promise<Logbook> {
-  const [items, facts, log, records] = await db.batch([
+  const [items, facts, log, records, photos] = await db.batch([
     db.prepare(
       "SELECT slug, section, text, aside, label_era, label_status, label_made_of, label_text, label_kind, label_note, snapshot_key FROM items ORDER BY section, position",
     ),
     db.prepare("SELECT key, title, subtitle FROM facts ORDER BY CASE key WHEN 'shelf' THEN 0 ELSE 1 END"),
     db.prepare("SELECT id, date, precision, text FROM log_entries ORDER BY date DESC, created_at DESC, id DESC LIMIT ?").bind(LOG_LIMIT),
     db.prepare("SELECT id, title, artist, audio_key, cover_key FROM records WHERE active = 1 ORDER BY position LIMIT ?").bind(RECORD_LIMIT),
+    // The same join the gallery uses, so the line never points at an empty gallery
+    db.prepare("SELECT EXISTS (SELECT 1 FROM photos JOIN photo_posts ON photo_posts.collection = photos.collection WHERE photos.published = 1) AS any"),
   ]);
   const all = (items.results as unknown as ItemRow[]).map(toItem);
   return {
@@ -118,6 +122,7 @@ export async function loadLogbook(db: D1Database): Promise<Logbook> {
       coverKey: row.cover_key,
       side: sideFor(index),
     })),
+    photos: (photos.results[0] as { any: number } | undefined)?.any === 1,
   };
 }
 

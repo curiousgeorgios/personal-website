@@ -25,6 +25,7 @@ describe("loadLogbook", () => {
       [{ key: "shelf", title: "the scout mindset", subtitle: "julia galef" }],
       [{ id: 5, date: "2026-10-03", precision: "day", text: "redesigning." }],
       [{ id: 9, title: "simple things", artist: "loom room", audio_key: "audio/a.mp3", cover_key: "covers/a.webp" }],
+      [{ any: 1 }],
     ]);
     const data = await loadLogbook(db);
     expect(db.batch).toHaveBeenCalledTimes(1);
@@ -33,6 +34,12 @@ describe("loadLogbook", () => {
     expect(data.facts).toEqual([{ key: "shelf", title: "the scout mindset", subtitle: "julia galef" }]);
     expect(data.log).toEqual([{ id: 5, date: "2026-10-03", precision: "day", text: "redesigning." }]);
     expect(data.records).toEqual([{ id: 9, title: "simple things", artist: "loom room", audioKey: "audio/a.mp3", coverKey: "covers/a.webp", side: "a1" }]);
+    expect(data.photos).toBe(true);
+  });
+
+  test("there are photos only when something is published", async () => {
+    const data = await loadLogbook(fakeDb([[], [], [], [], [{ any: 0 }]]));
+    expect(data.photos).toBe(false);
   });
 });
 

@@ -1,0 +1,32 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../../layouts/Notebook.astro";
+import Beacon from "../../components/Beacon.astro";
+import Gallery from "../../components/photos/Gallery.astro";
+import { ENTRY_LIMIT, entryPage, type EntryPage } from "../../lib/photos/store";
+import "../../styles/photos.css";
+
+const before = Astro.url.searchParams.get("before");
+// Anything but a plain count of seconds is the notebook 404 (spec 3.4); a null body makes Astro render 404.astro
+if (before !== null && !/^\d{1,10}$/.test(before)) return new Response(null, { status: 404 });
+
+let page: EntryPage | null = null;
+try {
+  page = await entryPage(env.DB, before === null ? null : Number(before), ENTRY_LIMIT);
+} catch (error) {
+  console.error("photos: the gallery couldn't read D1", error instanceof Error ? error.message : String(error));
+}
+if (page) {
+  // As the home page (R6.1): fresh for five minutes at the edge, then stale while it refreshes; saves purge the tag
+  Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["photos"] });
+  Astro.response.headers.set("Cache-Control", "no-cache");
+} else {
+  // A degraded page is never cached
+  Astro.response.status = 503;
+  Astro.response.headers.set("Cache-Control", "no-store");
+}
+---
+<Notebook title="photos · george vlachos" description="photos george vlachos has taken, one entry per instagram post." noindex={before !== null}>
+  <Gallery entries={page?.entries ?? null} next={page?.next ?? null} older={before !== null} />
+  <Beacon />
+</Notebook>

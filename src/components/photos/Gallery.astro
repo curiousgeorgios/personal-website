@@ -1,0 +1,42 @@
+---
+import Row from "../Row.astro";
+import Entry from "./Entry.astro";
+import type { Entry as EntryData } from "../../lib/photos/store";
+
+interface Props {
+  /** null when D1 couldn't be read: the head row says so, and nothing else renders */
+  entries: EntryData[] | null;
+  /** The next page's cursor, or null at the end */
+  next: number | null;
+  /** A ?before= page */
+  older: boolean;
+}
+
+const { entries, next, older } = Astro.props;
+---
+<main class="book photos">
+  <Row label="photos of" head>
+    <h1>george vlachos</h1>
+    <p class="intro">photos i've taken, one entry per instagram post, newest first.</p>
+    <p class="where"><a href="/">back to the logbook</a>{older && <> · <a href="/photos">newest entries</a></>}</p>
+    {entries === null && <p class="down">photos aren't loading right now. try again in a bit.</p>}
+  </Row>
+  {entries !== null && (
+    <Row label="entries" id="entries">
+      {entries.length === 0 && !older ? (
+        <p class="empty">no photos up yet.</p>
+      ) : (
+        <>
+          <ol class="entries">
+            {entries.map((entry, index) => <Entry entry={entry} first={index === 0} />)}
+          </ol>
+          {next !== null ? (
+            <a class="more" href={`/photos?before=${next}`} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl" aria-live="polite">older entries</span></a>
+          ) : (
+            <p class="more-end">that's every entry.</p>
+          )}
+        </>
+      )}
+    </Row>
+  )}
+</main>
