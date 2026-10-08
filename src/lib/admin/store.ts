@@ -64,6 +64,15 @@ export interface AdminPost {
   photos: AdminPhoto[];
 }
 
+/** A catalogue link still working (spec 6.3) */
+export interface AdminLink {
+  id: string;
+  /** D1's CURRENT_TIMESTAMP: UTC, written 2026-10-08 05:30:00 */
+  createdAt: string;
+  expiresAt: number;
+  note: string | null;
+}
+
 export interface AdminData {
   now: AdminItem[];
   before: AdminItem[];
@@ -71,6 +80,7 @@ export interface AdminData {
   facts: { shelf: AdminFact | null; kettle: AdminFact | null };
   records: AdminRecord[];
   photographs: AdminPost[];
+  links: AdminLink[];
 }
 
 interface ItemRow {
@@ -167,14 +177,16 @@ const toRecord = (row: RecordRow): AdminRecord => ({
   active: row.active === 1,
 });
 
-/** Everything the admin page shows, in one batch: unlike the logbook, every log entry, every record and every photograph */
-export async function loadAdmin(db: D1Database): Promise<AdminData> {
-  const [items, log, facts, records, photographs] = await db.batch([
+/** Everything the admin page shows, in one batch: unlike the logbook, every log entry, every record, every photograph and every working link */
+export async function loadAdmin(db: D1Database, now = Math.floor(Date.now() / 1000)): Promise<AdminData> {
+  const [items, log, facts, records, photographs, links] = await db.batch([
     db.prepare(`SELECT ${ITEM_COLUMNS} FROM items ORDER BY section, position`),
     db.prepare("SELECT id, date, precision, text FROM log_entries ORDER BY date DESC, created_at DESC, id DESC"),
     db.prepare("SELECT key, title, subtitle FROM facts"),
     db.prepare(`SELECT ${RECORD_COLUMNS} FROM records ORDER BY active DESC, position`),
     db.prepare(PHOTOGRAPHS),
+    // Catalogue links only: plan B's order grants carry a photo
+    db.prepare("SELECT id, created_at, expires_at, note FROM photo_download_grants WHERE photo_id IS NULL AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC, rowid DESC").bind(now),
   ]);
   const all = (items.results as unknown as ItemRow[]).map(toItem);
   const factRows = facts.results as unknown as { key: string; title: string; subtitle: string | null }[];
@@ -189,6 +201,7 @@ export async function loadAdmin(db: D1Database): Promise<AdminData> {
     facts: { shelf: fact("shelf"), kettle: fact("kettle") },
     records: (records.results as unknown as RecordRow[]).map(toRecord),
     photographs: toPosts(photographs.results as unknown as PhotographRow[]),
+    links: (links.results as unknown as { id: string; created_at: string; expires_at: number; note: string | null }[]).map((row) => ({ id: row.id, createdAt: row.created_at, expiresAt: row.expires_at, note: row.note })),
   };
 }
 

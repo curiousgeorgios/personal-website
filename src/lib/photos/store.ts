@@ -184,8 +184,14 @@ export async function grantIsActive(db: D1Database, token: PhotoToken, now: numb
   return !!row && row.revoked_at === null && row.expires_at > now && row.expires_at === token.expiresAt && row.photo_id === token.photoId;
 }
 
-export async function insertGrant(db: D1Database, token: PhotoToken): Promise<void> {
-  await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES (?, ?, ?)").bind(token.grantId, token.photoId, token.expiresAt).run();
+/**
+ * Records a grant. A note says who a catalogue link is for; a nonce is the admin form's, unique, so the same form sent
+ * twice makes one grant (spec 6.3). False when that nonce was already used. The token itself is never stored.
+ */
+export async function insertGrant(db: D1Database, token: PhotoToken, extra: { note?: string | null; nonce?: string | null } = {}): Promise<boolean> {
+  const result = await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, note, request_nonce) VALUES (?, ?, ?, ?, ?) ON CONFLICT(request_nonce) DO NOTHING")
+    .bind(token.grantId, token.photoId, token.expiresAt, extra.note ?? null, extra.nonce ?? null).run();
+  return result.meta.changes > 0;
 }
 
 export async function revokeGrant(db: D1Database, id: string, now = Math.floor(Date.now() / 1000)): Promise<boolean> {

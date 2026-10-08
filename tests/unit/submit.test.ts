@@ -118,4 +118,20 @@ describe("submitForm", () => {
     expect(outcome).toEqual({ redirect: "/admin/?saved=photographs#photographs" });
     expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook"] });
   });
+
+  test("issuing a link answers with it, without a redirect or a purge", async () => {
+    const purge = cache();
+    const form = formOf({ intent: "link.issue", days: "7", note: "", nonce: "AbCdEfGhIjKlMnOpQrStUv" });
+    const outcome = await submitForm(form, { ...deps(), photoLinkSecret: "1".repeat(64), origin: "https://curiousgeorge.dev" }, purge, waiter().waitUntil);
+    expect(outcome).toEqual({ issued: { url: expect.stringMatching(/^https:\/\/curiousgeorge\.dev\/photos\/downloads\?token=/) } });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+  });
+
+  test("revoking a link redirects to its section and purges nothing", async () => {
+    await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES ('a0000000-0000-4000-8000-000000000009', NULL, 9999999999)").run();
+    const purge = cache();
+    const outcome = await submitForm(formOf({ intent: "link.revoke", id: "a0000000-0000-4000-8000-000000000009", confirm: "yes" }), deps(), purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=links#links" });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+  });
 });

@@ -1,19 +1,22 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
 import { checkPlace } from "../photos/place";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
-import { PHOTO_ID } from "../photos/tokens";
+import { insertGrant, revokeGrant } from "../photos/store";
+import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
 import {
   checkFact,
   checkItem,
+  checkLink,
   checkLogEntry,
   checkRecordMeta,
   checkTitle,
   checkUpload,
   FACT_FIELDS,
   ITEM_FIELDS,
+  LINK_FIELDS,
   LOG_FIELDS,
   PLACE_FIELDS,
   readFields,
@@ -22,7 +25,7 @@ import {
   type Fields,
 } from "./validate";
 
-export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs";
+export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs" | "links";
 
 /** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
 export interface SnapshotsService {
@@ -39,6 +42,10 @@ export interface ActionDeps {
   snapshots?: SnapshotsService;
   /** PHOTO_PRINTS, the private masters a publish verifies (spec 6.2) */
   prints?: R2Bucket;
+  /** PHOTO_LINK_SECRET, which signs a new link (spec 6.3) */
+  photoLinkSecret?: string;
+  /** The site's origin, for a new link's address */
+  origin?: string;
 }
 
 export interface ActionFailure {
@@ -51,10 +58,13 @@ export interface ActionFailure {
   values: Fields;
 }
 
-export type ActionResult = { ok: true; section: AdminSection } | ActionFailure;
+/** A new link exists only in the response that made it (spec 6.3): its address, or word that the same form already made one */
+export type IssuedLink = { url: string } | { repeat: true };
+
+export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
-const gone = (what: "line" | "entry" | "record" | "post" | "photo") => fail(null, "", { form: `that ${what} no longer exists` });
+const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link") => fail(null, "", { form: `that ${what} no longer exists` });
 const CONFIRM = { confirm: "tick the box to remove it" };
 
 function idOf(form: FormData): number | null {
@@ -110,6 +120,10 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return publishPhoto(form, deps, true);
     case "photo.hide":
       return publishPhoto(form, deps, false);
+    case "link.issue":
+      return issueLink(form, deps);
+    case "link.revoke":
+      return revokeLink(form, deps);
     default:
       return fail(null, "", { form: "that action isn't recognised" });
   }
@@ -431,4 +445,37 @@ async function publishPhoto(form: FormData, deps: ActionDeps, published: boolean
   if (outcome.ok) return { ok: true, section: "photographs" };
   if ("missing" in outcome) return gone("photo");
   return fail("photographs", photoForm(id), { form: refusal(outcome, true) });
+}
+
+// Links (spec 6.3)
+
+/** 16 random bytes in base64url, from the form: the same form sent twice makes one link */
+const NONCE = /^[A-Za-z0-9_-]{22}$/;
+
+async function issueLink(form: FormData, deps: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, LINK_FIELDS);
+  const values = { days: fields.days, note: fields.note };
+  if (!NONCE.test(fields.nonce)) return fail(null, "", { form: "that form is out of date. reload the page and try again." });
+  const checked = checkLink(fields);
+  if (!checked.ok) return fail("links", "link-new", checked.errors, values);
+  try {
+    photoSigningKey(deps.photoLinkSecret);
+  } catch {
+    return fail("links", "link-new", { form: "links can't be made until PHOTO_LINK_SECRET is set." }, values);
+  }
+  const grant = { grantId: crypto.randomUUID(), photoId: null, expiresAt: Math.floor(Date.now() / 1000) + checked.value.days * 86400 };
+  const token = await signPhotoToken(deps.photoLinkSecret!, grant);
+  if (!(await insertGrant(deps.db, grant, { note: checked.value.note, nonce: fields.nonce }))) return { ok: true, section: "links", issued: { repeat: true } };
+  const url = new URL("/photos/downloads", deps.origin ?? "https://curiousgeorge.dev");
+  url.searchParams.set("token", token);
+  return { ok: true, section: "links", issued: { url: url.href } };
+}
+
+async function revokeLink(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!GRANT_ID.test(id)) return gone("link");
+  if (!confirmed(form)) return fail("links", `link-${id}`, CONFIRM);
+  // Already revoked counts as saved (ADR-0012)
+  await revokeGrant(db, id);
+  return { ok: true, section: "links" };
 }

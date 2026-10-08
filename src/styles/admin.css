@@ -118,3 +118,9 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .photo-id .status { white-space: nowrap; }
 .photo-id { font-size: 14.5px; color: var(--muted); }
 .photo-id .mono { color: var(--ink); }
+
+/* Links (spec 6.3): the link just issued, then the issue form and the working links */
+.issued { display: grid; gap: 10px; justify-items: start; max-width: 34rem; margin-bottom: 16px; }
+.issued .field { width: 100%; }
+.links-admin .entry { grid-template-columns: minmax(0, 1fr); }
+.links-admin .entry p { padding-top: 8px; font-size: 14.5px; }

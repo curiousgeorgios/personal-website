@@ -216,3 +216,20 @@ export function checkTitle(fields: Fields): Checked<string> {
   tooLong(errors, fields, "title", 80);
   return finish(errors, () => fields.title);
 }
+
+// Links (spec 6.3)
+
+export const LINK_FIELDS = ["days", "note", "nonce"] as const;
+
+export interface LinkInput {
+  days: number;
+  note: string | null;
+}
+
+export function checkLink(fields: Fields): Checked<LinkInput> {
+  const errors: Fields = {};
+  if (!/^\d{1,2}$/.test(fields.days) || Number(fields.days) < 1 || Number(fields.days) > 30) errors.days = "a number of days from 1 to 30";
+  if (CONTROL.test(fields.note)) errors.note = "one line of plain text";
+  tooLong(errors, fields, "note", 60);
+  return finish(errors, () => ({ days: Number(fields.days), note: orNull(fields.note) }));
+}

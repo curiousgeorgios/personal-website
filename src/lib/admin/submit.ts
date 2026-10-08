@@ -1,8 +1,8 @@
-import { runAction, type ActionDeps, type ActionFailure, type AdminSection } from "./actions";
+import { runAction, type ActionDeps, type ActionFailure, type AdminSection, type IssuedLink } from "./actions";
 import { purgeTags } from "./purge";
 
-/** What the page does next: redirect to the saved section (303), or show the page again with this failure and status */
-export type SubmitOutcome = { redirect: string } | { failure: ActionFailure; status: 422 | 500 };
+/** What the page does next: redirect to the saved section (303), show a link just issued (200) or show the page again with this failure and status */
+export type SubmitOutcome = { redirect: string } | { issued: IssuedLink } | { failure: ActionFailure; status: 422 | 500 };
 
 const UNREADABLE: ActionFailure = { ok: false, section: null, form: "", errors: { form: "that form couldn't be read. try again." }, values: {} };
 const UNEXPECTED: ActionFailure = { ok: false, section: null, form: "", errors: { form: "couldn't save that. try again." }, values: {} };
@@ -16,6 +16,7 @@ const PURGES: Record<AdminSection, string[]> = {
   records: ["logbook"],
   snapshots: ["logbook"],
   photographs: ["photos", "logbook"],
+  links: [],
 };
 
 /**
@@ -35,7 +36,10 @@ export async function submitForm(
     try {
       const result = await runAction(form, deps);
       if (!result.ok) return { failure: result, status: 422 };
-      const purged = await purgeTags(cache, PURGES[result.section]);
+      // The link exists only in this response, so it isn't a redirect (spec 6.3); links purge nothing
+      if (result.issued) return { issued: result.issued };
+      const tags = PURGES[result.section];
+      const purged = tags.length === 0 || (await purgeTags(cache, tags));
       return { redirect: `/admin/?saved=${result.section}${purged ? "" : "&later=1"}#${result.section}` };
     } catch (error) {
       console.error("admin: a save failed unexpectedly", error);

@@ -53,6 +53,7 @@ describe("loadAdmin", () => {
     ]);
     expect(data.now[0]).toMatchObject({ labelStatus: "live", labelKind: "decision", snapshotStatus: null });
     expect(data.photographs).toEqual([]);
+    expect(data.links).toEqual([]);
   });
 });
 
@@ -289,5 +290,21 @@ describe("photographs", () => {
     // A previews column that isn't a list leaves that photograph without a thumbnail rather than failing the page
     await db.prepare(`UPDATE photos SET previews = '{"a":1}' WHERE id = 'new-01'`).run();
     expect((await store.loadAdmin(db)).photographs[0].photos[0].thumb).toBeNull();
+  });
+});
+
+describe("links", () => {
+  test("loadAdmin lists only the catalogue links still working, newest first", async () => {
+    const add = (id: string, photo: string | null, expires: number, revoked: number | null, created: string, note: string | null) =>
+      db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, revoked_at, created_at, note) VALUES (?, ?, ?, ?, ?, ?)").bind(id, photo, expires, revoked, created, note).run();
+    await add("a0000000-0000-4000-8000-000000000001", null, 2000, null, "2026-10-01 00:00:00", "older");
+    await add("a0000000-0000-4000-8000-000000000002", null, 2000, null, "2026-10-02 00:00:00", null);
+    await add("a0000000-0000-4000-8000-000000000003", null, 2000, 1500, "2026-10-03 00:00:00", "revoked");
+    await add("a0000000-0000-4000-8000-000000000004", null, 900, null, "2026-10-04 00:00:00", "expired");
+    const { links } = await store.loadAdmin(db, 1000);
+    expect(links).toEqual([
+      { id: "a0000000-0000-4000-8000-000000000002", createdAt: "2026-10-02 00:00:00", expiresAt: 2000, note: null },
+      { id: "a0000000-0000-4000-8000-000000000001", createdAt: "2026-10-01 00:00:00", expiresAt: 2000, note: "older" },
+    ]);
   });
 });

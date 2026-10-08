@@ -1,0 +1,69 @@
+---
+import Field from "./Field.astro";
+import RemoveForm from "./RemoveForm.astro";
+import { formState } from "../../lib/admin/form-state";
+import type { ActionFailure, IssuedLink } from "../../lib/admin/actions";
+import type { AdminLink } from "../../lib/admin/store";
+import { formatLogDate } from "../../lib/text";
+import { sydneyDate } from "../../lib/time";
+
+interface Props {
+  links: AdminLink[];
+  failure: ActionFailure | null;
+  /** The link this response just made, or word that the same form had already made one */
+  issued: IssuedLink | null;
+}
+
+const { links, failure, issued } = Astro.props;
+// New on every render, so a repeated post of this form (a double tap, a reload) makes no second link (spec 6.3)
+const bytes = crypto.getRandomValues(new Uint8Array(16));
+const nonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fresh = formState(failure, "link-new", { days: "7", note: "" });
+const day = (when: Date) => formatLogDate(sydneyDate(when), "day");
+// D1's CURRENT_TIMESTAMP is UTC, written 2026-10-08 05:30:00
+const made = (createdAt: string) => day(new Date(`${createdAt.replace(" ", "T")}Z`));
+---
+{issued && ("url" in issued ? (
+  <div class="issued">
+    <p class="notice" role="status">here's the link. copy it now - it can't be shown again.</p>
+    <div class="field">
+      <label for="issued-link">the link</label>
+      <input id="issued-link" type="text" value={issued.url} readonly autocapitalize="none" autocorrect="off" spellcheck="false" />
+    </div>
+    <button type="button" class="button" data-copy="issued-link" hidden>copy</button>
+  </div>
+) : (
+  <p class="notice" role="status">that link was already made. it's in the list below, but it can't be shown again.</p>
+))}
+<form method="post" action="/admin/#link-new" id="link-new" class="admin-form">
+  <h3>issue a link</h3>
+  {fresh.errors.form && <p class="error" role="alert">{fresh.errors.form}</p>}
+  <input type="hidden" name="intent" value="link.issue" />
+  <input type="hidden" name="nonce" value={nonce} />
+  <Field form="link-new" name="days" label="days it works" value={fresh.values.days} error={fresh.errors.days} required plain maxlength={2} hint="1 to 30." />
+  <Field form="link-new" name="note" label="note" value={fresh.values.note} error={fresh.errors.note} maxlength={60} hint="who it's for, so you know which to revoke" />
+  <button type="submit" class="button">issue a link</button>
+</form>
+{links.length === 0 ? (
+  <p class="empty">no links are working right now.</p>
+) : (
+  <ol class="entries links-admin">
+    {links.map((link) => {
+      const id = `link-${link.id}`;
+      const { errors } = formState(failure, id, {});
+      return (
+        <li class="entry" id={id}>
+          <div>
+            <p>made {made(link.createdAt)} · works until {day(new Date(link.expiresAt * 1000))}{link.note && ` · ${link.note}`}</p>
+            <RemoveForm form={id} intent="link.revoke" id={link.id} confirm="yes, switch this link off" button="revoke" error={errors.confirm} />
+          </div>
+        </li>
+      );
+    })}
+  </ol>
+)}
+{issued && "url" in issued && (
+  <script>
+    import "../../scripts/copy-link";
+  </script>
+)}
