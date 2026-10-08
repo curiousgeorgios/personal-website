@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { photoError, photoJson, readPhotoJson } from "../../../lib/photos/http";
-import { insertGrant, revokeGrant } from "../../../lib/photos/store";
+import { insertGrant, revokeCatalogueLink } from "../../../lib/photos/store";
 import { DEFAULT_LINK_SECONDS, MAX_LINK_SECONDS, signPhotoToken } from "../../../lib/photos/tokens";
 
 export const POST: APIRoute = async ({ request, url }) => {
@@ -24,6 +24,7 @@ export const POST: APIRoute = async ({ request, url }) => {
 
 export const DELETE: APIRoute = async ({ url }) => {
   const id = url.searchParams.get("grantId") ?? "";
-  try { return await revokeGrant(env.DB, id) ? photoJson({ revoked: true }, 200, true) : photoError("Link unavailable or already revoked.", 404); }
+  // Catalogue links only: a photo-scoped grant (a print order's) is revoked by the print code alone, and answers as if it weren't here
+  try { return (await revokeCatalogueLink(env.DB, id)) === "revoked" ? photoJson({ revoked: true }, 200, true) : photoError("Link unavailable or already revoked.", 404); }
   catch { console.error("photos: could not revoke link"); return photoError("Could not revoke the link.", 503); }
 };
