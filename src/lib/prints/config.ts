@@ -31,6 +31,9 @@ export interface PrintConfig {
   testClients: boolean;
 }
 
+/** A live Stripe key, standard (sk_) or restricted (rk_): a test build refuses it and an order made with it is live */
+export const LIVE_STRIPE_KEY = /^(sk|rk)_live_/;
+
 const text = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 const trimSlash = (value: string) => value.replace(/\/+$/, "");
 
@@ -41,8 +44,8 @@ export function printConfig(env: Cloudflare.Env): PrintConfig {
   let emailSink: string | null = null;
   // Statements, not expressions: a production build compiles this block out, test-only names and all
   if (__TEST_HOOKS__) {
-    // A test build never talks to Stripe's live mode (spec 21.4)
-    if (secrets.STRIPE_SECRET_KEY.startsWith("sk_live_")) {
+    // A test build never talks to Stripe's live mode (spec 21.4), with a standard or a restricted key
+    if (LIVE_STRIPE_KEY.test(secrets.STRIPE_SECRET_KEY)) {
       console.error("prints: a test build refuses a live stripe key");
       secrets.STRIPE_SECRET_KEY = "";
     }

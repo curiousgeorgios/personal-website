@@ -3,7 +3,9 @@ import { basketPost } from "../../src/lib/prints/basket-page";
 import { parseItems } from "../../src/lib/prints/basket";
 import { customText, sessionForm, startCheckout } from "../../src/lib/prints/checkout";
 import { sealQuote, type QuotePayload } from "../../src/lib/prints/seal";
+import { printConfig } from "../../src/lib/prints/config";
 import { getOrder, resolveBasket, writeSetting } from "../../src/lib/prints/store";
+import { livemodeOf } from "../../src/lib/prints/stripe";
 import { viewKey } from "../../src/lib/prints/view-key";
 import { ADDRESS, captureLogs, dumpDb, fakeFetch, json, NOW, printDb, testConfig, testDeps, US_ADDRESS, VIEW_SECRET, type Handler } from "./prints-fakes";
 
@@ -100,6 +102,15 @@ describe("the session form", () => {
     expect(au.get("custom_text[submit][message]")).toMatch(/prices include gst for orders posted within australia\.$/);
     const us = sessionForm({ orderId: "o", lines: basket.lines, payload: payload({ address: US_ADDRESS }), config, viewKey: "K", now: NOW });
     expect(us.has("line_items[0][tax_rates][0]")).toBe(false);
+  });
+});
+
+describe("livemodeOf", () => {
+  test("a live key, standard or restricted, makes a live order; a test key of either kind a test one", () => {
+    expect(livemodeOf("sk_live_abc")).toBe(1);
+    expect(livemodeOf("rk_live_abc")).toBe(1);
+    expect(livemodeOf("sk_test_abc")).toBe(0);
+    expect(livemodeOf("rk_test_abc")).toBe(0);
   });
 });
 
@@ -235,10 +246,30 @@ describe("POST /basket, intent=checkout", () => {
     expect("view" in outcome && outcome.view.errors.form).toBe("couldn't reach the payment page. nothing was charged - try again in a minute.");
   });
 
-  test("a live key on a test build is never used: prints are closed and the basket says so", async () => {
+  test("a missing stripe key closes prints: the basket says so and nothing reaches stripe", async () => {
     const { fake, deps } = await setup(created, { config: testConfig({ missing: ["STRIPE_SECRET_KEY"] }) });
     const outcome = await basketPost(deps, await pay(await sealQuote(VIEW_SECRET, payload())), url(), {});
     expect("view" in outcome && outcome.view.open).toBe(false);
     expect(fake.calls).toHaveLength(0);
+  });
+
+  test("a live key, standard or restricted, on a test build is blanked by printConfig: prints close and nothing reaches stripe", async () => {
+    vi.stubGlobal("__TEST_HOOKS__", true);
+    captureLogs();
+    const base = testConfig();
+    const env = (key: string) => ({ PRINTS_OPEN: "true", SITE_ORIGIN: base.siteOrigin, STRIPE_API_BASE: base.stripeBase, ...base.secrets, STRIPE_SECRET_KEY: key }) as unknown as Cloudflare.Env;
+    try {
+      for (const key of ["sk_live_fixture", "rk_live_fixture"]) {
+        const config = printConfig(env(key));
+        expect(config.secrets.STRIPE_SECRET_KEY, key).toBe("");
+        expect(config.missing, key).toEqual(["STRIPE_SECRET_KEY"]);
+        const { fake, deps } = await setup(created, { config });
+        const outcome = await basketPost(deps, await pay(await sealQuote(VIEW_SECRET, payload())), url(), {});
+        expect("view" in outcome && outcome.view.open, key).toBe(false);
+        expect(fake.calls, key).toHaveLength(0);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

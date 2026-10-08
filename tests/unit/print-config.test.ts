@@ -59,3 +59,20 @@ test("a test build reads the retry window and the mail sink, and refuses a live 
   expect(error).toHaveBeenCalledWith("prints: a test build refuses a live stripe key");
   error.mockRestore();
 });
+
+test("a test build refuses a live key, standard or restricted, and keeps a test key of either kind", () => {
+  vi.stubGlobal("__TEST_HOOKS__", true);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  for (const key of ["sk_live_abc", "rk_live_abc"]) {
+    const live = printConfig(env({ STRIPE_SECRET_KEY: key }));
+    expect(live.secrets.STRIPE_SECRET_KEY, key).toBe("");
+    expect(live.missing, key).toEqual(["STRIPE_SECRET_KEY"]);
+  }
+  expect(error).toHaveBeenCalledTimes(2);
+  for (const key of ["sk_test_abc", "rk_test_abc"]) {
+    const test = printConfig(env({ STRIPE_SECRET_KEY: key }));
+    expect(test.secrets.STRIPE_SECRET_KEY, key).toBe(key);
+    expect(test.missing, key).toEqual([]);
+  }
+  error.mockRestore();
+});

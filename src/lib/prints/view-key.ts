@@ -16,6 +16,8 @@ export async function viewKeyMatches(secret: string, orderId: string, key: strin
   if (!secret || !key || key.length !== 43) return false;
   const signature = fromB64url(key);
   if (!signature || signature.length !== 32) return false;
+  // One spelling only: 43 characters carry 258 bits, and decoding ignores the last character's two spare bits
+  if (b64url(signature) !== key) return false;
   return crypto.subtle.verify("HMAC", await hmacKey(secret), signature, encoder.encode(LABEL + orderId));
 }
 

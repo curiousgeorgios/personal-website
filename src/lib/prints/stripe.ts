@@ -1,4 +1,4 @@
-import type { PrintDeps } from "./config";
+import { LIVE_STRIPE_KEY, type PrintDeps } from "./config";
 
 // Stripe's REST API with fetch (spec 17.2): no SDK, form-encoded, the API version pinned on every request. Nothing here
 // throws: a result is ok with Stripe's object, or not ok with a status (null for a network error or a timeout).
@@ -55,5 +55,5 @@ export const getSession = (deps: PrintDeps, id: string) => stripe(deps, "GET", `
 export const expireSession = (deps: PrintDeps, id: string) => stripe(deps, "POST", `/v1/checkout/sessions/${encodeURIComponent(id)}/expire`);
 export const getPaymentIntent = (deps: PrintDeps, id: string) => stripe(deps, "GET", `/v1/payment_intents/${encodeURIComponent(id)}`);
 
-/** An order is live or test by the key that made it (spec 17.2 step 3) */
-export const livemodeOf = (key: string): 0 | 1 => (key.startsWith("sk_live_") ? 1 : 0);
+/** An order is live or test by the key that made it (spec 17.2 step 3), standard or restricted */
+export const livemodeOf = (key: string): 0 | 1 => (LIVE_STRIPE_KEY.test(key) ? 1 : 0);

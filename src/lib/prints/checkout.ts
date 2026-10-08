@@ -99,6 +99,7 @@ export async function startCheckout(deps: PrintDeps, basket: ResolvedBasket, pay
   // The order first, so a payment can never arrive for an order the site doesn't know (spec 19)
   await createOrder(db, { id, country: payload.address.country, printTotal: payload.printTotal, deliveryAmount: payload.deliveryAmount, deliveryTaxed: hasTax(payload.taxes) ? 1 : 0, livemode: livemodeOf(config.secrets.STRIPE_SECRET_KEY), now }, basket.lines);
   const key = await viewKey(config.secrets.PRINT_VIEW_SECRET, id);
+  // The Idempotency-Key guards only a retried identical request; a double submit makes two orders by design (spec 17.2)
   const result = await stripe(deps, "POST", "/v1/checkout/sessions", sessionForm({ orderId: id, lines: basket.lines, payload, config, viewKey: key, now }), `checkout-${id}`);
   const session = result.ok && typeof result.body.id === "string" && typeof result.body.url === "string" ? { id: result.body.id, url: result.body.url } : null;
   if (!session) {

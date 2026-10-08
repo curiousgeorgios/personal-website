@@ -20,3 +20,15 @@ test("only the right key matches; anything else, or no secret, doesn't", async (
   expect(await viewKeyMatches("", ORDER, key)).toBe(false);
   for (const wrong of [null, "", "abc", `${key}x`, key.slice(0, -1), "!".repeat(43)]) expect(await viewKeyMatches(VIEW_SECRET, ORDER, wrong)).toBe(false);
 });
+
+test("only the key's one spelling matches: the last character's spare bits flipped is refused", async () => {
+  const key = await viewKey(VIEW_SECRET, ORDER);
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  // 43 characters carry 258 bits for a 32-byte signature: the last character's two low bits are spare
+  const spellings = [1, 2, 3].map((flip) => key.slice(0, -1) + alphabet[alphabet.indexOf(key.at(-1)!) ^ flip]);
+  for (const spelling of spellings) {
+    expect(spelling).not.toBe(key);
+    expect(await viewKeyMatches(VIEW_SECRET, ORDER, spelling), spelling).toBe(false);
+  }
+  expect(await viewKeyMatches(VIEW_SECRET, ORDER, key)).toBe(true);
+});
