@@ -18,7 +18,7 @@ async function database() {
   const db = sqliteD1();
   await db.prepare("INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES (?, ?, ?, ?)").bind("fixture", 1790497800, "2026-09-27", "bondi, sydney").run();
   for (const [position, id] of [ID, OTHER, DRAFT].entries()) {
-    const previews = [480, 960, 1600].flatMap((size) => ["avif", "webp"].map((format) => ({ key: `photos/previews/${id}/${SHA}/${size}.${format}`, width: size, height: size, format })));
+    const previews = [240, 480, 960, 1600].flatMap((size) => ["avif", "webp"].map((format) => ({ key: `photos/previews/${id}/${SHA}/${size}.${format}`, width: size, height: size, format })));
     await db.prepare("INSERT INTO photos (id, collection, position, title, published, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(id, "fixture", position, "", id === DRAFT ? 0 : 1, JSON.stringify(previews), `prints/${id}/${SHA}.jpg`, 2048, 2048, 1000, SHA).run();
   }

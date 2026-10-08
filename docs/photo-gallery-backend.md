@@ -40,7 +40,7 @@ bun run photos:import \
   --local
 ```
 
-The preparation command requires macOS to render RAW/HEIC with Core Image. It prefers an exported Photos edit where available, otherwise the preferred original. It preserves source dimensions and orientation, creates a full-resolution sRGB JPEG with its ICC profile and strips EXIF/XMP/IPTC from delivery copies. Six responsive variants are derived from that same JPEG. A checkpoint lets repeated preparations reuse completed assets. A rendered RAW is a candidate edit, not proof of a colour/crop match to Instagram.
+The preparation command requires macOS to render RAW/HEIC with Core Image. It prefers an exported Photos edit where available, otherwise the preferred original. It preserves source dimensions and orientation, creates a full-resolution sRGB JPEG with its ICC profile and strips EXIF/XMP/IPTC from delivery copies. Eight responsive variants (240, 480, 960 and 1600 pixels, in WebP and AVIF) are derived from that same JPEG. A checkpoint lets repeated preparations reuse completed assets; one from before the 240s gains them from its master without changing the master or its hash. A rendered RAW is a candidate edit, not proof of a colour/crop match to Instagram.
 
 Prepared assets must live outside the website checkout. The import validates selection membership, image format, dimensions, SHA-256, profile and private metadata before any storage write. Objects are uploaded before their database row. New or changed masters stay unpublished; an unchanged master keeps its current publication state. `--persist-to` chooses a separate local store. No prepared photo file is committed to Git.
 

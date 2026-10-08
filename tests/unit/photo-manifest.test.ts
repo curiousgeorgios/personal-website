@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { hasAllPreviews, type Preview } from "../../src/lib/photos/store";
 import { checkPhotoRecord, PREVIEW_FORMATS, PREVIEW_SIZES } from "../../scripts/photo-manifest.mjs";
 
 const SHA = "e5".repeat(32);
@@ -35,5 +36,20 @@ describe("checkPhotoRecord", () => {
     expect(() => checkPhotoRecord(record({ collection: "a/b" }))).toThrow("Invalid catalogue record");
     expect(() => checkPhotoRecord(record({ position: -1 }))).toThrow("Invalid catalogue record");
     expect(() => checkPhotoRecord(record({ print: { key: `prints/other-01/${SHA}.jpg`, sha256: SHA } }))).toThrow("Invalid print key");
+  });
+});
+
+describe("the publish check's previews", () => {
+  const eight = record().previews as unknown as Preview[];
+
+  test("accepts the eight and refuses a photograph missing its 240s", () => {
+    expect(hasAllPreviews(eight)).toBe(true);
+    expect(hasAllPreviews(eight.filter((p) => !p.key.includes("/240.")))).toBe(false);
+  });
+
+  test("refuses eight previews when a 240 is missing and a 480 is repeated", () => {
+    const repeated = [...eight.filter((p) => p.key !== eight[0].key), eight[2]];
+    expect(repeated).toHaveLength(8);
+    expect(hasAllPreviews(repeated)).toBe(false);
   });
 });
