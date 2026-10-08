@@ -40,9 +40,9 @@ CREATE TABLE print_orders (
   shipped_at INTEGER,
   refunded_at INTEGER,
   status_checked_at INTEGER,
-  shipped_email_at INTEGER,
+  shipped_email_at INTEGER,                  -- the three email guards: negative while a send is in flight, then when it went (ADR-0025)
   attention_notified_at INTEGER,
-  admin_notified_at INTEGER,                 -- 0 while an email to George is due (an artelo cancellation, or a payment whose stripe webhook never arrived), then when it went
+  admin_notified_at INTEGER,                 -- 0 while an email to George is due (an artelo cancellation, or a payment whose stripe webhook never arrived), negative in flight, then when it went
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX print_orders_due ON print_orders(status, next_attempt_at);
