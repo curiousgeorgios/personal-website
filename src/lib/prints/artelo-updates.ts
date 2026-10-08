@@ -88,8 +88,8 @@ const standing = (status: OrderStatus | null) => (status === "cancelled" ? 5 : s
 
 /**
  * What one status did: "applied" moved the order, "recorded" stored only Artelo's status and the check time, "stale" wrote
- * nothing (the status Artelo last reported again, or one at or below where the order and Artelo's last status already
- * stand: a replay or a late arrival), "raced" moved nothing because the order changed between the read and the write
+ * nothing (the status Artelo last reported again, or one below where the order and Artelo's last status already stand:
+ * a replay or a late arrival; a different word at the same rank is recorded), "raced" moved nothing because the order changed between the read and the write
  */
 type Applied = "applied" | "recorded" | "stale" | "raced";
 
