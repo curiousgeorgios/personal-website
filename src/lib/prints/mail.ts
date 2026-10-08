@@ -26,6 +26,12 @@ const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
 /** Any email-shaped token, in any case and with its @ percent-encoded or not: a provider's error may quote the recipient back */
 const EMAIL_TOKEN = /[^\s<>"'(),;:]+(?:@|%40)[^\s<>"'(),;:]+/gi;
 
+/** An error's text for the log: every address in it becomes "the recipient", except our own two, which a provider's complaint about the sender needs */
+function scrub(deps: PrintDeps, message: string): string {
+  const ours = [deps.config.fromEmail, REPLY_TO].map((address) => address.toLowerCase());
+  return message.replace(EMAIL_TOKEN, (token) => (ours.includes(token.replace(/\.+$/, "").toLowerCase()) ? token : "the recipient"));
+}
+
 export async function sendMail(deps: PrintDeps, mail: Mail, about: string): Promise<boolean> {
   const message = {
     from: { email: deps.config.fromEmail, name: deps.config.sellerName },
@@ -46,7 +52,7 @@ export async function sendMail(deps: PrintDeps, mail: Mail, about: string): Prom
     return true;
   } catch (error) {
     // The log must never hold a buyer's address, however the provider's error spells it
-    const reason = (error instanceof Error ? error.message : String(error)).replace(EMAIL_TOKEN, "the recipient");
+    const reason = scrub(deps, error instanceof Error ? error.message : String(error));
     console.error(`prints: couldn't send the ${about}`, reason);
     return false;
   }
@@ -157,11 +163,11 @@ export async function sendAdminNote(deps: PrintDeps, id: string): Promise<void> 
 }
 
 /** One email's send, on its own so a throw (a D1 hiccup, say) is logged by order id and the rest still go */
-async function attempt(id: string, send: () => Promise<void>): Promise<void> {
+async function attempt(deps: PrintDeps, id: string, send: () => Promise<void>): Promise<void> {
   try {
     await send();
-  } catch {
-    console.error("prints: couldn't finish sending the due email for order", id);
+  } catch (error) {
+    console.error("prints: couldn't finish sending the due email for order", id, scrub(deps, error instanceof Error ? error.message : String(error)));
   }
 }
 
@@ -174,8 +180,8 @@ export async function sendDueMail(deps: PrintDeps): Promise<void> {
     .all();
   for (const row of results as unknown as { id: string; status: string; admin_notified_at: number | null }[]) {
     // Each send claims its own email, so one that isn't due after all (or went in the meantime) does nothing
-    if (row.status === "shipped" || row.status === "delivered") await attempt(row.id, () => sendShipped(deps, row.id));
-    if (row.status === "needs_attention") await attempt(row.id, () => sendAttention(deps, row.id));
-    if (row.admin_notified_at !== null && row.admin_notified_at <= 0) await attempt(row.id, () => sendAdminNote(deps, row.id));
+    if (row.status === "shipped" || row.status === "delivered") await attempt(deps, row.id, () => sendShipped(deps, row.id));
+    if (row.status === "needs_attention") await attempt(deps, row.id, () => sendAttention(deps, row.id));
+    if (row.admin_notified_at !== null && row.admin_notified_at <= 0) await attempt(deps, row.id, () => sendAdminNote(deps, row.id));
   }
 }

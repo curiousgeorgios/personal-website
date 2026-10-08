@@ -55,6 +55,14 @@ describe("sending", () => {
     expect(logs().toLowerCase()).not.toMatch(/buyer(@|%40)example/);
   });
 
+  test("our own sender and reply-to addresses stay readable in a logged error; every other address does not", async () => {
+    const logs = captureLogs();
+    const { db } = await mailDeps();
+    const broken = testDeps(db, { email: { send: vi.fn(async () => { throw new Error("sender prints@curiousgeorge.dev is not verified; reply-to Hello@curiousgeorge.dev, to buyer@example.com or other@example.org."); }) } as unknown as SendEmail });
+    expect(await sendMail(broken, { to: "buyer@example.com", subject: "s", text: "t" }, "a test email")).toBe(false);
+    expect(logs()).toContain("sender prints@curiousgeorge.dev is not verified; reply-to Hello@curiousgeorge.dev, to the recipient or the recipient");
+  });
+
   test("a line break in the recipient or subject can't start another header", async () => {
     const { email, deps } = await mailDeps();
     await sendMail(deps, { to: "buyer@example.com\r\nBcc: x@example.com", subject: "hi\nBcc: y@example.com", text: "t" }, "a test email");
@@ -163,7 +171,7 @@ describe("claims", () => {
     let thrown = false;
     const flaky = new Proxy(db, {
       get(target, property) {
-        if (property === "batch") return async (...args: Parameters<D1Database["batch"]>) => { if (!thrown) { thrown = true; throw new Error("d1 hiccup"); } return target.batch(...args); };
+        if (property === "batch") return async (...args: Parameters<D1Database["batch"]>) => { if (!thrown) { thrown = true; throw new Error("d1 hiccup for buyer@example.com"); } return target.batch(...args); };
         const value = Reflect.get(target, property) as unknown;
         return typeof value === "function" ? value.bind(target) : value;
       },
@@ -173,7 +181,8 @@ describe("claims", () => {
     expect(email.send).toHaveBeenCalledTimes(2);
     expect(await db.prepare("SELECT shipped_email_at FROM print_orders WHERE id = ?").bind(shipped).first("shipped_email_at")).toBeNull();
     expect(logs()).toContain(`for order ${shipped}`);
-    expect(logs()).not.toContain("hiccup");
+    expect(logs()).toContain("d1 hiccup for the recipient");
+    expect(logs()).not.toContain("buyer@example.com");
     await sendDueMail(testDeps(db, withEmail));
     expect(email.send).toHaveBeenCalledTimes(3);
     expect(email.send).toHaveBeenLastCalledWith(expect.objectContaining({ to: "buyer@example.com" }));
@@ -191,6 +200,42 @@ describe("claims", () => {
     await sendDueMail(deps);
     expect(email.send).toHaveBeenCalledTimes(2);
     expect((await db.prepare("SELECT shipped_email_at, admin_notified_at FROM print_orders ORDER BY id").all()).results).toEqual([{ shipped_email_at: NOW, admin_notified_at: null }, { shipped_email_at: null, admin_notified_at: NOW }]);
+  });
+
+  test("two runs at once send george's note once", async () => {
+    const { db, email, deps } = await mailDeps();
+    email.send.mockImplementation(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); return { messageId: "m" }; });
+    await insertOrder(db, { status: "cancelled", admin_notified_at: 0 });
+    await Promise.all([sendDueMail(deps), sendDueMail(deps)]);
+    expect(email.send).toHaveBeenCalledTimes(1);
+  });
+
+  test("a run that was overtaken by a later claim neither completes nor gives back the claim that is not its own", async () => {
+    captureLogs();
+    for (const outcome of ["goes", "fails"] as const) {
+      const { db } = await mailDeps();
+      await insertOrder(db, { status: "cancelled", admin_notified_at: 0 });
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => { open = resolve; });
+      let first = true;
+      const send = vi.fn(async () => {
+        if (first) {
+          first = false;
+          await gate;
+          if (outcome === "fails") throw new Error("down");
+        }
+        return { messageId: "m" };
+      });
+      const email = { send } as unknown as SendEmail;
+      const slow = sendDueMail(testDeps(db, { email, now: () => NOW }));
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+      // Over 15 minutes on, a second run reclaims the stuck claim and sends
+      await sendDueMail(testDeps(db, { email, now: () => NOW + 1000 }));
+      open();
+      await slow;
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(await db.prepare("SELECT admin_notified_at FROM print_orders").first("admin_notified_at")).toBe(NOW + 1000);
+    }
   });
 
   test("two runs at once send an email once", async () => {
