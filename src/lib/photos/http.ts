@@ -9,6 +9,13 @@ export const PRIVATE_HEADERS = {
   "X-Content-Type-Options": "nosniff",
 };
 
+/**
+ * Paths whose responses carry a bearer token or what it unlocks: the middleware gives them PRIVATE_HEADERS whatever the
+ * route sent, so they are never cached, indexed or passed on as a referrer (spec 5.2). Plan B adds /prints/.
+ */
+export const isPrivatePath = (pathname: string) =>
+  pathname === "/api/photos/downloads" || pathname === "/api/photos/downloads/" || pathname === "/photos/downloads" || pathname.startsWith("/photos/downloads/");
+
 export function photoJson(value: unknown, status = 200, privateResponse = false): Response {
   return new Response(JSON.stringify(value), { status, headers: {
     "Content-Type": "application/json; charset=utf-8",

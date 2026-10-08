@@ -8,7 +8,12 @@ import { photoPlatform } from "./photo-platform.mjs";
 const args = process.argv.slice(2);
 const arg = (name) => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
 if (args.includes("--local") === args.includes("--remote") || (!arg("--revoke") && !arg("--output"))) {
-  console.error("usage: bun run photos:link --local | --remote --output private-link.json [--photo ID] [--days 7] [--origin URL] [--persist-to DIR]\n       bun run photos:link --local | --remote --revoke GRANT_ID");
+  console.error("usage: bun run photos:link --local | --remote --output private-link.json [--days 7] [--origin URL] [--persist-to DIR]\n       bun run photos:link --local | --remote --revoke GRANT_ID");
+  process.exit(1);
+}
+// People only ever get catalogue links (ADR-0020 as amended): photo-scoped grants are made inside print orders
+if (args.includes("--photo")) {
+  console.error("photo links are internal: issue a catalogue link (leave out --photo)");
   process.exit(1);
 }
 const platform = await photoPlatform({ remote: args.includes("--remote"), persistTo: arg("--persist-to") ?? ".wrangler/state" });
@@ -27,13 +32,11 @@ try {
     if (!secret) throw new Error("Set PHOTO_LINK_SECRET; remote issuance must use the production signing key");
     const duration = arg("--days") === null ? DEFAULT_LINK_SECONDS : Number(arg("--days"))*86400;
     if (!Number.isSafeInteger(duration) || duration < 60 || duration > MAX_LINK_SECONDS) throw new Error("Expiry must be 60 seconds to 30 days");
-    const photoId = arg("--photo");
-    if (photoId && !await platform.env.DB.prepare("SELECT id FROM photos WHERE id = ? AND published = 1").bind(photoId).first()) throw new Error("Photo is unavailable or unpublished");
-    const grant = { grantId: randomUUID(), photoId, expiresAt: Math.floor(Date.now()/1000) + duration };
+    const grant = { grantId: randomUUID(), photoId: null, expiresAt: Math.floor(Date.now()/1000) + duration };
     const token = await signPhotoToken(secret, grant);
     const origin = new URL(arg("--origin") ?? (args.includes("--remote") ? "https://curiousgeorge.dev" : "http://localhost:4331"));
     if (origin.username || origin.password || origin.search || origin.hash || origin.pathname !== "/" || (origin.protocol !== "https:" && !(args.includes("--local") && ["localhost", "127.0.0.1"].includes(origin.hostname)))) throw new Error("Invalid link origin");
-    const url = new URL(photoId === null ? "/api/photos/downloads" : `/photos/downloads/${photoId}`, origin);
+    const url = new URL("/photos/downloads", origin);
     url.searchParams.set("token", token);
     // Create the private output first, so a typo cannot leave a usable grant with its link lost.
     const output = resolve(arg("--output"));

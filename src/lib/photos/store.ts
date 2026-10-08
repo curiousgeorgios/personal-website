@@ -145,6 +145,11 @@ export async function entryPage(db: D1Database, before: number | null, limit: nu
   };
 }
 
+/** Every published photograph, grouped into entries newest first, on one page (the downloads page, spec 5.2) */
+export async function allEntries(db: D1Database, sizes: readonly number[]): Promise<Entry[]> {
+  return (await entryPage(db, null, 10_000, sizes)).entries;
+}
+
 /** One photograph's page (spec 4): the photograph, and where it sits among its post's published photographs */
 export interface PhotoPage {
   photo: PublicPhoto;

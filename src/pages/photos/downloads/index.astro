@@ -1,0 +1,32 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../../../layouts/Notebook.astro";
+import Downloads from "../../../components/photos/Downloads.astro";
+import type { DownloadsView } from "../../../lib/photos/gallery";
+import { PRIVATE_HEADERS, requestToken } from "../../../lib/photos/http";
+import { allEntries, grantIsActive } from "../../../lib/photos/store";
+import { verifyPhotoToken } from "../../../lib/photos/tokens";
+import "../../../styles/photos.css";
+
+// Never cached, indexed, counted or logged (spec 5.2): the middleware sets these too, and this page never calls
+// Astro.cache.set, carries no script and logs no URL
+for (const [name, value] of Object.entries(PRIVATE_HEADERS)) Astro.response.headers.set(name, value);
+const token = requestToken(Astro.request);
+let view: DownloadsView;
+try {
+  const now = Math.floor(Date.now() / 1000);
+  // Exactly as /api/photos/downloads: a valid signature, a catalogue scope and an active grant
+  const verified = await verifyPhotoToken(env.PHOTO_LINK_SECRET, token, now);
+  if (!verified || verified.photoId !== null || !(await grantIsActive(env.DB, verified, now))) view = { state: "gone" };
+  else view = { state: "ok", entries: await allEntries(env.DB, [240]), token, expiresAt: verified.expiresAt };
+} catch {
+  // A missing PHOTO_LINK_SECRET throws in verifyPhotoToken; D1 can throw too. Never log the request or the error, which could hold the token
+  console.error("photos: the downloads page is unavailable");
+  view = { state: "down" };
+}
+// Invalid, expired and revoked look the same (spec 5.3)
+Astro.response.status = view.state === "ok" ? 200 : view.state === "gone" ? 403 : 503;
+---
+<Notebook title="downloads · george vlachos" description="full-resolution photos from george vlachos, for the people he shares them with." noindex referrer="no-referrer">
+  <Downloads view={view} />
+</Notebook>

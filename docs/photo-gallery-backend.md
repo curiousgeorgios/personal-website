@@ -11,7 +11,8 @@ The backend supports public previews and private full-resolution JPEG downloads 
 | `GET /media/photos/previews/<id>/<sha>/<240\|480\|960\|1600>.<webp\|avif>` | Public versioned preview, served through the existing media route. |
 | `GET /api/photos/downloads?token=<signed-token>&after=-1&limit=24` | Private catalogue for a catalogue-scoped grant, with protected `downloadUrl` values and `expiresAt`. |
 | `GET` or `HEAD /photos/downloads/<id>?token=<signed-token>` | Approved full-resolution JPEG attachment. Supports byte ranges and conditional requests. |
-| `POST /admin/photos/links` | Issue a photo or catalogue link, through the existing owner administration gate. |
+| `GET /photos/downloads?token=<signed-token>` | The private downloads page: every published photograph with a download link. Never cached, indexed, counted or sent as a referrer; an invalid, expired or revoked link gets one 403 page. |
+| `POST /admin/photos/links` | Issue a catalogue link to the downloads page, through the existing owner administration gate. A `photoId` is refused with 400: photo links are internal. |
 | `DELETE /admin/photos/links?grantId=<uuid>` | Revoke a link through the owner gate. |
 | `PATCH /admin/photos/<id>` | Publish or unpublish a prepared photograph after verifying its private JPEG and eight previews. |
 
@@ -46,15 +47,15 @@ Prepared assets must live outside the website checkout. The import validates sel
 
 ## Issuing links without Access
 
-`photos:key` generates an ignored local key in `.dev.vars`, preserves an existing key and never prints it. Links require a published photo when photo-scoped; a catalogue link lists only published photos.
+`photos:key` generates an ignored local key in `.dev.vars`, preserves an existing key and never prints it. People only ever get catalogue links (ADR-0020 as amended): a catalogue link lists only published photos, and photo-scoped grants are made inside the site.
 
 ```bash
 bun run photos:link --local \
-  --photo DFkL1xrsnOH-02 --days 7 \
+  --days 7 \
   --output /Users/curiousgeorge/Documents/ChatGPT/photo-printing/recovery/private-link.json
 ```
 
-Omit `--photo` for catalogue access. The private JSON file contains the URL, grant identifier and expiry; its mode is 0600. The command refuses to save links into tracked areas of the website. George shares the link himself. To revoke it:
+The link opens the downloads page, `/photos/downloads?token=…`; `--photo` is refused. The private JSON file contains the URL, grant identifier and expiry; its mode is 0600. The command refuses to save links into tracked areas of the website. George shares the link himself. To revoke it:
 
 ```bash
 bun run photos:link --local --revoke <grant-id>

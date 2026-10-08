@@ -1,7 +1,7 @@
 // Names, dates and frames for the gallery's pages (spec 3 and 4). Pure, and shared by the server's components and the
 // browser's photo-sheet script, so the store is imported for its types only.
 import { formatLogDate } from "../text";
-import type { PublicPhoto, PublicPreview } from "./store";
+import type { Entry, PublicPhoto, PublicPreview } from "./store";
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
@@ -98,3 +98,6 @@ export function photoSizes(width: number, height: number): string {
 export function photoName(photo: Pick<PublicPhoto, "title" | "date">, index: number, total: number): string {
   return photo.title ? `"${photo.title}"` : `photo ${index + 1} of ${total} from ${formatLogDate(photo.date, "day")}`;
 }
+
+/** What the downloads page shows (spec 5.2 and 5.3): the list, a link that has run out (whatever the reason) or downloads that aren't working */
+export type DownloadsView = { state: "ok"; entries: Entry[]; token: string; expiresAt: number } | { state: "gone" } | { state: "down" };

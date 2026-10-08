@@ -25,6 +25,12 @@
 /* Drawn chevrons, as the log's: DM Mono has no arrow glyphs */
 .photo-nav .chev { display: inline-block; width: 6px; height: 6px; border: solid currentColor; border-width: 0 0 1px 1px; transform: translateY(-1px) rotate(45deg); margin: 0 6px 0 2px; }
 .photo-nav .chev.ahead { transform: translateY(-1px) rotate(-135deg); margin: 0 2px 0 6px; }
+/* The downloads page (spec 5.2): each photo's 240 preview above its download link */
+.download-list { display: flex; flex-wrap: wrap; gap: 14px 18px; margin-top: 10px; }
+.download-list li { display: grid; gap: 4px; justify-items: start; }
+.download-list img { display: block; height: 88px; width: auto; background: #ecebe5; }
+.download-list a { font: 12px/1.5 var(--mono); }
+
 /* The notebook's phone breakpoint, as PHONE_MEDIA in gallery.ts */
 @media (max-width: 680px) {
   .frame-link img { height: 88px; }

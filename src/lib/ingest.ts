@@ -99,6 +99,9 @@ export async function forwardEvent(
   if (text === "unreadable") return ingestAnswer(400);
   const parsed = parseEvent(text);
   if (!parsed) return ingestAnswer(400);
+  // The downloads page carries no beacon; should one ever be added, its events are still never counted (spec 2.2)
+  const pathname = parsed.properties.$pathname;
+  if (typeof pathname === "string" && pathname.startsWith("/photos/downloads")) return ingestAnswer(400);
   if (!config.key) return ingestAnswer(204);
   const properties: Record<string, unknown> = {};
   for (const name of INGEST_PROPERTIES) if (parsed.properties[name] !== undefined) properties[name] = parsed.properties[name];

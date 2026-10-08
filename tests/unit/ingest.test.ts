@@ -187,3 +187,14 @@ test("the visitor's clock never reaches PostHog, and PostHog's reply is cancelle
   expect(JSON.parse((upstream.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).timestamp).toBe("2026-10-05T04:05:06.000Z");
   expect(reply.bodyUsed).toBe(true);
 });
+
+test("an event from the downloads page is refused and never forwarded", async () => {
+  const upstream = ok();
+  for (const pathname of ["/photos/downloads", "/photos/downloads/fixture-01"]) {
+    const body = JSON.stringify({ ...pageview, properties: { ...pageview.properties, $pathname: pathname } });
+    expect((await forwardEvent(post(body), config, upstream, serverNow)).status).toBe(400);
+  }
+  expect(upstream).not.toHaveBeenCalled();
+  const gallery = JSON.stringify({ ...pageview, properties: { ...pageview.properties, $pathname: "/photos" } });
+  expect((await forwardEvent(post(gallery), config, upstream, serverNow)).status).toBe(204);
+});

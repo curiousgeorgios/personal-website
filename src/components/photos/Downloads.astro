@@ -1,0 +1,73 @@
+---
+import Row from "../Row.astro";
+import EntryHead from "./EntryHead.astro";
+import { photoAlt, previewOf, type DownloadsView } from "../../lib/photos/gallery";
+import { formatLogDate } from "../../lib/text";
+import { sydneyDate, sydneyTime } from "../../lib/time";
+
+interface Props {
+  view: DownloadsView;
+}
+
+const { view } = Astro.props;
+const list = view.state === "ok" ? view : null;
+// The token's expiry in Sydney's wall time: 15.10.26, 2:30 pm
+const until = (seconds: number) => {
+  const when = new Date(seconds * 1000);
+  return `${formatLogDate(sydneyDate(when), "day")}, ${sydneyTime(when)}`;
+};
+// Decimal megabytes, one decimal (spec 5.2)
+const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
+---
+<main class="book downloads">
+  <Row label="downloads" head>
+    {view.state === "gone" ? (
+      <>
+        <h1>this link has run out</h1>
+        <p class="intro">it may have expired or been switched off. if you were expecting photos, ask george for a fresh one: <a href="mailto:hello@curiousgeorge.dev">hello@curiousgeorge.dev</a>.</p>
+      </>
+    ) : (
+      <>
+        <h1>photos, full size</h1>
+        {list ? (
+          <p class="intro">every photo in the gallery as a full-resolution jpeg. this link works until {until(list.expiresAt)} sydney time. please keep it to yourself.</p>
+        ) : (
+          <p class="intro">downloads aren't working right now. try again in a bit.</p>
+        )}
+      </>
+    )}
+  </Row>
+  {list && (
+    <Row label="entries" id="entries">
+      {list.entries.length === 0 ? (
+        <p class="empty">no photos up yet.</p>
+      ) : (
+        <ol class="entries">
+          {list.entries.map((entry) => (
+            <li class="entry" id={`post-${entry.collection}`}>
+              <EntryHead date={entry.date} place={entry.place} />
+              <ol class="download-list">
+                {entry.photos.map((photo, index) => {
+                  const webp = previewOf(photo, 240, "webp");
+                  const avif = previewOf(photo, 240, "avif");
+                  return (
+                    <li>
+                      {webp && (
+                        <picture>
+                          {avif && <source type="image/avif" srcset={avif.url} />}
+                          <img id={`download-${photo.id}`} src={webp.url} width={webp.width} height={webp.height} alt={photoAlt(photo, index, entry.photos.length)} loading="lazy" decoding="async" />
+                        </picture>
+                      )}
+                      {/* The token lives only in these links (spec 5.2) */}
+                      <a href={`/photos/downloads/${photo.id}?token=${encodeURIComponent(list.token)}`} download={`${photo.id}.jpg`} aria-describedby={webp ? `download-${photo.id}` : undefined}>download · {megabytes(photo.downloadBytes)}</a>
+                    </li>
+                  );
+                })}
+              </ol>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Row>
+  )}
+</main>

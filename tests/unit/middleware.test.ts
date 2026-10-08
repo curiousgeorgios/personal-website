@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { isPrivatePath } from "../../src/lib/photos/http";
 
 // The middleware imports two virtual modules and reads a build-time constant; stand them in
 vi.mock("astro:middleware", () => ({ defineMiddleware: (handler: unknown) => handler }));
@@ -20,13 +21,18 @@ const run = (path: string, next: () => Promise<Response>) => {
 afterEach(() => vi.restoreAllMocks());
 
 test("private photo paths cannot inherit public cache headers or leak a token as a referrer", async () => {
-  for (const path of ["/photos/downloads/fixture-01?token=private", "/api/photos/downloads?token=private"]) {
+  for (const path of ["/photos/downloads/fixture-01?token=private", "/photos/downloads?token=private", "/api/photos/downloads?token=private"]) {
     const response = await run(path, () => Promise.resolve(new Response("ok", { headers: { "Cache-Control": "public, max-age=999", "Cache-Tag": "photos" } })));
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(response.headers.get("Cloudflare-CDN-Cache-Control")).toBe("no-store");
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(response.headers.has("Cache-Tag")).toBe(false);
   }
+});
+
+test("the private paths are the downloads page, its files and the JSON catalogue, and nothing else", () => {
+  for (const path of ["/photos/downloads", "/photos/downloads/", "/photos/downloads/fixture-01", "/api/photos/downloads", "/api/photos/downloads/"]) expect(isPrivatePath(path)).toBe(true);
+  for (const path of ["/photos", "/photos/fixture-01", "/photos/downloadsx", "/api/photos", "/api/photos/downloadsx"]) expect(isPrivatePath(path)).toBe(false);
 });
 
 test("a failed private photo route retains cache exclusion", async () => {
