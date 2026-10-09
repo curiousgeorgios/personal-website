@@ -9,10 +9,17 @@
     "build": "astro build",
     "build:test": "TEST_HOOKS=1 ADMIN_BYPASS=1 astro build",
     "typecheck": "astro check",
+    "check:worker": "node scripts/check-built-worker.mjs",
     "cf-typegen": "wrangler types --strict-vars=false -c wrangler.jsonc -c workers/snapshots/wrangler.jsonc",
     "fonts": "node scripts/build-fonts.mjs",
     "og": "node scripts/og-image.mjs",
     "covers": "node scripts/covers.mjs",
+    "photos:prepare": "node scripts/prepare-photos.mjs",
+    "photos:import": "node scripts/import-photos.mjs",
+    "photos:key": "node scripts/photo-key.mjs",
+    "photos:link": "node scripts/photo-links.mjs",
+    "prints:check": "node scripts/print-check.mjs",
+    "prints:webhook": "node scripts/artelo-webhook.mjs",
     "seed:media": "node scripts/seed-media.mjs",
     "seed:snapshots": "node scripts/seed-snapshots.mjs",
     "poster": "node scripts/poster.mjs",
@@ -22,7 +29,7 @@
     "serve": "wrangler dev -c dist/server/wrangler.json --port 4331 --persist-to .wrangler/state",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run seed:snapshots --local && bun run build:test && bun run test:e2e"
+    "check": "bun run typecheck && bun run test:unit && bun run db:migrate:local && bun run seed:media --local && bun run seed:snapshots --local && bun run build:test && bun run check:worker && bun run test:e2e"
   },
   "dependencies": {
     "@astrojs/cloudflare": "14.3.3",
@@ -43,6 +50,7 @@
     "sharp": "0.35.5",
     "subset-font": "2.9.0",
     "typescript": "6.0.3",
+    "undici": "7.29.1",
     "vitest": "5.0.3",
     "wrangler": "4.147.0"
   }

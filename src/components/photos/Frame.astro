@@ -1,0 +1,24 @@
+---
+import { PHONE_MEDIA, type FrameView } from "../../lib/photos/gallery";
+
+interface Props {
+  /** null renders the empty frame the photo-sheet script clones (spec 3.4), so the markup lives in one place */
+  view: FrameView | null;
+  eager?: boolean;
+  priority?: boolean;
+}
+
+const { view, eager = false, priority = false } = Astro.props;
+---
+<li class="sheet-frame">
+  <a class="frame-link" href={view?.href}>
+    <picture>
+      <source media={PHONE_MEDIA} type="image/avif" srcset={view?.phoneAvif} sizes={view?.sizes} />
+      <source media={PHONE_MEDIA} type="image/webp" srcset={view?.phoneWebp} sizes={view?.sizes} />
+      <source type="image/avif" srcset={view?.avif} sizes={view?.sizes} />
+      <img src={view?.src} srcset={view?.webp} sizes={view?.sizes} width={view?.width} height={view?.height} alt={view?.alt ?? ""}
+        loading={eager ? "eager" : "lazy"} decoding="async" fetchpriority={priority ? "high" : undefined} />
+    </picture>
+    <span class="frame-no" aria-hidden="true">{view?.number}</span>
+  </a>
+</li>

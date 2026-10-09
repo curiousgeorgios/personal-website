@@ -5,9 +5,13 @@ const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
 export const isAdminPath = (pathname: string) => pathname === "/admin" || pathname.startsWith("/admin/");
 
-/** Writes must come from this site: a missing or different Origin header is refused (spec 7) */
+/** Providers' webhooks send no Origin; each verifies its signature before reading anything else (spec 13.3) */
+export const WEBHOOK_PATHS = ["/api/prints/stripe", "/api/prints/artelo"];
+
+/** Writes must come from this site: a missing or different Origin header is refused (spec 7), except at the two webhooks */
 export function originAllowed(request: Request, url: URL): boolean {
   if (SAFE_METHODS.includes(request.method)) return true;
+  if (request.method === "POST" && WEBHOOK_PATHS.includes(url.pathname)) return true;
   return request.headers.get("origin") === url.origin;
 }
 

@@ -82,6 +82,16 @@ function parseEvent(text: string): IngestEvent | null {
   return { event: event as IngestEvent["event"], properties: (properties as Record<string, unknown> | undefined) ?? {} };
 }
 
+/** Whether a URL is a private page (the downloads, an order page) or carries a token or a view key in its query */
+function isPrivateUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.pathname.startsWith("/photos/downloads") || url.pathname.startsWith("/prints/") || url.searchParams.has("token") || url.searchParams.has("key");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Forwards one beacon event to PostHog's capture endpoint in cookieless server hash mode (spec 10). The key, the
  * country and the time are added here: the visitor's clock could put a visit in the wrong day of PostHog's daily hash.
@@ -99,6 +109,12 @@ export async function forwardEvent(
   if (text === "unreadable") return ingestAnswer(400);
   const parsed = parseEvent(text);
   if (!parsed) return ingestAnswer(400);
+  // Neither the downloads page nor an order page carries a beacon; should one ever be added, its events are still never
+  // counted (spec 2.2, 13.3). $current_url is checked too: it is forwarded as sent, and a hand-made event could carry it
+  const pathname = parsed.properties.$pathname;
+  if (typeof pathname === "string" && (pathname.startsWith("/photos/downloads") || pathname.startsWith("/prints/"))) return ingestAnswer(400);
+  const currentUrl = parsed.properties.$current_url;
+  if (typeof currentUrl === "string" && isPrivateUrl(currentUrl)) return ingestAnswer(400);
   if (!config.key) return ingestAnswer(204);
   const properties: Record<string, unknown> = {};
   for (const name of INGEST_PROPERTIES) if (parsed.properties[name] !== undefined) properties[name] = parsed.properties[name];

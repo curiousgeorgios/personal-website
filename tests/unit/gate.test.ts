@@ -47,6 +47,12 @@ describe("originAllowed", () => {
     expect(originAllowed(request("POST", { Origin: "http://curiousgeorge.dev" }), url)).toBe(false);
     expect(originAllowed(request("DELETE", { Origin: "null" }), url)).toBe(false);
   });
+
+  test("exactly the two provider webhooks may post without an Origin; they verify a signature instead", () => {
+    for (const path of ["/api/prints/stripe", "/api/prints/artelo"]) expect(originAllowed(request("POST"), new URL(`https://curiousgeorge.dev${path}`))).toBe(true);
+    for (const path of ["/api/prints/stripe/", "/api/prints/other", "/basket", "/admin/"]) expect(originAllowed(request("POST"), new URL(`https://curiousgeorge.dev${path}`))).toBe(false);
+    expect(originAllowed(request("PUT"), new URL("https://curiousgeorge.dev/api/prints/stripe"))).toBe(false);
+  });
 });
 
 describe("adminIdentity", () => {

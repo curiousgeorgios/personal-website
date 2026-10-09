@@ -1,22 +1,37 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
+import { checkPlace } from "../photos/place";
+import { photoCacheTag } from "../media";
+import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
+import { insertGrant, revokeCatalogueLink } from "../photos/store";
+import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
+import { REFUND_REASON } from "../prints/artelo-status";
+import { ORDER_ID } from "../prints/order-id";
+import { writeSetting } from "../prints/store";
 import { snapshotReason } from "../snapshots";
 import { makeCover, newMediaKeys, type MediaKeys } from "./media";
 import * as store from "./store";
 import {
+  BUFFER_FIELDS,
+  checkBuffer,
   checkFact,
   checkItem,
+  checkLink,
   checkLogEntry,
   checkRecordMeta,
+  checkTitle,
   checkUpload,
   FACT_FIELDS,
   ITEM_FIELDS,
+  LINK_FIELDS,
   LOG_FIELDS,
+  PLACE_FIELDS,
   readFields,
   RECORD_FIELDS,
+  TITLE_FIELDS,
   type Fields,
 } from "./validate";
 
-export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots";
+export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs" | "links" | "orders";
 
 /** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
 export interface SnapshotsService {
@@ -31,6 +46,17 @@ export interface ActionDeps {
   keys?: () => MediaKeys;
   /** The snapshots Worker, through the SNAPSHOTS service binding (spec 9) */
   snapshots?: SnapshotsService;
+  /** PHOTO_PRINTS, the private masters a publish verifies (spec 6.2) */
+  prints?: R2Bucket;
+  /** PHOTO_LINK_SECRET, which signs a new link (spec 6.3) */
+  photoLinkSecret?: string;
+  /** The site's origin, for a new link's address */
+  origin?: string;
+  /**
+   * Print orders (spec 20): retry now places in the background, with a fresh window of this many seconds; testMail sends
+   * George the test email and resolves to whether it went
+   */
+  orders?: { placeLater(orderId: string): void; retryWindow: number; testMail?(): Promise<boolean> };
 }
 
 export interface ActionFailure {
@@ -43,10 +69,14 @@ export interface ActionFailure {
   values: Fields;
 }
 
-export type ActionResult = { ok: true; section: AdminSection } | ActionFailure;
+/** A new link exists only in the response that made it (spec 6.3): its address, or word that the same form already made one */
+export type IssuedLink = { url: string } | { repeat: true };
+
+/** `purge`: cache tags this save purges beyond its section's own (a hidden photograph's previews); `note`: which saved line to show */
+export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[]; note?: "retry" | "resolved" | "testmail" } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
-const gone = (what: "line" | "entry" | "record") => fail(null, "", { form: `that ${what} no longer exists` });
+const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link" | "order") => fail(null, "", { form: `that ${what} no longer exists` });
 const CONFIRM = { confirm: "tick the box to remove it" };
 
 function idOf(form: FormData): number | null {
@@ -90,6 +120,30 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return removeRecord(form, deps);
     case "snapshot.reshoot":
       return reshoot(form, deps);
+    case "post.place":
+      return savePlace(form, deps);
+    case "post.publish":
+      return publishPost(form, deps, true);
+    case "post.hide":
+      return publishPost(form, deps, false);
+    case "photo.title":
+      return saveTitle(form, deps);
+    case "photo.publish":
+      return publishPhoto(form, deps, true);
+    case "photo.hide":
+      return publishPhoto(form, deps, false);
+    case "link.issue":
+      return issueLink(form, deps);
+    case "link.revoke":
+      return revokeLink(form, deps);
+    case "prints.buffer":
+      return saveBuffer(form, deps);
+    case "order.retry":
+      return retryOrder(form, deps);
+    case "order.resolve":
+      return resolveOrder(form, deps);
+    case "prints.testmail":
+      return sendTestMail(deps);
     default:
       return fail(null, "", { form: "that action isn't recognised" });
   }
@@ -338,4 +392,184 @@ async function reshoot(form: FormData, { db, snapshots }: ActionDeps): Promise<A
     return fail("snapshots", formId, { form: "the line changed while it was being captured. try again." });
   }
   return fail("snapshots", formId, { form: `couldn't capture it: ${snapshotReason(outcome)}` });
+}
+
+// Photographs (spec 6.2)
+
+const COLLECTION = /^[A-Za-z0-9_-]{1,64}$/;
+const postForm = (collection: string) => `post-${collection}`;
+const photoForm = (id: string) => `photo-${id}`;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** What failed for one photograph, from setPublished: its print master, its preview set or the previews by name ("240.avif") */
+function whatFailed(failed: string[]): string {
+  const previews = failed.filter((what) => what !== "master" && what !== "previews");
+  return [failed.includes("master") && "print master", failed.includes("previews") && "preview set", previews.length > 0 && `preview ${previews.join(", ")}`].filter(Boolean).join(", ");
+}
+
+/** Why a publish was refused, in the admin's voice: photographs with no post, then the ones whose files didn't check out and what failed for each */
+function refusal(outcome: Extract<PublishOutcome, { postless: string[] }>, one: boolean): string {
+  const { postless, unverified } = outcome;
+  const reasons: string[] = [];
+  if (postless.length > 0) {
+    reasons.push(one ? "that photo has no post, so it would stay hidden. import its post first." : `${plural(postless.length, "photo has", "photos have")} no post: ${postless.join(", ")}. import ${postless.length === 1 ? "its" : "their"} post first.`);
+  }
+  if (unverified.length > 0) {
+    const [{ failed }] = unverified;
+    reasons.push(
+      one
+        ? `that photo couldn't be checked (${whatFailed(failed)}), so it stays hidden. run the import for it again.`
+        : `${plural(unverified.length, "photo", "photos")} couldn't be checked: ${unverified.map((entry) => `${entry.id} (${whatFailed(entry.failed)})`).join(", ")}. publish the others one at a time.`,
+    );
+  }
+  return reasons.join(" ");
+}
+
+/** Hiding never asks R2, so only a publish needs the PHOTO_PRINTS binding */
+function publishDeps({ db, media, prints }: ActionDeps, published: boolean): PublishDeps {
+  if (published && !prints) throw new Error("no PHOTO_PRINTS binding");
+  return { db, media, prints: prints as R2Bucket };
+}
+
+async function savePlace(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, PLACE_FIELDS);
+  if (!COLLECTION.test(fields.collection)) return gone("post");
+  const checked = checkPlace(fields.place);
+  if (!checked.ok) return fail("photographs", postForm(fields.collection), { place: checked.error }, fields);
+  return (await store.savePostPlace(db, fields.collection, checked.place)) ? { ok: true, section: "photographs" } : gone("post");
+}
+
+/** A saved publication change; a hide also purges each photograph's previews, which /media now refuses (spec 6.2) */
+const hidden = (ids: string[], published: boolean): ActionResult =>
+  published ? { ok: true, section: "photographs" } : { ok: true, section: "photographs", purge: ids.map(photoCacheTag) };
+
+/** Publishes or hides every photograph in a post: all of them or none, after checking each (spec 6.2) */
+async function publishPost(form: FormData, deps: ActionDeps, published: boolean): Promise<ActionResult> {
+  const collection = String(form.get("collection") ?? "");
+  const ids = COLLECTION.test(collection) ? await store.postPhotoIds(deps.db, collection) : null;
+  if (!ids || ids.length === 0) return gone("post");
+  const outcome = await setPublished(publishDeps(deps, published), ids, published);
+  if (outcome.ok) return hidden(ids, published);
+  if ("missing" in outcome) return gone("post");
+  return fail("photographs", postForm(collection), { form: refusal(outcome, false) });
+}
+
+async function saveTitle(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, TITLE_FIELDS);
+  if (!PHOTO_ID.test(fields.id)) return gone("photo");
+  const checked = checkTitle(fields);
+  if (!checked.ok) return fail("photographs", photoForm(fields.id), checked.errors, fields);
+  return (await store.savePhotoTitle(db, fields.id, checked.value)) ? { ok: true, section: "photographs" } : gone("photo");
+}
+
+async function publishPhoto(form: FormData, deps: ActionDeps, published: boolean): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!PHOTO_ID.test(id)) return gone("photo");
+  const outcome = await setPublished(publishDeps(deps, published), [id], published);
+  if (outcome.ok) return hidden([id], published);
+  if ("missing" in outcome) return gone("photo");
+  return fail("photographs", photoForm(id), { form: refusal(outcome, true) });
+}
+
+// Links (spec 6.3)
+
+/** 16 random bytes in base64url, from the form: the same form sent twice makes one link */
+const NONCE = /^[A-Za-z0-9_-]{22}$/;
+
+async function issueLink(form: FormData, deps: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, LINK_FIELDS);
+  const values = { days: fields.days, note: fields.note };
+  if (!NONCE.test(fields.nonce)) return fail(null, "", { form: "that form is out of date. reload the page and try again." });
+  const checked = checkLink(fields);
+  if (!checked.ok) return fail("links", "link-new", checked.errors, values);
+  try {
+    photoSigningKey(deps.photoLinkSecret);
+  } catch {
+    return fail("links", "link-new", { form: "links can't be made until PHOTO_LINK_SECRET is set." }, values);
+  }
+  const grant = { grantId: crypto.randomUUID(), photoId: null, expiresAt: Math.floor(Date.now() / 1000) + checked.value.days * 86400 };
+  const token = await signPhotoToken(deps.photoLinkSecret!, grant);
+  if (!(await insertGrant(deps.db, grant, { note: checked.value.note, nonce: fields.nonce }))) return { ok: true, section: "links", issued: { repeat: true } };
+  const url = new URL("/photos/downloads", deps.origin ?? "https://curiousgeorge.dev");
+  url.searchParams.set("token", token);
+  return { ok: true, section: "links", issued: { url: url.href } };
+}
+
+async function revokeLink(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!GRANT_ID.test(id)) return gone("link");
+  if (!confirmed(form)) return fail("links", `link-${id}`, CONFIRM);
+  // Only a catalogue link: a photo grant isn't this screen's to switch off. Already revoked counts as saved (ADR-0012)
+  if ((await revokeCatalogueLink(db, id)) === "photo") return gone("link");
+  return { ok: true, section: "links" };
+}
+
+// Print orders (spec 20)
+
+async function saveBuffer(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const fields = readFields(form, BUFFER_FIELDS);
+  const checked = checkBuffer(fields);
+  if (!checked.ok) return fail("orders", "buffer", checked.errors, fields);
+  // Read afresh by the next quote, so it needs no deploy and no purge; a quote already sealed keeps its own (spec 16.2)
+  await writeSetting(db, "delivery_buffer", String(checked.value / 100), Math.floor(Date.now() / 1000));
+  return { ok: true, section: "orders" };
+}
+
+/**
+ * retry now (spec 20): one conditional write sets an attention order Artelo doesn't have back to paid, with a fresh
+ * window, and only then does placeOrder run it, with its claim, lookup and fence (ADR-0026); nothing here talks to
+ * Artelo. A live lease means an attempt is still running, so it is left alone. Any other status is never touched: a
+ * refunded order's lease is the marker that Artelo may have it, and stays. Nor is a fully refunded order, or one flagged
+ * with the refund reason (the daily stranded-refund lookup leaves those in needs_attention with no Artelo id, whatever
+ * refund amount is recorded): retrying either would print for a refunded buyer
+ */
+async function retryOrder(form: FormData, { db, orders }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!ORDER_ID.test(id)) return gone("order");
+  const now = Math.floor(Date.now() / 1000);
+  // The rule's guard: canRetry (src/lib/prints/admin.ts) is the view's copy of every condition but the lease, so the
+  // button shows exactly when this can apply. Change the two together; orders-admin.test.ts fails when they disagree
+  const result = await db
+    .prepare("UPDATE print_orders SET status = 'paid', attempts = 0, retry_until = ?, next_attempt_at = ?, lease_until = NULL, attention_reason = NULL, attention_notified_at = NULL, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND resolved_at IS NULL AND artelo_order_id IS NULL AND COALESCE(refunded_amount, 0) < print_total + delivery_amount AND attention_reason IS NOT ? AND (lease_until IS NULL OR lease_until < ?)")
+    .bind(now + (orders?.retryWindow ?? 86_400), now, now, id, REFUND_REASON, now)
+    .run();
+  if (result.meta.changes > 0) {
+    orders?.placeLater(id);
+    return { ok: true, section: "orders", note: "retry" };
+  }
+  const row = await db.prepare("SELECT status FROM print_orders WHERE id = ?").bind(id).first<{ status: string }>();
+  if (!row) return gone("order");
+  // Already set going by an earlier tap counts as saved, and starts nothing: the first tap's attempt, or the cron, has it (ADR-0012)
+  if (row.status === "paid") return { ok: true, section: "orders", note: "retry" };
+  return fail("orders", `order-${id}`, { form: "that order can't be retried from here." });
+}
+
+/**
+ * mark resolved (spec 20): George has dealt with a needs_attention order outside the site. One conditional write, bound
+ * to the reason the page showed him (the form carries it), so an order flagged again since the page loaded is never
+ * resolved unseen; the order stays listed, out of the needs-attention-first ordering and without its red dot or retry
+ * now. Any write that moves it into needs_attention again clears resolved_at, so a new problem shows again
+ */
+async function resolveOrder(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!ORDER_ID.test(id)) return gone("order");
+  // The view writes no reason as an empty field; a reason is never empty
+  const shown = form.get("reason");
+  const reason = typeof shown === "string" && shown !== "" ? shown : null;
+  const now = Math.floor(Date.now() / 1000);
+  const result = await db.prepare("UPDATE print_orders SET resolved_at = ?, updated_at = ? WHERE id = ? AND status = 'needs_attention' AND resolved_at IS NULL AND attention_reason IS ?").bind(now, now, id, reason).run();
+  if (result.meta.changes > 0) return { ok: true, section: "orders", note: "resolved" };
+  const row = await db.prepare("SELECT status, attention_reason, resolved_at FROM print_orders WHERE id = ?").bind(id).first<{ status: string; attention_reason: string | null; resolved_at: number | null }>();
+  if (!row) return gone("order");
+  if (row.status !== "needs_attention") return fail("orders", `order-${id}`, { form: "that order doesn't need attention any more." });
+  // Flagged again with another reason since the page loaded: George hasn't seen this one
+  if (row.attention_reason !== reason) return fail("orders", `order-${id}`, { form: "that order changed. look again before resolving." });
+  // Already resolved by an earlier tap, for this same reason, counts as saved and writes nothing (ADR-0012)
+  return { ok: true, section: "orders", note: "resolved" };
+}
+
+/** send me a test email (spec 20): proves the EMAIL binding before prints open, so it works while they are closed */
+async function sendTestMail({ orders }: ActionDeps): Promise<ActionResult> {
+  if (orders?.testMail && (await orders.testMail())) return { ok: true, section: "orders", note: "testmail" };
+  return fail("orders", "testmail", { form: `couldn't send the test email. check workers logs for "prints: couldn't send"` });
 }

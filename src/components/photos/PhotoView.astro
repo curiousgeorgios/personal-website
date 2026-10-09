@@ -1,0 +1,50 @@
+---
+import Row from "../Row.astro";
+import SayHi from "../SayHi.astro";
+import PrintRow from "../prints/PrintRow.astro";
+import { dateAndPlace, photoAlt, photoSizes, previewOf, srcsetOf } from "../../lib/photos/gallery";
+import type { PhotoPage } from "../../lib/photos/store";
+import { basketHref } from "../../lib/prints/basket";
+import { carried, carryLabel, type Carry } from "../../lib/prints/carry";
+import type { PhotoPrints } from "../../lib/prints/catalogue";
+import type { PriceList } from "../../lib/prints/store";
+
+interface Props {
+  page: PhotoPage;
+  /** The print row's sizes, prices and gst sentence, when prints are open and this photograph gets a size (spec 15.1) */
+  prints?: { offers: PhotoPrints; prices: PriceList; gst: string } | null;
+  /** The basket this page was reached with (spec 15.3) */
+  carry?: Carry | null;
+}
+
+const { page, prints = null, carry = null } = Astro.props;
+const { photo, index, total, previous, next, publishedAt } = page;
+const large = previewOf(photo, 1600, "webp");
+const medium = previewOf(photo, 960, "webp");
+const line = dateAndPlace(photo.date, photo.place);
+const sizes = photoSizes(photo.width, photo.height);
+---
+<main class="book photo-page">
+  <Row label="photo" head>
+    {/* width and height from the 1600, so the box is known before the image loads; no zoom, the 1600 is the largest the site serves (spec 4) */}
+    <picture class="photo">
+      <source type="image/avif" srcset={srcsetOf(photo, [960, 1600], "avif")} sizes={sizes} />
+      <img src={medium?.url} srcset={srcsetOf(photo, [960, 1600], "webp")} sizes={sizes} width={large?.width} height={large?.height}
+        alt={photoAlt(photo, index, total)} loading="eager" fetchpriority="high" decoding="async" />
+    </picture>
+    <h1>{photo.title || line}</h1>
+    {photo.title && <p class="where">{line}</p>}
+    {/* Each step is a nowrap unit with its separator, so a phone wraps between steps and never strands a dot or splits a name */}
+    <p class="photo-nav">photo {index + 1} of {total}
+      {previous && <> <span class="step">· <a href={carried(`/photos/${previous}`, carry)} rel="prev"><span class="chev back" aria-hidden="true"></span>previous</a></span></>}
+      {next && <> <span class="step">· <a href={carried(`/photos/${next}`, carry)} rel="next">next<span class="chev ahead" aria-hidden="true"></span></a></span></>}
+      {" "}<span class="step">· <a href={carried(`/photos?before=${publishedAt + 1}#post-${photo.collection}`, carry)}>the whole entry</a></span></p>
+    {carry && <p class="where basket-link"><a href={basketHref(carry.items)}>{carryLabel(carry)}</a></p>}
+  </Row>
+  {prints && (
+    <Row label="prints" id="print-row">
+      <PrintRow photoId={photo.id} prints={prints.offers} prices={prints.prices} items={carry?.items ?? null} gst={prints.gst} />
+    </Row>
+  )}
+  <Row label="say hi" id="say-hi"><SayHi /></Row>
+</main>

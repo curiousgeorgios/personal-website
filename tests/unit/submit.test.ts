@@ -110,4 +110,54 @@ describe("submitForm", () => {
     await submitForm(formOf(SHELF), { ...deps(), db: broken }, cache(), waitUntil);
     await expect(promises[0]).resolves.toMatchObject({ status: 500 });
   });
+
+  test("a photographs save purges the gallery and the home page, and redirects to its section", async () => {
+    await db.prepare("INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES ('post', 1738488468, '2025-02-02', NULL)").run();
+    const purge = cache();
+    const outcome = await submitForm(formOf({ intent: "post.place", collection: "post", place: "bondi, sydney" }), deps(), purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=photographs#photographs" });
+    expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook"] });
+  });
+
+  test("hiding a photograph also purges its previews; publishing purges only the pages", async () => {
+    await db.prepare("INSERT INTO photo_posts (collection, published_at, published_on, place) VALUES ('post', 1738488468, '2025-02-02', NULL)").run();
+    await db.prepare("INSERT INTO photos (id, collection, position, title, published, previews, print_key, print_width, print_height, print_bytes, print_sha256) VALUES ('post-01', 'post', 1, '', 1, '[]', 'k', 1, 1, 1, 's')").run();
+    const purge = cache();
+    expect(await submitForm(formOf({ intent: "photo.hide", id: "post-01" }), deps(), purge, waiter().waitUntil)).toEqual({ redirect: "/admin/?saved=photographs#photographs" });
+    expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook", "photo-post-01"] });
+  });
+
+  test("issuing a link answers with it, without a redirect or a purge", async () => {
+    const purge = cache();
+    const form = formOf({ intent: "link.issue", days: "7", note: "", nonce: "AbCdEfGhIjKlMnOpQrStUv" });
+    const outcome = await submitForm(form, { ...deps(), photoLinkSecret: "1".repeat(64), origin: "https://curiousgeorge.dev" }, purge, waiter().waitUntil);
+    expect(outcome).toEqual({ issued: { url: expect.stringMatching(/^https:\/\/curiousgeorge\.dev\/photos\/downloads\?token=/) } });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+  });
+
+  test("revoking a link redirects to its section and purges nothing", async () => {
+    await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES ('a0000000-0000-4000-8000-000000000009', NULL, 9999999999)").run();
+    const purge = cache();
+    const outcome = await submitForm(formOf({ intent: "link.revoke", id: "a0000000-0000-4000-8000-000000000009", confirm: "yes" }), deps(), purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=links#links" });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+  });
+
+  test("a retry redirects to the orders section with its note, purging nothing", async () => {
+    await db.prepare("INSERT INTO print_orders (id, country, print_total, delivery_amount, status, livemode, created_at, updated_at) VALUES ('01k6x00000000000000000000a', 'AU', 1, 1, 'needs_attention', 0, 1, 1)").run();
+    const purge = cache();
+    const placeLater = vi.fn();
+    const outcome = await submitForm(formOf({ intent: "order.retry", id: "01k6x00000000000000000000a" }), { ...deps(), orders: { placeLater, retryWindow: 86_400 } }, purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=orders&note=retry#orders" });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+    expect(placeLater).toHaveBeenCalledWith("01k6x00000000000000000000a");
+  });
+
+  test("a buffer save redirects to the orders section and purges nothing: only the next quote reads it", async () => {
+    const purge = cache();
+    const outcome = await submitForm(formOf({ intent: "prints.buffer", buffer: "10" }), deps(), purge, waiter().waitUntil);
+    expect(outcome).toEqual({ redirect: "/admin/?saved=orders#orders" });
+    expect(purge.invalidate).not.toHaveBeenCalled();
+    expect(await db.prepare("SELECT value FROM print_settings WHERE key = 'delivery_buffer'").first("value")).toBe("0.1");
+  });
 });

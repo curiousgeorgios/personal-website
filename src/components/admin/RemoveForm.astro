@@ -2,15 +2,17 @@
 interface Props {
   /** The failure form id this reports to, so an unticked remove reopens its entry */
   form: string;
-  intent: "item.remove" | "log.remove" | "record.remove";
-  id: number;
+  intent: "item.remove" | "log.remove" | "record.remove" | "link.revoke";
+  id: number | string;
   /** The checkbox's wording */
   confirm: string;
   section?: string;
   error?: string;
+  /** The button's word: remove, or revoke for a link */
+  button?: string;
 }
 
-const { form, intent, id, confirm, section, error } = Astro.props;
+const { form, intent, id, confirm, section, error, button = "remove" } = Astro.props;
 const errorId = `${form}-confirm-error`;
 ---
 <form method="post" action={`/admin/#${form}`} class="admin-form remove">
@@ -22,5 +24,5 @@ const errorId = `${form}-confirm-error`;
     {confirm}
   </label>
   {error && <p class="error" id={errorId}>{error}</p>}
-  <button type="submit" class="button quiet">remove</button>
+  <button type="submit" class="button quiet">{button}</button>
 </form>

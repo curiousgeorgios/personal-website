@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { contextOptions } from "../../src/deck/webgl";
 import { hasWebGL, settled, SLOW } from "./deck";
+import { GALLERY } from "./gallery-site";
+import { PRINTS } from "./prints-site";
 
 // Spec 11 on every run: interaction to next paint under 200ms at 4× CPU and layout shift under 0.01 at phone width.
 // INP comes from the Event Timing API (an interaction's latency is its longest event entry), because Lighthouse's
@@ -123,3 +125,61 @@ test("fonts are cached for a month, and static files are never sniffed", async (
   expect(font.headers()["x-content-type-options"]).toBe("nosniff");
   expect((await request.get("/favicon.ico")).headers()["x-content-type-options"]).toBe("nosniff");
 });
+
+/** Layout shift from the very start of the page, summed in the page as it happens */
+async function watchShifts(page: Page) {
+  await page.addInitScript(() => {
+    const store = window as unknown as { shifted: number };
+    store.shifted = 0;
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) {
+        if (!entry.hadRecentInput) store.shifted += entry.value;
+      }
+    }).observe({ type: "layout-shift", buffered: true });
+  });
+}
+const shifted = (page: Page) => page.evaluate(() => (window as unknown as { shifted: number }).shifted);
+
+// Photo gallery spec 10, on the gallery server's photo fixture
+for (const [width, height] of [[1280, 800], [375, 812]]) {
+  test(`nothing shifts on /photos at ${width}px, before or after the next entries load`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await watchShifts(page);
+    await page.goto(`${GALLERY}/photos`, { waitUntil: "networkidle" });
+    // The server page holds two entries and nothing is fetched until the visitor scrolls (spec 3.4)
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(2);
+    await page.waitForTimeout(500);
+    const before = await shifted(page);
+    // The End key, so the script sees a scroll even where the fixture's short page can't move
+    await page.keyboard.press("End");
+    await expect(page.locator("ol.entries > li.entry")).toHaveCount(6);
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(500);
+    const cls = await shifted(page);
+    test.info().annotations.push({ type: "cls", description: `layout shift on /photos at ${width}px: ${before} before the scroll, ${cls} after the batch` });
+    expect(before).toBeLessThan(0.01);
+    expect(cls).toBeLessThan(0.01);
+  });
+
+  test(`nothing shifts on a photo's page at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await watchShifts(page);
+    await page.goto(`${GALLERY}/photos/fixture-b-01`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1000);
+    const cls = await shifted(page);
+    test.info().annotations.push({ type: "cls", description: `layout shift on a photo's page at ${width}px: ${cls}` });
+    expect(cls).toBeLessThan(0.01);
+  });
+
+  test(`nothing shifts on a photo's page with its print row, or on a basket, at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await watchShifts(page);
+    for (const path of ["/photos/fixture-b-01", "/basket?items=fixture-b-01:medium:oak,fixture-b-02:small:unframed"]) {
+      await page.goto(`${PRINTS}${path}`, { waitUntil: "networkidle" });
+      await page.waitForTimeout(800);
+      const cls = await shifted(page);
+      test.info().annotations.push({ type: "cls", description: `layout shift on ${path} at ${width}px: ${cls}` });
+      expect(cls).toBeLessThan(0.01);
+    }
+  });
+}

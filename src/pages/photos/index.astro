@@ -1,0 +1,46 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../../layouts/Notebook.astro";
+import Beacon from "../../components/Beacon.astro";
+import Gallery from "../../components/photos/Gallery.astro";
+import { entryPage, PAGE_ENTRY_LIMIT, type EntryPage } from "../../lib/photos/store";
+import { printConfig } from "../../lib/prints/config";
+import { readCarry, type Carry } from "../../lib/prints/carry";
+import { printsOpenNow } from "../../lib/prints/open";
+import "../../styles/photos.css";
+
+const before = Astro.url.searchParams.get("before");
+// Anything but a plain count of seconds is the notebook 404 (spec 3.4); a null body makes Astro render 404.astro
+if (before !== null && !/^\d{1,10}$/.test(before)) return new Response(null, { status: 404 });
+
+let page: EntryPage | null = null;
+try {
+  page = await entryPage(env.DB, before === null ? null : Number(before), PAGE_ENTRY_LIMIT);
+} catch (error) {
+  console.error("photos: the gallery couldn't read D1", error instanceof Error ? error.message : String(error));
+}
+let carry: Carry | null = null;
+let prints = false;
+if (page) prints = await printsOpenNow(printConfig(env), env.DB);
+// A page reached with a basket is that visitor's own: never edge-cached, never indexed (spec 15.3). Only while prints are
+// open: a closed site ignores ?items= altogether, so it is the plain cached page and reads no basket (spec 16.5)
+const carrying = prints && Astro.url.searchParams.has("items");
+if (carrying) carry = await readCarry(env.DB, Astro.url);
+if (page && !carrying) {
+  // As the home page (R6.1): fresh for five minutes at the edge, then stale while it refreshes; saves purge the tag
+  Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["photos"] });
+  Astro.response.headers.set("Cache-Control", "no-cache");
+} else {
+  // A degraded page, or one carrying a basket, is never cached
+  if (!page) Astro.response.status = 503;
+  Astro.response.headers.set("Cache-Control", "no-store");
+}
+---
+<Notebook title="photos · george vlachos" description="photos george vlachos has taken, one entry per instagram post." noindex={before !== null || carrying}>
+  <Gallery entries={page?.entries ?? null} next={page?.next ?? null} older={before !== null} carry={carry} prints={prints} />
+  <Beacon />
+  <script>
+    // Its own entry: it shares no module with any other script, so the build inlines it
+    import "../../scripts/photo-sheet";
+  </script>
+</Notebook>

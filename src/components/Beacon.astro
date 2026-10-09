@@ -1,0 +1,7 @@
+---
+// The first-party analytics beacon (R10), for every page that counts visits. One component, so one script entry: two
+// scripts importing beacon.ts would split it into a shared chunk, and a page's inline script would become a file
+---
+<script>
+  import "../scripts/beacon";
+</script>

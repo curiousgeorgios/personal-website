@@ -27,6 +27,34 @@ bun run check
 
 `/admin` sits behind Cloudflare Access, and the Worker also requires the token's email to be `ADMIN_EMAIL` (`wrangler.jsonc`, ADR-0016); the page shows the day the Access session ends, or on its last day the time (until 14:30). Locally, `bun run dev:admin` skips Access with a test-only build flag that production builds refuse. Saves say "it's on the logbook now" there, because the dev server's cache accepts the purge and does nothing. Against a built Worker under `wrangler dev` (the end-to-end servers on ports 4331 to 4333) there's no cache to purge, so saves say "the logbook may show the old version for a little while".
 
+## Photographs
+
+The photo gallery: `/photos`, a page for each photograph and a private downloads page behind catalogue links, with the owner's photographs and links sections in `/admin`. How the pages, the catalogue, the preparation and the import work: [photo gallery guide](docs/photo-gallery-backend.md). The e2e gallery server (4335) gets the six-post photo fixture afresh on every run (`scripts/seed-photo-test.mjs`), and every local test server passes the fixture signing key explicitly (`PHOTO_KEY_VAR` in `playwright.config.ts`), because `build:test` copies `.dev.vars` into `dist/server`. No test server is reused, so stop your own `bun run serve` before `bun run test:e2e` (Playwright says the port is already used otherwise).
+
+Decisions: [ADR-0020](docs/adr/0020-photo-downloads-use-revocable-signed-links.md) (amended; revocable signed links), [ADR-0022](docs/adr/0022-photo-places-are-area-and-city-only.md) (amended; area and city only), [ADR-0023](docs/adr/0023-the-gallery-stays-light-on-phones.md) (the gallery stays light on phones) and [ADR-0024](docs/adr/0024-test-servers-never-hold-the-real-signing-key.md) (test servers never hold the real signing key).
+
+Launch steps for the gallery, all George's, in this order:
+
+1. Create the `curiousgeorge-photo-prints` R2 bucket before this branch deploys, because `wrangler.jsonc` binds it.
+2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`; the deploy job runs it). Production has never had the photo backend, so both arrive with this merge, along with the owner's JSON photo routes.
+3. Set `PHOTO_LINK_SECRET` as a fresh Worker secret.
+4. From the Mac, run `bun run photos:prepare` and then `bun run photos:import --remote` (the manifest is now version 2).
+5. In `/admin`, review and publish the photographs, including the 96 RAW candidates.
+6. Issue the first catalogue link from `/admin`.
+7. Once something is published, run the post-publish check against the live site (the image gate and the photo pages' privacy check, then Lighthouse): `PLAYWRIGHT_BASE_URL=https://curiousgeorge.dev bunx playwright test tests/e2e/budgets.spec.ts tests/e2e/privacy.spec.ts -g "images before any scroll|photo pages" --project=chromium` and `bun run lighthouse https://curiousgeorge.dev/`.
+
+Details, and what is still open: the guide's launch steps and [the plan 6 follow-ups](docs/superpowers/plans/2026-10-08-plan-6-followups.md).
+
+The gallery merges together with prints (plan 7), so George follows the combined launch checklist in the [prints guide](docs/prints.md#launch-checklist), which holds these steps too.
+
+## Prints
+
+Print ordering (plan 7) is built and stays closed until George has worked through the launch checklist; `PRINTS_OPEN` is `"false"` in `wrangler.jsonc` until its last step. A photograph's page gets a `prints` row, the basket lives in the URL, Artelo's Price Check quotes delivery exactly for the buyer's address, Stripe's hosted checkout takes the payment, each paid basket becomes one Artelo order and the buyer gets a private order page and a shipped email; George runs it from the `orders` section of `/admin`. How it works, the launch checklist and how to run it: [prints guide](docs/prints.md). What is left: [the plan 7 follow-ups](docs/superpowers/plans/2026-10-08-plan-7-followups.md).
+
+The e2e suite stands in for Stripe, Artelo, the exchange rate and the mail binding (`tests/fixtures/artelo-site.mjs`, port 4401) on the prints servers (4337, and 4339 with no exchange rate). Set `STRIPE_TEST_SECRET_KEY` to a Stripe test key in your shell to also run the one full order through Stripe's test mode (4338); without it that spec is skipped.
+
+Decisions: [ADR-0021](docs/adr/0021-prints-sold-on-site-through-artelo.md) (amended; prints sold on the site through Artelo), [ADR-0025](docs/adr/0025-print-emails-fail-towards-a-duplicate.md) (emails fail towards a duplicate), [ADR-0026](docs/adr/0026-a-print-order-is-fenced-not-keyed.md) (one Artelo order through a fence and a lookup) and [ADR-0027](docs/adr/0027-a-stripe-event-acts-only-when-provably-ours.md) (a Stripe event acts only when provably ours).
+
 ## Snapshots and analytics
 
 The snapshots Worker lives in `workers/snapshots/`. `bun run dev:snapshots` runs it on its own, with its own store (`.wrangler/snapshots-dev`, migrated first) and its own dev registry, so the site's servers never reach it; its nightly run, started with `curl http://localhost:8790/__scheduled`, captures the lines' real pages into that store. The end-to-end suite runs it beside the site on port 4334, with local Browser Rendering (wrangler downloads Chrome on first use) capturing a fixture site on port 4400. Run scripts under Node 24 (`mise exec node@24 --` outside your home directory): wrangler's Chrome download has hung under Node 26.

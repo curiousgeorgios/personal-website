@@ -1,0 +1,79 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../../layouts/Notebook.astro";
+import Beacon from "../../components/Beacon.astro";
+import Row from "../../components/Row.astro";
+import PhotoView from "../../components/photos/PhotoView.astro";
+import { dateAndPlace, longDate, previewOf } from "../../lib/photos/gallery";
+import { photoPageData, type PhotoPage } from "../../lib/photos/store";
+import { printConfig } from "../../lib/prints/config";
+import { readCarry, type Carry } from "../../lib/prints/carry";
+import { printsFor, type PhotoPrints } from "../../lib/prints/catalogue";
+import { gstSentence } from "../../lib/prints/money";
+import { canOpen, printsStatus } from "../../lib/prints/open";
+import { loadPrintContext, type PriceList } from "../../lib/prints/store";
+import "../../styles/photos.css";
+
+let page: PhotoPage | null = null;
+let down = false;
+try {
+  page = await photoPageData(env.DB, Astro.params.id ?? "");
+} catch (error) {
+  down = true;
+  console.error("photos: a photo page couldn't read D1", error instanceof Error ? error.message : String(error));
+}
+// Unpublished or unknown: the notebook 404, uncached (spec 4)
+if (!down && !page) return new Response(null, { status: 404 });
+const config = printConfig(env);
+const hasItems = Astro.url.searchParams.has("items");
+let prints: { offers: PhotoPrints; prices: PriceList; gst: string } | null = null;
+let open = false;
+if (page) {
+  const offers = printsFor(page.photo.width, page.photo.height);
+  // Read only while prints could open, and only when something shows: the row (this photograph gets a size) or a carried basket
+  if ((offers || hasItems) && canOpen(config)) {
+    try {
+      const context = await loadPrintContext(env.DB);
+      open = printsStatus(config, context.settings.rate).open;
+      // The row only while prints are open and this photograph gets a size (spec 15.1); a failed read just leaves it out
+      if (open && offers) prints = { offers, prices: context.prices, gst: gstSentence(config.gst) };
+    } catch (error) {
+      console.error("prints: a photo page couldn't read the price list", error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+// A page reached with a basket is that visitor's own: never edge-cached, never indexed (spec 15.3). Only while prints are
+// open: a closed site ignores ?items= altogether, so it is the plain cached page and reads no basket (spec 16.5)
+const carrying = open && hasItems;
+let carry: Carry | null = null;
+if (page && carrying) carry = await readCarry(env.DB, Astro.url);
+if (page && !carrying) {
+  Astro.cache.set({ maxAge: 300, swr: 86400, tags: ["photos"] });
+  Astro.response.headers.set("Cache-Control", "no-cache");
+} else {
+  if (!page) Astro.response.status = 503;
+  Astro.response.headers.set("Cache-Control", "no-store");
+}
+const heading = page ? page.photo.title || dateAndPlace(page.photo.date, page.photo.place) : null;
+const share = page ? previewOf(page.photo, 1600, "webp") : undefined;
+// "from", because the date is the post's, not the shutter's (spec 4). Known gap: a few link previews don't read WebP
+const description = page ? `a photo by george vlachos from ${longDate(page.photo.date)}${page.photo.place ? `, ${page.photo.place}` : ""}.` : undefined;
+---
+<Notebook
+  title={heading ? `${heading} · photos · george vlachos` : "photos · george vlachos"}
+  description={description}
+  noindex={!page || carrying}
+  ogImage={share ? { url: new URL(share.url, "https://curiousgeorge.dev").href, width: share.width, height: share.height } : undefined}
+>
+  {page ? (
+    <PhotoView page={page} prints={prints} carry={carry} />
+  ) : (
+    <main class="book photo-page">
+      <Row label="photo" head>
+        <p class="down">photos aren't loading right now. try again in a bit.</p>
+        <p class="home"><a href="/photos">the photos</a></p>
+      </Row>
+    </main>
+  )}
+  <Beacon />
+</Notebook>

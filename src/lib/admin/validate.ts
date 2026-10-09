@@ -201,3 +201,46 @@ export async function checkUpload(value: FormDataEntryValue | null, kind: "audio
   if (audio) return sniffAudio(head) ? null : "that file isn't an mp3";
   return sniffImage(head) ? null : "covers can be JPEG, PNG or WebP";
 }
+
+// Photographs (spec 6.2)
+
+export const PLACE_FIELDS = ["collection", "place"] as const;
+export const TITLE_FIELDS = ["id", "title"] as const;
+/** A tab, a newline or another control character: titles and notes are one line of plain text */
+export const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** A photograph's title: at most 80 characters of plain text, empty allowed. It is shown as text, never as markup */
+export function checkTitle(fields: Fields): Checked<string> {
+  const errors: Fields = {};
+  if (CONTROL.test(fields.title)) errors.title = "one line of plain text";
+  tooLong(errors, fields, "title", 80);
+  return finish(errors, () => fields.title);
+}
+
+// Links (spec 6.3)
+
+export const LINK_FIELDS = ["days", "note", "nonce"] as const;
+
+export interface LinkInput {
+  days: number;
+  note: string | null;
+}
+
+export function checkLink(fields: Fields): Checked<LinkInput> {
+  const errors: Fields = {};
+  if (!/^\d{1,2}$/.test(fields.days) || Number(fields.days) < 1 || Number(fields.days) > 30) errors.days = "a number of days from 1 to 30";
+  if (CONTROL.test(fields.note)) errors.note = "one line of plain text";
+  tooLong(errors, fields, "note", 60);
+  return finish(errors, () => ({ days: Number(fields.days), note: orNull(fields.note) }));
+}
+
+// Print orders (spec 20)
+
+export const BUFFER_FIELDS = ["buffer"] as const;
+
+/** The delivery buffer as a whole percent from 0 to 20: anything else is refused, never clamped */
+export function checkBuffer(fields: Fields): Checked<number> {
+  const errors: Fields = {};
+  if (!/^\d{1,2}$/.test(fields.buffer) || Number(fields.buffer) > 20) errors.buffer = "a whole number from 0 to 20";
+  return finish(errors, () => Number(fields.buffer));
+}
