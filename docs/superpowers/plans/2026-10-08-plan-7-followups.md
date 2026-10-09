@@ -43,6 +43,11 @@ Each was weighed in its task's review and parked, not missed:
 - `src/lib/prints/daily.ts` with `src/lib/prints/stripe-events.ts`: an order the daily lookup flagged as unmatched can be moved back to `refunded` by a later `charge.refunded` under a new event id, and the next daily run flags it and emails George again. Parked because it can never reach `paid`, and Stripe sends no new full-refund event once a charge is refunded in full (Task 14).
 - `src/lib/prints/daily.ts`: the webhook-missing email goes once a day for as long as the webhook is missing, and a failed send waits for the next day. Accepted by ruling, since `/admin` shows the state (Task 14).
 
+## Launch findings
+
+- Stripe's hosted page shows the checkout's custom text (`posting to: …`) as a plain paragraph (CI run 37876913033, 9 October 2026, from the page snapshot). The test address had no `*`, `_` or brackets, so whether Stripe would format those is still unseen; a buyer's own name would only ever format on their own page.
+- The first test-mode run against Stripe's real page found the pay button is a plain button named `Pay`, not a submit input, and that Link's "Save my information for faster checkout" box is ticked by default and then asks for a phone number. `tests/e2e/prints-stripe.spec.ts` now clicks the button by its exact name and unticks the box; it passed end to end locally against Stripe's test mode.
+
 ## Known flakes
 
 Load-only; each passes when rerun alone. Plan 5's list ([plan 5 follow-ups](2026-10-05-plan-5-followups.md), testing) carries the first three too.

@@ -49,10 +49,13 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
   if (await country.count()) await country.selectOption("AU");
   const postal = page.locator("#billingPostalCode");
   if (await postal.isVisible().catch(() => false)) await postal.fill("2026");
+  // Link's "save my information" box is ticked by default and then wants a phone number; the buyer here doesn't save
+  const save = page.getByRole("checkbox", { name: "Save my information for faster checkout" });
+  if (await save.isVisible().catch(() => false)) await save.uncheck();
   // Events from a minute before paying on: the test account may be shared with other runs
   const started = Math.floor(Date.now() / 1000) - 60;
-  // The pay button by its words (submit_type=pay), not any submit button: the page may hold another, for a wallet or a sign-in
-  await page.locator("button[type=submit]").filter({ hasText: /^\s*pay\b/i, visible: true }).first().click();
+  // The pay button by its exact name: Stripe's isn't a submit input, and "Apple Pay" and "Pay securely with Link" sit beside it
+  await page.getByRole("button", { name: "Pay", exact: true }).filter({ visible: true }).first().click();
   await page.waitForURL(new RegExp(`^${PRINTS_STRIPE}/prints/[0-9a-z]{26}\\?key=`), { timeout: 90_000 });
   const orderId = new URL(page.url()).pathname.split("/").at(-1)!;
   await expect(page.locator("h1")).toHaveText("your prints");
