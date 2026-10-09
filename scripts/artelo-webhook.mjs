@@ -1,7 +1,8 @@
 // bun run prints:webhook --local [--origin URL] | --remote (spec 18.6): saves Artelo's OrderStatusChange webhook for every
-// status and pipes the returned secret straight to the Worker's secret store on standard input, never printing it.
-// --remote stores it with wrangler secret put ARTELO_WEBHOOK_SECRET, for wrangler.jsonc's SITE_ORIGIN; --local hands it to
-// PRINTS_SECRET_SINK, a command that reads it from standard input. The Artelo key comes from ARTELO_API_KEY.
+// status and pipes the returned secret on standard input, never printing it. --remote stores it in Infisical's prod
+// environment as ARTELO_WEBHOOK_SECRET (ADR-0029: Infisical's sync carries it to the Worker), for wrangler.jsonc's
+// SITE_ORIGIN; --local hands it to PRINTS_SECRET_SINK, a command that reads it from standard input. The Artelo key comes
+// from ARTELO_API_KEY, which `infisical run --env=prod --` supplies.
 // Artelo's webhooks are listed first: a secret can't be read back once saved, so a second webhook for the same URL would
 // leave one whose deliveries fail every signature check. If ours is already there, nothing is saved, and George deletes
 // it in Artelo's dashboard and runs this again (Artelo documents no delete).
@@ -21,7 +22,7 @@ if (!key) {
   console.error("set ARTELO_API_KEY in the environment; it is never printed");
   process.exit(2);
 }
-const sink = remote ? ["bunx", "wrangler", "secret", "put", "ARTELO_WEBHOOK_SECRET"] : (process.env.PRINTS_SECRET_SINK ?? "").split(" ").filter(Boolean);
+const sink = remote ? ["infisical", "secrets", "set", "ARTELO_WEBHOOK_SECRET=@/dev/stdin", "--env=prod", "--silent"] : (process.env.PRINTS_SECRET_SINK ?? "").split(" ").filter(Boolean);
 // Checked before Artelo is asked, so no webhook is saved whose secret has nowhere to go
 if (sink.length === 0) {
   console.error("--local needs PRINTS_SECRET_SINK, a command that takes the secret on standard input");
@@ -59,13 +60,13 @@ const again = "run this again; if it says artelo already has the webhook, delete
 // Ignored is a test order's end and isn't among Save Webhook's filter values; test orders never need a webhook
 const saved = await artelo(deps, "POST", "/webhooks/save", { topic: "OrderStatusChange", url, filters: { statuses: ARTELO_STATUSES.filter((status) => status !== "Ignored") } });
 if (!saved.ok) {
-  console.error(`artelo answered ${saved.status ?? "nothing readable"}; nothing was stored on the worker. ${again}`);
+  console.error(`artelo answered ${saved.status ?? "nothing readable"}; nothing was stored. ${again}`);
   process.exit(1);
 }
 const body = saved.body;
 const secret = typeof body?.secret === "string" ? body.secret : typeof body?.data?.secret === "string" ? body.data.secret : null;
 if (!secret) {
-  console.error(`artelo's answer had no secret; nothing was stored on the worker. ${again}`);
+  console.error(`artelo's answer had no secret; nothing was stored. ${again}`);
   process.exit(1);
 }
 // The child gets the secret on standard input and an environment without the Artelo key, which it has no use for
@@ -75,4 +76,4 @@ if (put.status !== 0) {
   console.error(`storing the secret failed. ${again}`);
   process.exit(1);
 }
-console.log(remote ? "webhook saved; its secret is stored on the worker." : "webhook saved; its secret went to the local sink.");
+console.log(remote ? "webhook saved; its secret is stored in infisical, whose sync carries it to the worker." : "webhook saved; its secret went to the local sink.");

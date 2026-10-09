@@ -24,9 +24,11 @@ How print ordering works on curiousgeorge.dev, how George launches it and how he
 
 ## Launch checklist
 
-Every step is George's, in this order. Prints stay closed (`PRINTS_OPEN` is `"false"` in `wrangler.jsonc`) until the last step, so the merge itself changes nothing a visitor can buy. Plan 6 (the gallery) and plan 7 (prints) merge together from `feature/photos-and-prints`.
+In this order. An agent can run any step that needs no login or pasted key; George does the rest. Prints stay closed (`PRINTS_OPEN` is `"false"` in `wrangler.jsonc`) until the last step, so the merge itself changes nothing a visitor can buy. Plan 6 (the gallery) and plan 7 (prints) merge together from `feature/photos-and-prints`.
 
-Where a step pastes a key into the shell, read it without echo so it stays out of your history: `read -rs NAME && export NAME`, then paste and press return.
+Every secret lives in the `personal-website` Infisical project ([ADR-0029](adr/0029-secrets-live-in-infisical.md)). The Worker's secrets are copies: Infisical's Cloudflare Workers sync pushes the `prod` environment to the `personal-website` Worker, so nobody runs `wrangler secret put` by hand. A key from a provider's dashboard is pasted into Infisical's dashboard; a random one is generated straight into it; scripts that need a key run under `infisical run`, so no key is ever exported in the shell.
+
+Steps 1 to 6 were done on 9 October 2026, with the Infisical project and its sync.
 
 ### Before merge
 
@@ -45,30 +47,26 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
    bunx wrangler d1 migrations apply curiousgeorge-logbook --remote
    ```
    This is what `bun run db:migrate:remote` and the deploy job run, so the deploy then finds nothing left to apply. Never `wrangler d1 execute --file`: it leaves the `d1_migrations` tracker behind, and the next `apply` fails on a migration it thinks is new.
-4. **`PHOTO_LINK_SECRET`**, fresh and never the local one (the downloads page answers 503 without it, and placing an order needs it to give Artelo its links):
+4. **`PHOTO_LINK_SECRET`**, fresh and never the local one (the downloads page answers 503 without it, and placing an order needs it to give Artelo its links), generated into Infisical without being displayed:
    ```bash
-   openssl rand -hex 32 | bunx wrangler secret put PHOTO_LINK_SECRET
+   openssl rand -hex 32 | tr -d '\n' | infisical secrets set PHOTO_LINK_SECRET=@/dev/stdin --env=prod --silent > /dev/null
    ```
 5. **`PRINT_VIEW_SECRET`**, which seals quotes and derives every order page's key:
    ```bash
-   openssl rand -hex 32 | bunx wrangler secret put PRINT_VIEW_SECRET
+   openssl rand -hex 32 | tr -d '\n' | infisical secrets set PRINT_VIEW_SECRET=@/dev/stdin --env=prod --silent > /dev/null
    ```
    Set it once and keep it: changing it breaks every order page link already emailed and every quote still open.
-6. **The Stripe account.** Open it as an individual, set the public business name to `george vlachos`, turn on customer emails for successful payments and turn off Adaptive Pricing in the dashboard too (the site also turns it off on every session). Then set the live key:
-   ```bash
-   bunx wrangler secret put STRIPE_SECRET_KEY
-   ```
+6. **The Stripe account.** Open it as an individual, set the public business name to `george vlachos`, turn on customer emails for successful payments and turn off Adaptive Pricing in the dashboard too (the site also turns it off on every session). Then paste the live key into Infisical's `prod` environment as `STRIPE_SECRET_KEY`, and set up the sync if it isn't yet: a Cloudflare API token with Account › Workers Scripts › Edit on the Digital Nachos account, added to Infisical as a Cloudflare app connection, then a Cloudflare Workers secret sync from `personal-website` › `prod` to the Worker `personal-website`. Cloudflare can't hand secrets back, so everything the Worker needs (`POSTHOG_KEY` included) must be in Infisical before the sync first runs.
    A standard `sk_live_` key or a restricted `rk_live_` key both work. A restricted key needs write access to Checkout Sessions and read access to PaymentIntents (the site creates, reads and expires sessions and reads a payment's delivery address); if a checkout fails with a permissions error, add what Stripe's message names.
-7. **The GitHub secret for CI.** Add a Stripe test-mode key as a repository secret (the `check` job has no environment, so an environment secret wouldn't reach it):
+7. **The GitHub secret for CI.** Keep a Stripe test-mode key in Infisical's `dev` environment as `STRIPE_TEST_SECRET_KEY` (never `prod`, which the sync pushes to the Worker), then copy it to a repository secret (the `check` job has no environment, so an environment secret wouldn't reach it):
    ```bash
-   gh secret set STRIPE_TEST_SECRET_KEY
+   infisical secrets get STRIPE_TEST_SECRET_KEY --env=dev --plain | tr -d '\n' | gh secret set STRIPE_TEST_SECRET_KEY
    ```
    From then on every CI run, this branch's pull request included, runs the full order through `checkout.stripe.com` in test mode on its own server (4338). It must pass before merging. A pull request that is already open picks up a newly added secret only on its next run, so re-run its checks (or push a commit) after adding it. It has never run against Stripe's real page, so a first failure is likely to be a renamed field on Stripe's page (plan 7, assumption 20); that is fixed in `tests/e2e/prints-stripe.spec.ts` alone.
 8. **One Stripe test-mode order and refund.** Run the full order once on the Mac, so you can see Stripe's page:
    ```bash
-   read -rs STRIPE_TEST_SECRET_KEY && export STRIPE_TEST_SECRET_KEY
    bun run build:test
-   bunx playwright test tests/e2e/prints-stripe.spec.ts --project=chromium --headed --trace on
+   infisical run --env=dev -- bunx playwright test tests/e2e/prints-stripe.spec.ts --project=chromium --headed --trace on
    bunx playwright show-trace test-results/<the prints-stripe folder>/trace.zip
    ```
    Stop any `bun run serve` of your own first (no test server is reused). Then:
@@ -76,34 +74,25 @@ Where a step pastes a key into the shell, read it without echo so it stays out o
    - In Stripe's dashboard, in test mode, open the payment (its description reads `print order <id> · prices include no gst…`) and refund it in full.
    - Open the `charge.refunded` event for that charge (Developers, Events) and confirm `data.object.metadata.order_id` holds the order id. A refund that arrives before the site has recorded the payment finds its order only through it ([ADR-0027](adr/0027-a-stripe-event-acts-only-when-provably-ours.md)); if it is missing, don't open prints until the refund handling is changed.
 
-   Then take the key out of the shell: `unset STRIPE_TEST_SECRET_KEY`.
-
 ### After merge
 
 9. **Watch the deploy.** The job applies migrations (none left after step 3), deploys both Workers, purges the `logbook` and `photos` cache tags and checks the visitor info's promises on the live site. The Worker now has the five-minute cron and the three rate limits. Within a few minutes the orders section of `/admin` reads `prints are closed: PRINTS_OPEN isn't "true"`, and after the first cron run it shows an exchange rate (`us$1 = a$… · ecb rate of …`).
-10. **The Stripe webhook**, in live mode, now that the route exists: add an endpoint at `https://curiousgeorge.dev/api/prints/stripe` on API version `2025-09-30.clover`, subscribed to exactly `checkout.session.completed`, `checkout.session.expired` and `charge.refunded` (the three the site handles; anything else is recorded and ignored). Reveal its signing secret and set it:
-    ```bash
-    bunx wrangler secret put STRIPE_WEBHOOK_SECRET
-    ```
+10. **The Stripe webhook**, in live mode, now that the route exists: add an endpoint at `https://curiousgeorge.dev/api/prints/stripe` on API version `2025-09-30.clover`, subscribed to exactly `checkout.session.completed`, `checkout.session.expired` and `charge.refunded` (the three the site handles; anything else is recorded and ignored). Reveal its signing secret and paste it into Infisical's `prod` environment as `STRIPE_WEBHOOK_SECRET`; the sync carries it to the Worker within a minute or so.
     Then prove the secret: send a test event to the endpoint from Stripe's dashboard (any of the three events) and check it is answered 200. If the dashboard offers no test event for a live endpoint, use `stripe trigger checkout.session.completed` from the Stripe CLI against the same endpoint, or watch the endpoint's delivery log on the first real order instead. A signed event that isn't one of the site's orders is recorded and answered 200, while a wrong secret answers 400; otherwise a wrong secret would show only as a missed-webhook email 65 minutes after the first real order.
-11. **Artelo.** Open the account, connect the API integration and set up billing on George's card (no foreign transaction fee). Then set the key and save Artelo's webhook straight after, so the cron's daily webhook check never finds a key with no webhook:
+11. **Artelo.** Open the account, connect the API integration and set up billing on George's card (no foreign transaction fee). Then paste the key into Infisical's `prod` environment as `ARTELO_API_KEY` and save Artelo's webhook straight after, so the cron's daily webhook check never finds a key with no webhook:
     ```bash
-    read -rs ARTELO_API_KEY && export ARTELO_API_KEY
-    printf %s "$ARTELO_API_KEY" | bunx wrangler secret put ARTELO_API_KEY
-    bun run prints:webhook --remote
+    infisical run --env=prod -- bun run prints:webhook --remote
     ```
-    It prints `webhook saved; its secret is stored on the worker.` and sets `ARTELO_WEBHOOK_SECRET` itself; never set that secret by hand. If it says `artelo already has a webhook for https://curiousgeorge.dev/api/prints/artelo`, a secret can't be read back from Artelo, so delete that webhook in Artelo's dashboard and run it again. It never saves a second one.
-12. **The margin and lookup check**, with `ARTELO_API_KEY` still exported:
+    It prints `webhook saved; its secret is stored in infisical, whose sync carries it to the worker.` and sets `ARTELO_WEBHOOK_SECRET` in Infisical itself; never set that secret by hand. If it says `artelo already has a webhook for https://curiousgeorge.dev/api/prints/artelo`, a secret can't be read back from Artelo, so delete that webhook in Artelo's dashboard and run it again. It never saves a second one.
+12. **The margin and lookup check**, with the Artelo key supplied by Infisical:
     ```bash
-    bun run prints:check --remote
+    infisical run --env=prod -- bun run prints:check --remote
     ```
     - It must end with `lookup check: ok` and `0 failed`. Any `FAIL lookup check` line means don't open prints: placing depends on Artelo finding an order the moment it is created ([ADR-0026](adr/0026-a-print-order-is-fenced-not-keyed.md)).
     - Read every indented `orderCosts` line. The site assumes Artelo's `total` is `productionCost` plus `arteloShipping`, the taxes, `branding`, `holidayFees` and `customPricingAdjustment`, less `wholesaleDiscount`. Check those four fields count towards `total` that way in the real answers; if they don't, every quote will be refused as unreadable, so get `src/lib/prints/quote.ts` changed before opening. If all four are 0 in every answer, the assumption is unproven rather than confirmed, which is safe: should one ever be non-zero and not reconcile, `readOrderCosts` refuses that quote, so the buyer sees delivery as unavailable, never a wrong price. Note it in the follow-ups either way.
     - Fix anything it fails on, and look at every warning (a margin under 30%, or Price Check more than 5% from the catalogue's costs). The Antarctica line shows Artelo's real refusal.
     - It creates one free Artelo test order, which is never produced, and prints `lookup check: test order <artelo id> created (<status>)`. Cancel it in Artelo if you like.
     - Prove Artelo's webhook secret: once that test order changes status at Artelo, `/admin` should read `artelo webhook: connected · last heard …` (any delivery that passes the signature check stamps it; a wrong secret answers 400, and Artelo eventually deletes a webhook that keeps failing). If it still reads `not heard from yet` an hour or so later, Artelo may not send a test order's changes; then check Artelo's webhook delivery log, and watch for `last heard` to change during the first real order (step 17).
-
-    Then take the key out of the shell: `unset ARTELO_API_KEY`.
 13. **The photographs** (plan 6's steps):
     - From the Mac, under Node 24: `bun run photos:prepare`, filling `scripts/photo-cities.json` wherever it stops, then `bun run photos:import --remote`.
     - In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates with `raw` pills.
