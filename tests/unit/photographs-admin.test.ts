@@ -62,6 +62,18 @@ describe("PhotographsAdmin", () => {
 
   test("with nothing imported, it says how to import", async () => {
     const doc = await render(PhotographsAdmin, { posts: [], failure: null });
-    expect(text(doc.querySelector(".empty"))).toBe("no photos imported yet. run photos:import from the mac.");
+    expect(text(doc.querySelector(".empty"))).toBe("no photos in the gallery. run photos:import from the mac to add new ones.");
+  });
+
+  test("each photo has a confirmed delete with the retention hint; a refusal reopens its post", async () => {
+    const doc = await render(PhotographsAdmin, { posts, failure: failure("photo-newer-02", { confirm: "tick the box to delete it" }) });
+    const form = doc.querySelector('#photo-newer-02 form:has(input[value="photo.delete"])')!;
+    const box = form.querySelector('input[name="confirm"]')!;
+    expect(box.hasAttribute("required")).toBe(true);
+    expect(box.getAttribute("aria-invalid")).toBe("true");
+    expect(box.getAttribute("aria-describedby")).toBe("photo-newer-02-delete-hint photo-newer-02-confirm-error");
+    expect(text(form.querySelector(".hint"))).toBe("removes it from the gallery and this list. files are kept for existing print orders.");
+    expect(text(form.querySelector("button"))).toBe("delete");
+    expect(doc.querySelector("#post-newer")!.hasAttribute("open")).toBe(true);
   });
 });

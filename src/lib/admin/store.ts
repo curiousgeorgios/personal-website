@@ -123,7 +123,7 @@ interface PhotographRow {
 }
 
 const PHOTOGRAPHS =
-  "SELECT photo_posts.collection, photo_posts.published_on, photo_posts.place, photos.id, photos.title, photos.published, photos.raw_review, photos.previews FROM photo_posts JOIN photos ON photos.collection = photo_posts.collection ORDER BY photo_posts.published_at DESC, photos.position";
+  "SELECT photo_posts.collection, photo_posts.published_on, photo_posts.place, photos.id, photos.title, photos.published, photos.raw_review, photos.previews FROM photo_posts JOIN photos ON photos.collection = photo_posts.collection WHERE photos.deleted_at IS NULL ORDER BY photo_posts.published_at DESC, photos.position";
 
 /** A photograph's previews, or none when the column isn't a list (the schema keeps it valid JSON): one odd row mustn't take the whole admin page down */
 function previewsOf(json: string): { key: string; width: number; height: number }[] {
@@ -430,7 +430,7 @@ export async function removeRecord(db: D1Database, id: number): Promise<boolean>
 export async function postPhotoIds(db: D1Database, collection: string): Promise<string[] | null> {
   const [post, photos] = await db.batch([
     db.prepare("SELECT collection FROM photo_posts WHERE collection = ?").bind(collection),
-    db.prepare("SELECT id FROM photos WHERE collection = ? ORDER BY position").bind(collection),
+    db.prepare("SELECT id FROM photos WHERE collection = ? AND deleted_at IS NULL ORDER BY position").bind(collection),
   ]);
   if (post.results.length === 0) return null;
   return (photos.results as unknown as { id: string }[]).map((row) => row.id);
@@ -444,6 +444,6 @@ export async function savePostPlace(db: D1Database, collection: string, place: s
 
 /** False when the photograph doesn't exist */
 export async function savePhotoTitle(db: D1Database, id: string, title: string): Promise<boolean> {
-  const result = await db.prepare("UPDATE photos SET title = ? WHERE id = ?").bind(title, id).run();
+  const result = await db.prepare("UPDATE photos SET title = ? WHERE id = ? AND deleted_at IS NULL").bind(title, id).run();
   return result.meta.changes > 0;
 }

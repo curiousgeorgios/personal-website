@@ -65,6 +65,9 @@ const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url
 // Photographs show on the gallery, everything else on the logbook (spec 6.2)
 const later = Astro.url.searchParams.has("later");
 const savedLine = (section: AdminSection) => {
+  if (section === "photographs" && Astro.url.searchParams.get("note") === "deleted") {
+    return later ? "deleted - the gallery may show the old version for a little while." : "deleted - removed from the gallery.";
+  }
   if (section === "orders") {
     const note = Astro.url.searchParams.get("note");
     if (note === "retry") return "retrying - refresh in a minute to see how it went.";

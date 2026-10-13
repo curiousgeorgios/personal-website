@@ -8,6 +8,7 @@ Decisions:
 - [ADR-0022](adr/0022-photo-places-are-area-and-city-only.md) (amended): a place is an area and a city, and coordinates never reach the site.
 - [ADR-0023](adr/0023-the-gallery-stays-light-on-phones.md): the gallery stays light on phones.
 - [ADR-0024](adr/0024-test-servers-never-hold-the-real-signing-key.md): test servers never hold the real signing key.
+- [ADR-0030](adr/0030-deleted-photos-stay-out-of-the-catalogue.md): deleting a photograph removes it from the catalogue and preserves existing print orders.
 
 ## Pages and routes
 
@@ -25,6 +26,7 @@ Decisions:
 | `POST /admin/photos/links` | Issue a catalogue link through the owner gate (JSON; a `photoId` is refused with `photo links are internal`). |
 | `DELETE /admin/photos/links?grantId=<uuid>` | Revoke a catalogue link through the owner gate. A photo-scoped grant (plan B's print orders) answers as an unknown link and keeps working. |
 | `PATCH /admin/photos/<id>` | Publish or hide one photograph through `setPublished` (JSON); a hide also purges its previews' tag. |
+| `DELETE /admin/photos/<id>` | Delete from the catalogue through the owner and same-origin gates; requires JSON `{ "confirm": true }`. Returns `{ id, deleted: true, cacheInvalidated }`. Repeats succeed; unknown IDs return 404. |
 | `/media/photos/previews/<id>/<sha>/<size>.<format>` | A published photograph's preview, `public, max-age=31536000, immutable`, cache tag `photo-<id>`. A hidden or unknown photograph's previews answer 404, `no-store`. Audio, covers and snapshots under `/media` are unchanged. |
 | `/admin/media/photos/previews/…` | The same previews for the admin's thumbnails, hidden photographs' included, behind the admin gate and never cached. |
 
@@ -50,6 +52,14 @@ Measured on a store shaped like the real catalogue (two entries, 36 frames): 198
 - **links:** issue a catalogue link for 1 to 30 days with a note; it is shown once with a copy button and never stored (a nonce stops a repeated form making a second). Working links are listed with a revoke form, which switches off catalogue links only.
 
 `bun run photos:link` issues and revokes catalogue links from the Mac without the admin; `--photo` is refused, because photo-scoped grants are made only inside print orders (plan B).
+
+### Deleting a photograph
+
+Each photo's admin row has a delete form, using the existing confirmation checkbox and working without JavaScript. It posts `intent=photo.delete`, `id=<photo-id>` and `confirm=yes` to `/admin/`. Confirmation is also checked on the server. Success redirects to the photographs section with a deleted notice; an unsuccessful cache purge says the gallery may show the old version for a little while.
+
+Delete removes the photo from this list and every public gallery, preview and catalogue-download view. The remaining photos in the post keep their order. Deleting its last photo removes the post from the list too. Imports, stale edits and publish all cannot bring deleted photos back. The row and stored files remain for existing print orders; their internal master links and order history continue to work. Local originals are untouched. This is removal from the catalogue, not storage erasure. A visitor's existing downloaded or browser-cached copies cannot be recalled.
+
+This feature needs migration `0009_photo_deletion.sql` before deployment. See ADR-0030 for the retention and concurrency rules.
 
 ## Preparing and importing (George's Mac only)
 
