@@ -13,7 +13,8 @@ const PHOTO_UPSERT = `INSERT INTO photos (id, collection, position, title, raw_r
   ON CONFLICT(id) DO UPDATE SET collection = excluded.collection, position = excluded.position, raw_review = excluded.raw_review,
   previews = excluded.previews, print_key = excluded.print_key, print_width = excluded.print_width, print_height = excluded.print_height,
   print_bytes = excluded.print_bytes, print_sha256 = excluded.print_sha256,
-  published = CASE WHEN photos.print_sha256 = excluded.print_sha256 THEN photos.published ELSE 0 END`;
+  published = CASE WHEN photos.print_sha256 = excluded.print_sha256 THEN photos.published ELSE 0 END
+  WHERE photos.deleted_at IS NULL`;
 
 /** A post's row: seconds since 1970, and the date part of its own time, which is the day in the post's offset (spec 7.1) */
 export const postRow = (post) => [post.collection, Math.floor(Date.parse(post.publishedAt) / 1000), post.publishedAt.slice(0, 10), post.place];

@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { purgeTags } from "../../../lib/admin/purge";
 import { photoError, photoJson, readPhotoJson } from "../../../lib/photos/http";
+import { deletePhoto } from "../../../lib/photos/delete";
 import { publicationPurges, publishRefusal, setPublished } from "../../../lib/photos/publish";
 import { PHOTO_ID } from "../../../lib/photos/tokens";
 
@@ -21,4 +22,17 @@ export const PATCH: APIRoute = async ({ params, request, cache }) => {
     const cacheInvalidated = await purgeTags(cache, publicationPurges([id], body.published));
     return photoJson({ id, published: body.published, cacheInvalidated }, 200, true);
   } catch { console.error("photos: publication update unavailable"); return photoError("Could not update the photo.", 503); }
+};
+
+export const DELETE: APIRoute = async ({ params, request, cache }) => {
+  const id = params.id ?? "";
+  if (!PHOTO_ID.test(id)) return photoError("Photo unavailable.", 404);
+  const parsed = await readPhotoJson(request);
+  if ("response" in parsed) return parsed.response;
+  if (!parsed.data || typeof parsed.data !== "object" || !("confirm" in parsed.data) || parsed.data.confirm !== true) return photoError("Confirm deletion with confirm: true.", 400);
+  try {
+    if (!(await deletePhoto(env.DB, id))) return photoError("Photo unavailable.", 404);
+    const cacheInvalidated = await purgeTags(cache, publicationPurges([id], false));
+    return photoJson({ id, deleted: true, cacheInvalidated }, 200, true);
+  } catch { console.error("photos: deletion unavailable"); return photoError("Could not delete the photo.", 503); }
 };

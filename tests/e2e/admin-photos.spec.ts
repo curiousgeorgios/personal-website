@@ -164,3 +164,41 @@ test("an edited place and title show on the gallery and the photo's page", async
   await expect(page.locator("h1")).toHaveText("the long jetty");
   await expect(page.locator(".photo-page .where")).toHaveText("01.03.26 · cottesloe, perth");
 });
+
+test("deleting a photo requires confirmation, works without JavaScript and removes its public views", async ({ browser, request }) => {
+  const id = "fixture-b-02";
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  const [{ previews }] = adminD1<{ previews: string }>(`SELECT previews FROM photos WHERE id = '${id}'`);
+  const preview = `${ADMIN}/media/${JSON.parse(previews)[0].key}`;
+  try {
+    // The middleware refuses both API and form writes without the site's origin, before either can delete.
+    expect((await request.delete(`${ADMIN}/admin/photos/${id}`, { data: { confirm: true } })).status()).toBe(403);
+    expect((await request.post(`${ADMIN}/admin/`, { headers: { Origin: "https://example.com" }, form: { intent: "photo.delete", id, confirm: "yes" } })).status()).toBe(403);
+    const unconfirmed = await request.post(`${ADMIN}/admin/`, { headers: { Origin: ADMIN }, form: { intent: "photo.delete", id } });
+    expect(unconfirmed.status()).toBe(422);
+    expect(adminD1<{ deleted_at: number | null }>(`SELECT deleted_at FROM photos WHERE id = '${id}'`)[0].deleted_at).toBeNull();
+
+    await openPost(page, "fixture-b");
+    const row = page.locator(`#photo-${id}`);
+    const remove = intent(row, "photo.delete");
+    await remove.getByRole("button", { name: "delete", exact: true }).click();
+    await expect(row).toHaveCount(1);
+    expect(adminD1<{ deleted_at: number | null }>(`SELECT deleted_at FROM photos WHERE id = '${id}'`)[0].deleted_at).toBeNull();
+    await remove.getByRole("checkbox", { name: `yes, delete photo ${id}`, exact: true }).check();
+    await remove.getByRole("button", { name: "delete", exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/\?saved=photographs&note=deleted(&later=1)?#photographs$/);
+    await expect(page.locator("#photographs .notice")).toHaveText(/^deleted - (removed from the gallery|the gallery may show the old version for a little while)\.$/);
+    await expect(row).toHaveCount(0);
+    await expect(post(page, "fixture-b").locator("summary .what")).toHaveText("14.06.26 · 1 photo, 1 published");
+    expect((await request.get(`${ADMIN}/api/photos/${id}`)).status()).toBe(404);
+    expect((await request.get(`${ADMIN}/photos/${id}?fresh=${unique()}`)).status()).toBe(404);
+    expect((await request.get(`${preview}?fresh=${unique()}`)).status()).toBe(404);
+    expect((await request.patch(`${ADMIN}/admin/photos/${id}`, { headers: { Origin: ADMIN }, data: { published: true } })).status()).toBe(404);
+    expect((await request.delete(`${ADMIN}/admin/photos/${id}`, { headers: { Origin: ADMIN }, data: { confirm: true } })).status()).toBe(200);
+  } finally {
+    // This is a synthetic fixture. Restore it for other admin specs, never a real photograph.
+    adminD1(`UPDATE photos SET deleted_at = NULL, published = 1 WHERE id = '${id}'`);
+    await context.close();
+  }
+});

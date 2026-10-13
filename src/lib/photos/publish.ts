@@ -65,7 +65,7 @@ async function pooled(checks: (() => Promise<boolean>)[], limit: number): Promis
 export async function setPublished(deps: PublishDeps, ids: string[], published: boolean): Promise<PublishOutcome> {
   // One parameter however many ids: D1 caps a statement at 100 bound parameters
   const list = JSON.stringify(ids);
-  const rows = (await deps.db.prepare("SELECT * FROM photos WHERE id IN (SELECT value FROM json_each(?))").bind(list).all<PhotoRow>()).results;
+  const rows = (await deps.db.prepare("SELECT * FROM photos WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(list).all<PhotoRow>()).results;
   const found = new Set(rows.map((row) => row.id));
   const missing = ids.filter((id) => !found.has(id));
   if (ids.length === 0 || missing.length > 0) return { ok: false, missing };
@@ -91,7 +91,15 @@ export async function setPublished(deps: PublishDeps, ids: string[], published: 
       return { ok: false, postless, unverified: ids.filter((id) => failed.has(id)).map((id) => ({ id, failed: failed.get(id)! })) };
     }
   }
-  await deps.db.prepare("UPDATE photos SET published = ? WHERE id IN (SELECT value FROM json_each(?))").bind(published ? 1 : 0, list).run();
+  // A delete during the R2 checks must stop the entire publish, including the other photos in a post.
+  const result = await deps.db.prepare(`UPDATE photos SET published = ? WHERE id IN (SELECT value FROM json_each(?))
+    AND NOT EXISTS (SELECT 1 FROM json_each(?) AS requested LEFT JOIN photos AS target ON target.id = requested.value
+      WHERE target.id IS NULL OR target.deleted_at IS NOT NULL)`).bind(published ? 1 : 0, list, list).run();
+  if (result.meta.changes === 0) {
+    const remaining = (await deps.db.prepare("SELECT id FROM photos WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(list).all<{ id: string }>()).results;
+    const active = new Set(remaining.map((row) => row.id));
+    return { ok: false, missing: ids.filter((id) => !active.has(id)) };
+  }
   return { ok: true };
 }
 

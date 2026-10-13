@@ -1,5 +1,6 @@
 ---
 import Field from "./Field.astro";
+import RemoveForm from "./RemoveForm.astro";
 import { formState } from "../../lib/admin/form-state";
 import type { ActionFailure } from "../../lib/admin/actions";
 import type { AdminPost } from "../../lib/admin/store";
@@ -15,7 +16,7 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 const heading = (post: AdminPost) => (post.place ? `${formatLogDate(post.date, "day")} · ${post.place}` : formatLogDate(post.date, "day"));
 ---
 {posts.length === 0 ? (
-  <p class="empty">no photos imported yet. run photos:import from the mac.</p>
+  <p class="empty">no photos in the gallery. run photos:import from the mac to add new ones.</p>
 ) : (
   <ol class="posts-admin">
     {posts.map((post) => {
@@ -72,6 +73,7 @@ const heading = (post: AdminPost) => (post.place ? `${formatLogDate(post.date, "
                         <input type="hidden" name="id" value={photo.id} />
                         <button type="submit" class="button quiet" aria-label={`${toggle} ${photo.id}`}>{toggle}</button>
                       </form>
+                      <RemoveForm form={formId} intent="photo.delete" id={photo.id} confirm={`yes, delete photo ${photo.id}`} button="delete" error={state.errors.confirm} hint="removes it from the gallery and this list. files are kept for existing print orders." />
                     </div>
                   </li>
                 );

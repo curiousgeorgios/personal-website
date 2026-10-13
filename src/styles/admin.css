@@ -113,6 +113,8 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .photo-admin-body { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 6px; }
 .photo-admin-body > .photo-id, .photo-admin-body > .error { flex: 1 0 100%; margin: 0; }
 .photo-admin-body > .admin-form { display: contents; }
+.photo-admin-body > .admin-form.remove { display: grid; flex: 1 0 100%; gap: 6px; justify-items: start; padding-top: 8px; }
+.photo-admin-body > .remove .hint { margin: 0; }
 .photo-admin-body .field { flex: 1 0 100%; max-width: 34rem; }
 .photo-admin-body .move { padding-top: 0; }
 .photo-id .status { white-space: nowrap; }

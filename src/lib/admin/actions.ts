@@ -1,5 +1,6 @@
 import type { ReshootOutcome } from "../../../workers/snapshots/src/run";
 import { checkPlace } from "../photos/place";
+import { deletePhoto } from "../photos/delete";
 import { photoCacheTag } from "../media";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
 import { insertGrant, revokeCatalogueLink } from "../photos/store";
@@ -73,7 +74,7 @@ export interface ActionFailure {
 export type IssuedLink = { url: string } | { repeat: true };
 
 /** `purge`: cache tags this save purges beyond its section's own (a hidden photograph's previews); `note`: which saved line to show */
-export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[]; note?: "retry" | "resolved" | "testmail" } | ActionFailure;
+export type ActionResult = { ok: true; section: AdminSection; issued?: IssuedLink; purge?: string[]; note?: "retry" | "resolved" | "testmail" | "deleted" } | ActionFailure;
 
 const fail = (section: AdminSection | null, form: string, errors: Fields, values: Fields = {}): ActionFailure => ({ ok: false, section, form, errors, values });
 const gone = (what: "line" | "entry" | "record" | "post" | "photo" | "link" | "order") => fail(null, "", { form: `that ${what} no longer exists` });
@@ -132,6 +133,8 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
       return publishPhoto(form, deps, true);
     case "photo.hide":
       return publishPhoto(form, deps, false);
+    case "photo.delete":
+      return removePhoto(form, deps);
     case "link.issue":
       return issueLink(form, deps);
     case "link.revoke":
@@ -469,6 +472,14 @@ async function publishPhoto(form: FormData, deps: ActionDeps, published: boolean
   if (outcome.ok) return hidden([id], published);
   if ("missing" in outcome) return gone("photo");
   return fail("photographs", photoForm(id), { form: refusal(outcome, true) });
+}
+
+async function removePhoto(form: FormData, { db }: ActionDeps): Promise<ActionResult> {
+  const id = String(form.get("id") ?? "");
+  if (!PHOTO_ID.test(id)) return gone("photo");
+  if (!confirmed(form)) return fail("photographs", photoForm(id), { confirm: "tick the box to delete it" });
+  if (!(await deletePhoto(db, id))) return gone("photo");
+  return { ok: true, section: "photographs", note: "deleted", purge: [photoCacheTag(id)] };
 }
 
 // Links (spec 6.3)
