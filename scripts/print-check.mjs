@@ -11,6 +11,7 @@ import { ANTARCTICA, COMBINATIONS, drifted, LANDMARKS, marginFor, verdict } from
 import { aud, rateText, usd } from "../src/lib/prints/money.ts";
 import { readOrderCosts } from "../src/lib/prints/quote.ts";
 import { photoPlatform } from "./photo-platform.mjs";
+import { unstable_readConfig } from "wrangler";
 
 const args = process.argv.slice(2);
 const arg = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
@@ -26,6 +27,7 @@ if (!key) {
 const pace = Number(process.env.PRINTS_CHECK_PACE_MS ?? 250);
 const retryAfter = Number(process.env.PRINTS_CHECK_RETRY_MS ?? 1000);
 const deps = { config: { arteloBase: (process.env.ARTELO_API_BASE ?? "https://www.artelo.com/api/open").replace(/\/+$/, ""), secrets: { ARTELO_API_KEY: key } }, fetch: (input, init) => fetch(input, init) };
+const designUrl = new URL("/og.png", unstable_readConfig({ config: "wrangler.jsonc" }).vars.SITE_ORIGIN).href;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** No answer, a busy Artelo or a server error: worth one more try, and never Artelo refusing what was asked */
 const transient = (result) => !result.ok && (result.status === null || result.status === 429 || result.status >= 500);
@@ -113,7 +115,7 @@ for (const combination of COMBINATIONS) {
   }
   for (const landmark of LANDMARKS) {
     const line = { line: 1, quantity: 1, unitAmount: price, size: combination.size, frame: combination.frame, orientation: "Vertical" };
-    const result = await call("POST", "/orders/price-check", priceCheckBody([line], landmark.address, rate, `check-quote-${Date.now()}`));
+    const result = await call("POST", "/orders/price-check", priceCheckBody([line], landmark.address, rate, `check-quote-${Date.now()}`, designUrl));
     if (!result.ok) {
       fail(`${name} to ${landmark.label}: ${trouble(result, "the price check")}`);
       continue;
@@ -141,7 +143,7 @@ const small = COMBINATIONS.find((combination) => combination.family === "2:3" &&
 const large = COMBINATIONS.find((combination) => combination.family === "2:3" && combination.tier === "large" && combination.frame === "oak");
 for (const landmark of LANDMARKS) {
   const lines = [small, large].map((combination, index) => ({ line: index + 1, quantity: 1, unitAmount: prices[`${combination.tier}:${combination.frame}`], size: combination.size, frame: combination.frame, orientation: "Vertical" }));
-  const result = await call("POST", "/orders/price-check", priceCheckBody(lines, landmark.address, rate, `check-quote-${Date.now()}`));
+  const result = await call("POST", "/orders/price-check", priceCheckBody(lines, landmark.address, rate, `check-quote-${Date.now()}`, designUrl));
   const quoted = result.ok ? readOrderCosts(result.body?.orderCosts) : null;
   if (!quoted) {
     fail(`two prints to ${landmark.label}: ${result.ok ? "the price check couldn't be read" : trouble(result, "the price check")}`);
@@ -152,7 +154,7 @@ for (const landmark of LANDMARKS) {
 }
 
 // Antarctica: Artelo's real refusal, to check the basket's handling of it against
-const antarctic = await call("POST", "/orders/price-check", priceCheckBody([{ line: 1, quantity: 1, unitAmount: prices["small:unframed"], size: small.size, frame: "unframed", orientation: "Vertical" }], ANTARCTICA, rate, `check-quote-${Date.now()}`));
+const antarctic = await call("POST", "/orders/price-check", priceCheckBody([{ line: 1, quantity: 1, unitAmount: prices["small:unframed"], size: small.size, frame: "unframed", orientation: "Vertical" }], ANTARCTICA, rate, `check-quote-${Date.now()}`, designUrl));
 console.log(antarctic.ok ? `antarctica: artelo quoted ${JSON.stringify(antarctic.body?.orderCosts)}` : `antarctica: artelo answered ${antarctic.status ?? "nothing"} ${antarctic.message}`);
 
 // The lookup check (spec 25 assumption 8): a test order, then Get Orders by its name, because placing depends on finding
@@ -165,7 +167,7 @@ const created = await call("POST", "/orders/create", {
   // Only this test order skips the DPI check: its image is the 1200 × 630 share card, about 100 ppi at 8 × 12 in. Real
   // orders never send it (Task 9's test pins that)
   dangerouslySkipDPICheck: true,
-  items: [{ orderItemId: `${checkId}-1`, quantity: 1, unitPrice: prices["small:unframed"] / 100, productInfo: productInfo({ size: small.size, frame: "unframed", orientation: "Vertical" }, "https://curiousgeorge.dev/og.png") }],
+  items: [{ orderItemId: `${checkId}-1`, quantity: 1, unitPrice: prices["small:unframed"] / 100, productInfo: productInfo({ size: small.size, frame: "unframed", orientation: "Vertical" }, designUrl) }],
 }, { create: true });
 if (!created.ok) fail(`lookup check: ${trouble(created, "the test order")}, so the lookup wasn't proved: don't open prints`);
 else {

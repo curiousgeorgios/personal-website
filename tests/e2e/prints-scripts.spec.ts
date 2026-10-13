@@ -14,7 +14,7 @@ test.skip(({ browserName }) => browserName !== "chromium", "the print specs run 
 /** Runs a script without blocking this process (the proxy below lives in it), with its own dev registry */
 function run(args: string[], env: Record<string, string>): Promise<{ status: number | null; stdout: string; stderr: string }> {
   const registry = mkdtempSync(join(tmpdir(), "prints-scripts-registry-"));
-  const child = spawn("node", args, { env: { ...process.env, ARTELO_API_KEY: FIXTURE_SECRETS.ARTELO_API_KEY, CI: "", WRANGLER_REGISTRY_PATH: registry, ...env } });
+  const child = spawn("node", args, { env: { ...process.env, FORCE_COLOR: undefined, ARTELO_API_KEY: FIXTURE_SECRETS.ARTELO_API_KEY, CI: "", WRANGLER_REGISTRY_PATH: registry, ...env } });
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => (stdout += chunk));

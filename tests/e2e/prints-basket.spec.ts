@@ -166,7 +166,7 @@ test.describe("the basket without javascript", () => {
     const checks = await priceChecksFor(name);
     expect(checks).toHaveLength(1);
     expect(checks[0].customerAddress).toMatchObject({ street1: "12 Example Street", street2: "Unit 3", city: "Bondi Beach", state: "NSW", zipcode: "2026", country: "AU", phone: "+61 400 000 000" });
-    expect(checks[0].items.map((item) => [item.quantity, item.productInfo.size, item.productInfo.frameColor, item.productInfo.orientation])).toEqual([[1, "x12x18", "NaturalOak", "Vertical"], [1, "x8x12", null, "Horizontal"]]);
+    expect(checks[0].items.map((item) => [item.quantity, item.productInfo.size, item.productInfo.frameColor, item.productInfo.orientation])).toEqual([[1, "x12x18", "NaturalOak", "Vertical"], [1, "x8x12", "Unframed", "Horizontal"]]);
     expect(urls.filter((url) => /Example|Bondi|Ada|400(%20|\+| )000/.test(decodeURIComponent(url)))).toEqual([]);
   });
 
