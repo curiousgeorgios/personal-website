@@ -20,6 +20,7 @@ test("head carries metadata, preloads two self-hosted fonts and nothing third-pa
 test("static files are served", async ({ request }) => {
   expect((await request.get("/robots.txt")).status()).toBe(200);
   expect(await (await request.get("/robots.txt")).text()).toContain("Disallow: /admin");
+  expect(await (await request.get("/robots.txt")).text()).toContain("Disallow: /photos/downloads");
   expect((await request.get("/favicon-32x32.png")).status()).toBe(200);
   const manifest = await (await request.get("/site.webmanifest")).json();
   expect(manifest.theme_color).toBe("#f3f2ec");

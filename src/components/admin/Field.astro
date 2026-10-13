@@ -15,9 +15,11 @@ interface Props {
   accept?: string;
   /** For slugs and addresses: iOS autocorrect and spellcheck would rewrite or split them */
   plain?: boolean;
+  /** A number on a phone's keyboard; the value is still checked on the server */
+  inputmode?: "numeric";
 }
 
-const { form, name, label, value = "", error, kind = "text", options = [], required = false, maxlength, hint, accept, plain = false } = Astro.props;
+const { form, name, label, value = "", error, kind = "text", options = [], required = false, maxlength, hint, accept, plain = false, inputmode } = Astro.props;
 const id = `${form}-${name}`;
 const describedBy = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(" ") || undefined;
 const control = { id, name, required, "aria-invalid": error ? ("true" as const) : undefined, "aria-describedby": describedBy };
@@ -39,7 +41,7 @@ const spellcheck = literal ? "false" : undefined;
   ) : kind === "file" ? (
     <input {...control} type="file" accept={accept} />
   ) : (
-    <input {...control} type={kind} value={value} maxlength={maxlength} autocapitalize={autocapitalize} autocorrect={autocorrect} spellcheck={spellcheck} />
+    <input {...control} type={kind} value={value} inputmode={inputmode} maxlength={maxlength} autocapitalize={autocapitalize} autocorrect={autocorrect} spellcheck={spellcheck} />
   )}
   {hint && <p class="hint" id={`${id}-hint`}>{hint}</p>}
   {error && <p class="error" id={`${id}-error`}>{error}</p>}

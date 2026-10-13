@@ -1,0 +1,25 @@
+---
+import EntryHead from "./EntryHead.astro";
+import Frame from "./Frame.astro";
+import { EAGER_FRAMES, frameView, type FrameView } from "../../lib/photos/gallery";
+import type { Entry } from "../../lib/photos/store";
+
+interface Props {
+  /** null renders the empty entry the photo-sheet script clones */
+  entry: Entry | null;
+  /** The page's first entry: its first row loads eagerly */
+  first?: boolean;
+  /** The carried basket's query ("?items=…", spec 15.3), or "" */
+  query?: string;
+}
+
+const { entry, first = false, query = "" } = Astro.props;
+// Alt text counts published photographs in post order: the entry holds only those (spec 3.2)
+const views = entry ? entry.photos.map((photo, index) => frameView(photo, index, entry.photos.length, query)).filter((view): view is FrameView => view !== null) : [];
+---
+<li class="entry" id={entry ? `post-${entry.collection}` : undefined}>
+  <EntryHead date={entry?.date ?? null} place={entry?.place ?? null} />
+  <ol class="sheet">
+    {views.map((view, index) => <Frame view={view} eager={first && index < EAGER_FRAMES} priority={first && index === 0} />)}
+  </ol>
+</li>

@@ -70,7 +70,7 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 .entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 4px 0; border-bottom: 1px solid var(--rule); }
 .entry > details { min-width: 0; }
 .entry summary { cursor: pointer; padding: 8px 0; min-height: 44px; }
-.entry .tagged { margin-left: 8px; font: 11.5px/1 var(--mono); color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 7px; }
+.entry .tagged, .post-admin .tagged { margin-left: 8px; font: 11.5px/1 var(--mono); color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; padding: 3px 7px; }
 .move { display: flex; gap: 6px; padding-top: 2px; }
 .add { margin-top: 16px; max-width: 40rem; }
 .add > summary { cursor: pointer; font: 12.5px/1.55 var(--mono); color: var(--muted); padding: 12px 0; min-height: 44px; }
@@ -99,3 +99,50 @@ html:has(.page-error) { scroll-padding-top: 4.5rem; }
 }
 
 .snapshots .reshoot { display: grid; gap: 6px; justify-items: start; margin-top: 6px; }
+
+/* Photographs: one post per row, opening to its place, its publish buttons and each photograph (spec 6.2) */
+.posts-admin { border-top: 1px solid var(--rule); max-width: 40rem; }
+.post-admin { border-bottom: 1px solid var(--rule); padding: 4px 0; }
+.post-admin > details > summary { cursor: pointer; padding: 8px 0; min-height: 44px; }
+.post-admin > details > .controls { padding-bottom: 12px; }
+.photos-admin { display: grid; gap: 0; }
+.photo-admin { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 0; border-top: 1px dashed var(--rule); scroll-margin-top: 1rem; }
+.photo-admin img, .photo-admin .no-thumb { display: block; width: 88px; height: auto; max-height: 132px; object-fit: contain; background: var(--rule); }
+.photo-admin .no-thumb { height: 88px; }
+/* The title's field, then its save and the publish or hide on one row; each stays its own form (display: contents lets its field and button join the row) */
+.photo-admin-body { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 6px; }
+.photo-admin-body > .photo-id, .photo-admin-body > .error { flex: 1 0 100%; margin: 0; }
+.photo-admin-body > .admin-form { display: contents; }
+.photo-admin-body .field { flex: 1 0 100%; max-width: 34rem; }
+.photo-admin-body .move { padding-top: 0; }
+.photo-id .status { white-space: nowrap; }
+.photo-id { font-size: 14.5px; color: var(--muted); }
+.photo-id .mono { color: var(--ink); }
+
+/* Links (spec 6.3): the link just issued, then the issue form and the working links */
+.issued { display: grid; gap: 10px; justify-items: start; max-width: 34rem; margin-bottom: 16px; }
+.issued .field { width: 100%; }
+.links-admin .entry { grid-template-columns: minmax(0, 1fr); }
+.links-admin .entry p { padding-top: 8px; font-size: 14.5px; }
+
+/* Print orders (spec 20): the state of prints, then the orders, needs attention first with a red dot. Nothing here moves */
+.orders-status { display: grid; gap: 2px; margin-bottom: 8px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.orders-admin .entry { grid-template-columns: minmax(0, 1fr); }
+.orders-admin .entry p { padding-top: 6px; font-size: 14.5px; overflow-wrap: anywhere; }
+.orders-admin .order-line { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+/* A photo id never splits at its hyphen */
+.orders-admin .order-prints a { white-space: nowrap; }
+.orders-admin .mono { color: var(--ink); }
+.orders-admin .reason { color: var(--error); }
+.attention-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-right: 8px; vertical-align: 1px; }
+.orders-admin .order-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.orders-admin .open-in-artelo { color: var(--muted); }
+/* Drawn chevrons, as the log's and the photo page's: DM Mono has no arrow glyphs. The rotation draws it; it never animates */
+.orders-admin .chev { display: inline-block; width: 5px; height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; transform: translateY(-1px) rotate(-135deg); margin-left: 5px; }
+/* retry now and mark resolved side by side; a resolved order's reason is history, so it is no longer in red */
+.orders-admin .order-forms { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 6px 0 10px; }
+.orders-admin .order-forms .error { flex-basis: 100%; }
+.orders-admin .resolved .reason { color: var(--muted); }
+.orders-admin .entry .resolved-on { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.orders-hint { margin-top: 10px; max-width: 40rem; }
+.test-mail .hint { padding-bottom: 6px; }

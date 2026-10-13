@@ -1,0 +1,45 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../layouts/Notebook.astro";
+import Beacon from "../components/Beacon.astro";
+import Row from "../components/Row.astro";
+import Basket from "../components/prints/Basket.astro";
+import { basketGet, basketPost, type BasketOutcome } from "../lib/prints/basket-page";
+import { printDeps } from "../lib/prints/config";
+import { canOpen } from "../lib/prints/open";
+import "../styles/prints.css";
+
+// The basket (spec 15.2): never cached, never indexed; a GET counts a page view (the beacon sends the path only), a POST,
+// which shows an address, carries no beacon
+const deps = printDeps(env, (promise) => Astro.locals.cfContext.waitUntil(promise));
+// While prints are switched off or a secret is missing every basket route is the notebook 404, answered before anything
+// is read, as a closed gallery ignores ?items= (spec 16.5). A missing or stale rate isn't closed: the basket shows, unquotable
+if (!canOpen(deps.config)) return new Response(null, { status: 404 });
+const method = Astro.request.method;
+if (method !== "GET" && method !== "HEAD" && method !== "POST") return new Response(null, { status: 405, headers: { Allow: "GET, HEAD, POST", "Cache-Control": "no-store" } });
+let outcome: BasketOutcome | null = null;
+try {
+  outcome = method === "POST"
+    ? await basketPost(deps, Astro.request, Astro.url, { quote: env.QUOTE_LIMIT, checkout: env.CHECKOUT_LIMIT, artelo: env.ARTELO_LIMIT })
+    : await basketGet(deps, Astro.url);
+} catch (error) {
+  // The message only: never the request, which can carry an address
+  console.error("prints: the basket failed", error instanceof Error ? error.message : String(error));
+}
+if (outcome && "redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
+Astro.response.status = outcome ? outcome.status : 503;
+Astro.response.headers.set("Cache-Control", "no-store");
+---
+<Notebook title="your basket · george vlachos" noindex>
+  {outcome ? (
+    <Basket view={outcome.view} />
+  ) : (
+    <main class="book basket">
+      <Row label="basket" head>
+        <h1>your basket</h1>
+        <p class="down">the basket isn't loading right now. try again in a bit.</p>
+      </Row>
+    </main>
+  )}
+  {outcome?.beacon && <Beacon />}
+</Notebook>

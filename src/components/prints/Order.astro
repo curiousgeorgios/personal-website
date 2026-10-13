@@ -1,0 +1,64 @@
+---
+import Row from "../Row.astro";
+import { frameLabel, parseSize, printLine } from "../../lib/prints/catalogue";
+import { countryName } from "../../lib/prints/countries";
+import { aud } from "../../lib/prints/money";
+import { ORDER_STATUS_LINES } from "../../lib/prints/order-page";
+import { trackingHref } from "../../lib/prints/tracking";
+import { shipmentsOf, type OrderLine, type OrderRow } from "../../lib/prints/store";
+import { formatLogDate } from "../../lib/text";
+import { sydneyDate } from "../../lib/time";
+import "../../styles/prints.css";
+
+// A buyer's order (spec 18.5): what they bought, what they paid and where it is. No script, and nothing personal: the
+// order row holds no address or email. The status is a buyer's wording by status, never Artelo's message or a reason
+interface Props {
+  order: OrderRow;
+  lines: OrderLine[];
+  gst: string;
+}
+
+const { order, lines, gst } = Astro.props;
+const one = lines.reduce((sum, line) => sum + line.quantity, 0) === 1;
+const label = order.delivery_taxed === 1 ? "delivery and destination taxes" : "delivery";
+const status = ORDER_STATUS_LINES[order.status][one ? 1 : 0];
+// Tracking is text from Artelo: it renders escaped, and only an https address becomes a link
+const shipments = order.status === "shipped" || order.status === "delivered" ? shipmentsOf(order) : [];
+---
+<main class="book order">
+  <Row label="your order" head>
+    <h1>{one ? "your print" : "your prints"}</h1>
+    <ol class="basket-lines order-lines">
+      {lines.map((line) => (
+        <li class="basket-line">
+          <span class="line-thumb">{line.thumb && <img src={line.thumb.url} width={line.thumb.width} height={line.thumb.height} alt="" loading="eager" decoding="async" />}</span>
+          <div>
+            <p class="line-name">{line.name}</p>
+            {/* A recreated order's line may have no Artelo size (spec 18.1): it still reads */}
+            <p class="line-what">{line.size ? printLine(line.tier, parseSize(line.size), line.frame) : `${line.tier} · ${frameLabel(line.frame)}`}{line.quantity > 1 && ` × ${line.quantity}`}</p>
+          </div>
+        </li>
+      ))}
+    </ol>
+    <div class="order-facts">
+      <p class="order-to">to {countryName(order.country)}</p>
+      <p>prints {aud(order.print_total)} + {label} {aud(order.delivery_amount)} = {aud(order.print_total + order.delivery_amount)}</p>
+      <p class="prints-hint">{gst}</p>
+      {order.paid_at !== null && <p class="order-paid">paid {formatLogDate(sydneyDate(new Date(order.paid_at * 1000)), "day")}</p>}
+    </div>
+  </Row>
+  <Row label="status" id="status">
+    <p class="order-status">{status}</p>
+    {shipments.length > 0 && (
+      <ul class="tracking">
+        {shipments.map((shipment) => {
+          const href = trackingHref(shipment.url);
+          return <li>{shipment.carrier} {href ? <a href={href} rel="noopener noreferrer">{shipment.number}<span class="chev" aria-hidden="true"></span></a> : shipment.number}</li>;
+        })}
+      </ul>
+    )}
+  </Row>
+  <Row label="say hi" id="say-hi">
+    <p>questions about your order? <a href="mailto:hello@curiousgeorge.dev">hello@curiousgeorge.dev</a></p>
+  </Row>
+</main>

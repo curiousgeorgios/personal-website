@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { GALLERY } from "./gallery-site";
 
 test("renders the seeded logbook", async ({ page }) => {
   await page.goto("/");
@@ -25,4 +26,12 @@ test("caches the page at the edge with the logbook tag", async ({ request }) => 
   expect(response.headers()["cloudflare-cdn-cache-control"]).toBe("public, max-age=300, stale-while-revalidate=86400");
   expect(response.headers()["cache-tag"]).toContain("logbook");
   expect(response.headers()["cache-control"]).toBe("no-cache");
+});
+
+// The gallery server (4335) has the logbook's seed and published photographs, so its home page has the line
+test("the home page points to the photos while one is published", async ({ page }) => {
+  await page.goto(`${GALLERY}/`);
+  await expect(page.locator(".row > .label")).toHaveText(["logbook of", "now", "lately", "log", "photos", "on the turntable", "before", "say hi", "visitor info"]);
+  await expect(page.locator("#photos .body")).toHaveText("photos i've taken, kept like this log.");
+  await expect(page.locator("#photos a")).toHaveAttribute("href", "/photos");
 });

@@ -1,0 +1,62 @@
+/* Prints (spec 15 and 18.5): the print row, the basket and the order page, in the notebook's paper and type */
+.print-form { display: grid; gap: 14px; max-width: 34rem; }
+.print-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; }
+.print-form legend { padding: 0; margin-bottom: 2px; font: 12px/1.5 var(--mono); color: var(--muted); }
+/* 44px rows, so each choice is a full tap target on a phone. The circle sits on the first line of a choice that wraps: the
+   row's padding centres one line in 44px (11.5px above and below a 20.9px line) and the circle's margin centres it on that line */
+.choice { display: flex; align-items: flex-start; gap: 10px; box-sizing: border-box; min-height: 44px; padding: 11.5px 0; cursor: pointer; font-size: 15.5px; line-height: 1.35; }
+.choice input { flex: none; width: 18px; height: 18px; margin: 1.5px 0 0; accent-color: var(--ink); }
+.choice input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.prints-hint { font-size: 14px; color: var(--muted); max-width: 34rem; text-wrap: pretty; }
+.print-button {
+  justify-self: start; min-height: 44px; padding: 0 16px; cursor: pointer;
+  font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat);
+  border: 1px solid var(--rule); border-radius: 999px;
+}
+.print-button:active { background: #ebe8df; }
+/* notebook.css squares every focused button to 3px, which would turn the pill square under the keyboard */
+.print-button:focus-visible { border-radius: 999px; }
+@media (hover: hover) and (pointer: fine) {
+  .print-button { transition: border-color 200ms ease, background-color 200ms ease; }
+  .print-button:hover { border-color: color-mix(in oklab, var(--ink) 55%, transparent); }
+}
+.basket-link { margin-top: 8px; }
+
+/* The basket (spec 15.2) */
+.basket-lines { display: grid; gap: 14px; }
+.basket-line { display: flex; gap: 14px; align-items: flex-start; }
+/* The box holds its 88px square before any preview arrives, so a slow image never moves the lines below it (CLS, spec 23.1) */
+.line-thumb { flex: none; width: 88px; height: 88px; }
+.basket-line img { display: block; width: auto; height: auto; max-width: 88px; max-height: 88px; background: #ecebe5; }
+.line-name { font-size: 16px; }
+.line-what, .line-links { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.line-links { margin-top: 2px; }
+.basket-total { margin-top: 16px; font: 12.5px/1.55 var(--mono); color: var(--ink); }
+.basket-note, .basket-closed { margin-bottom: 12px; color: var(--muted); }
+.basket-form { display: grid; gap: 12px; max-width: 34rem; }
+.basket-form .field { display: grid; gap: 4px; min-width: 0; }
+.basket-form label { font: 12px/1.5 var(--mono); color: var(--muted); }
+/* 16px keeps iOS from zooming into a focused field; the edge is 3:1 against the paper (WCAG 1.4.11), as the admin's */
+.basket-form input:not([type="hidden"]), .basket-form select {
+  font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink);
+  background: var(--mat); border: 1px solid #85857d; border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+.basket-form .invalid input, .basket-form .invalid select { border-color: #a83a24; }
+.basket-form input:focus-visible, .basket-form select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* --red is under 4.5:1 on paper for small text; this darker red is 5.6:1 */
+.basket-error { font-size: 14px; color: #a83a24; }
+.basket-error:focus { outline: none; }
+.basket-down { max-width: 34rem; }
+.quote-line { font-size: 18px; margin-bottom: 8px; }
+.quote-line + .prints-hint { margin-bottom: 6px; }
+.pay-form { margin-top: 14px; }
+
+/* The order page (spec 18.5) */
+.order-lines { margin-top: 20px; }
+.order-facts { margin-top: 18px; display: grid; gap: 4px; }
+.order-to, .order-paid { font: 12.5px/1.55 var(--mono); color: var(--muted); }
+.order-status { font-size: 18px; }
+.order-down { margin-top: 18px; color: var(--muted); }
+.tracking { margin-top: 8px; display: grid; gap: 4px; font: 12.5px/1.55 var(--mono); overflow-wrap: anywhere; }
+/* A chevron drawn as a shape, as the log's: DM Mono has no arrow glyphs. Clipped, not rotated, so it needs no transform */
+.tracking .chev { display: inline-block; width: 6px; height: 9px; margin-left: 5px; background: currentColor; clip-path: polygon(0 0, 22% 0, 100% 50%, 22% 100%, 0 100%, 78% 50%); }

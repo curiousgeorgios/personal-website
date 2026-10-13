@@ -1,0 +1,42 @@
+---
+import { env } from "cloudflare:workers";
+import Notebook from "../../layouts/Notebook.astro";
+import Row from "../../components/Row.astro";
+import Order from "../../components/prints/Order.astro";
+import { printConfig } from "../../lib/prints/config";
+import { gstSentence } from "../../lib/prints/money";
+import { canViewOrder } from "../../lib/prints/order-page";
+import { getOrder, orderLines, type OrderLine, type OrderRow } from "../../lib/prints/store";
+
+// A buyer's private order page (spec 18.5): the right key, or the notebook 404, so the page never says whether an order
+// exists. Every request is verified the same way before anything is read (canViewOrder), and every refusal is this one
+// answer. The middleware sends the private headers; no beacon, no script, and the key is never logged
+const id = Astro.params.id ?? "";
+const config = printConfig(env);
+let found: { order: OrderRow; lines: OrderLine[] } | null = null;
+let down = false;
+if (await canViewOrder(config.secrets.PRINT_VIEW_SECRET, id, Astro.url.searchParams.get("key"))) {
+  try {
+    const order = await getOrder(env.DB, id);
+    if (order) found = { order, lines: (await orderLines(env.DB, [id])).get(id) ?? [] };
+  } catch (error) {
+    down = true;
+    console.error("prints: an order page couldn't read D1", error instanceof Error ? error.message : String(error));
+  }
+}
+if (!found && !down) return new Response(null, { status: 404 });
+if (down) Astro.response.status = 503;
+const one = found ? found.lines.reduce((sum, line) => sum + line.quantity, 0) === 1 : false;
+---
+<Notebook title={`${one ? "your print" : "your prints"} · george vlachos`} noindex referrer="no-referrer" refresh={found?.order.status === "checkout" ? 10 : undefined}>
+  {found ? (
+    <Order order={found.order} lines={found.lines} gst={gstSentence(config.gst)} />
+  ) : (
+    <main class="book order">
+      <Row label="your order" head>
+        <h1>your prints</h1>
+        <p class="order-down">this page isn't loading right now. try again in a bit.</p>
+      </Row>
+    </main>
+  )}
+</Notebook>

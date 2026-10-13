@@ -1,6 +1,27 @@
+import { PHOTO_ID } from "./photos/tokens";
+
 // Media lives in R2 and is served same-origin under /media/<key> (spec 6.2). Keys are unique and never reused,
 // so a file can be cached for a year.
-export const MEDIA_PREFIXES = ["audio/", "covers/", "snapshots/"];
+export const MEDIA_PREFIXES = ["audio/", "covers/", "snapshots/", "photos/previews/"];
+
+const PREVIEWS = "photos/previews/";
+
+/** The photograph a preview key belongs to (photos/previews/<id>/<sha>/<size>.<format>); null for any other key */
+export function previewPhotoId(key: string): string | null {
+  if (!key.startsWith(PREVIEWS)) return null;
+  const id = key.slice(PREVIEWS.length).split("/")[0];
+  return PHOTO_ID.test(id) ? id : null;
+}
+
+/** The cache tag on a photograph's previews, which hiding it purges (spec 6.2) */
+export const photoCacheTag = (id: string) => `photo-${id}`;
+
+/** Whether a photograph's previews may be served: the public route asks D1 whether it is published, the admin's says yes */
+export type PreviewGate = (photoId: string) => Promise<boolean>;
+
+/** A primary-key lookup, so a preview costs one indexed read on a cache miss */
+export const publishedPreviews = (db: D1Database): PreviewGate => async (photoId) =>
+  (await db.prepare("SELECT 1 AS found FROM photos WHERE id = ? AND published = 1").bind(photoId).first("found")) === 1;
 
 export function isMediaKey(key: string): boolean {
   if (!MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix))) return false;
@@ -15,8 +36,22 @@ const unavailable = () =>
 
 type ByteRange = { offset?: number; length?: number; suffix?: number };
 
-export async function serveMedia(bucket: R2Bucket, key: string, request: Request): Promise<Response> {
+/**
+ * Serves one media file. A photograph's previews are served only while `previews` allows it: a hidden photograph's
+ * answer 404, never cached, so hiding takes them off the site for anyone who hasn't already cached a copy.
+ */
+export async function serveMedia(bucket: R2Bucket, key: string, request: Request, previews: PreviewGate): Promise<Response> {
   if (!isMediaKey(key)) return missing();
+  if (key.startsWith(PREVIEWS)) {
+    const photoId = previewPhotoId(key);
+    if (!photoId) return missing();
+    try {
+      if (!(await previews(photoId))) return missing();
+    } catch (error) {
+      console.error("media: the preview check failed", error instanceof Error ? error.message : String(error));
+      return unavailable();
+    }
+  }
   let object: R2ObjectBody | R2Object | null;
   try {
     object = await bucket.get(key, { range: request.headers, onlyIf: request.headers });

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { isPrivatePath } from "../../src/lib/photos/http";
 
 // The middleware imports two virtual modules and reads a build-time constant; stand them in
 vi.mock("astro:middleware", () => ({ defineMiddleware: (handler: unknown) => handler }));
@@ -18,6 +19,28 @@ const run = (path: string, next: () => Promise<Response>) => {
 };
 
 afterEach(() => vi.restoreAllMocks());
+
+test("private photo paths cannot inherit public cache headers or leak a token as a referrer", async () => {
+  for (const path of ["/photos/downloads/fixture-01?token=private", "/photos/downloads?token=private", "/api/photos/downloads?token=private"]) {
+    const response = await run(path, () => Promise.resolve(new Response("ok", { headers: { "Cache-Control": "public, max-age=999", "Cache-Tag": "photos" } })));
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Cloudflare-CDN-Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.has("Cache-Tag")).toBe(false);
+  }
+});
+
+test("the private paths are the downloads page, its files and the JSON catalogue, and nothing else", () => {
+  for (const path of ["/photos/downloads", "/photos/downloads/", "/photos/downloads/fixture-01", "/api/photos/downloads", "/api/photos/downloads/"]) expect(isPrivatePath(path)).toBe(true);
+  for (const path of ["/photos", "/photos/fixture-01", "/photos/downloadsx", "/api/photos", "/api/photos/downloadsx"]) expect(isPrivatePath(path)).toBe(false);
+});
+
+test("a failed private photo route retains cache exclusion", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await run("/photos/downloads/fixture-01", () => Promise.reject(new Error("down")));
+  expect(response.status).toBe(503);
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+});
 
 describe("middleware, when the page throws", () => {
   test("/admin answers a plain 500 that still carries the admin and security headers", async () => {
@@ -85,4 +108,23 @@ describe("middleware, without the local bypass", () => {
     const { response } = onProduction();
     expect((await response).status).toBe(403);
   });
+});
+
+test("an order page is private too: never cached, indexed or passed on as a referrer", async () => {
+  for (const path of ["/prints/01k6x00000000000000000000a?key=private", "/prints/anything"]) {
+    expect(isPrivatePath(path.split("?")[0])).toBe(true);
+    const response = await run(path, () => Promise.resolve(new Response("ok", { headers: { "Cache-Control": "public, max-age=999" } })));
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  }
+  for (const path of ["/prints", "/printsx", "/basket"]) expect(isPrivatePath(path)).toBe(false);
+});
+
+test("an order page that throws says so in its own words, still private", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await run("/prints/01k6x00000000000000000000a?key=private", () => Promise.reject(new Error("down")));
+  expect(response.status).toBe(503);
+  expect(await response.text()).toBe("this page isn't loading right now. try again in a bit.");
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
 });

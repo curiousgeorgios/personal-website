@@ -1,0 +1,56 @@
+---
+import Row from "../Row.astro";
+import Entry from "./Entry.astro";
+import Frame from "./Frame.astro";
+import type { Entry as EntryData } from "../../lib/photos/store";
+import { basketHref, itemsQuery } from "../../lib/prints/basket";
+import { carried, carryLabel, type Carry } from "../../lib/prints/carry";
+
+interface Props {
+  /** null when D1 couldn't be read: the head row says so, and nothing else renders */
+  entries: EntryData[] | null;
+  /** The next page's cursor, or null at the end */
+  next: number | null;
+  /** A ?before= page */
+  older: boolean;
+  /** The basket this page was reached with (spec 15.3), carried in every link to a gallery page */
+  carry?: Carry | null;
+  /** Prints are open: the intro says some come as prints (spec 16.5) */
+  prints?: boolean;
+}
+
+const { entries, next, older, carry = null, prints = false } = Astro.props;
+const query = itemsQuery(carry?.items ?? "");
+---
+<main class="book photos">
+  <Row label="photos of" head>
+    <h1>george vlachos</h1>
+    <p class="intro">photos i've taken, one entry per instagram post, newest first.{prints && " some come as prints."}</p>
+    <p class="where"><a href="/">back to the logbook</a>{older && <> · <a href={carried("/photos", carry)}>newest entries</a></>}{carry && <> · <a href={basketHref(carry.items)}>{carryLabel(carry)}</a></>}</p>
+    {entries === null && <p class="down">photos aren't loading right now. try again in a bit.</p>}
+  </Row>
+  {entries !== null && (
+    <Row label="entries" id="entries">
+      {entries.length === 0 && !older ? (
+        <p class="empty">no photos up yet.</p>
+      ) : (
+        <>
+          {/* data-items hands the carried basket to photo-sheet.ts, which builds the frames of later batches */}
+          <ol class="entries" data-items={carry?.items}>
+            {entries.map((entry, index) => <Entry entry={entry} first={index === 0} query={query} />)}
+          </ol>
+          {next !== null ? (
+            <>
+              <a class="more" href={carried(`/photos?before=${next}`, carry)} data-next={next}><span class="chev" aria-hidden="true"></span><span class="lbl" aria-live="polite">older entries</span></a>
+              {/* The same components, empty: photo-sheet.ts clones these, so an entry's markup lives in one place (spec 3.4) */}
+              <template id="entry-template"><Entry entry={null} /></template>
+              <template id="frame-template"><Frame view={null} /></template>
+            </>
+          ) : (
+            <p class="more-end">that's every entry.</p>
+          )}
+        </>
+      )}
+    </Row>
+  )}
+</main>

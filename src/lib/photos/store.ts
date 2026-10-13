@@ -1,0 +1,257 @@
+import { GRANT_ID, PHOTO_ID, signPhotoToken, type PhotoToken } from "./tokens";
+
+export interface Preview {
+  key: string;
+  width: number;
+  height: number;
+  format: "avif" | "webp";
+}
+export interface PhotoRow {
+  id: string;
+  collection: string;
+  position: number;
+  title: string;
+  published: number;
+  raw_review: number;
+  previews: string;
+  print_key: string;
+  print_width: number;
+  print_height: number;
+  print_bytes: number;
+  print_sha256: string;
+}
+/** A photograph joined to its post: every public query joins the two, so a photograph without a post isn't shown (spec 8) */
+export interface PublicPhotoRow extends PhotoRow {
+  published_at: number;
+  published_on: string;
+  place: string | null;
+}
+export interface PublicPreview {
+  url: string;
+  width: number;
+  height: number;
+  format: "avif" | "webp";
+}
+export interface PublicPhoto {
+  id: string;
+  collection: string;
+  title: string;
+  width: number;
+  height: number;
+  downloadBytes: number;
+  /** The day the post went up, in the post's own offset (YYYY-MM-DD) */
+  date: string;
+  /** "area, city", or null (ADR-0022) */
+  place: string | null;
+  previews: PublicPreview[];
+}
+/** One Instagram post with its published photographs in post order: an entry in the gallery (spec 3.2) */
+export interface Entry {
+  collection: string;
+  date: string;
+  place: string | null;
+  /** Seconds since 1970: the sort key and the pager's cursor */
+  publishedAt: number;
+  photos: PublicPhoto[];
+}
+export interface EntryPage {
+  entries: Entry[];
+  /** The cursor for the next page (the last entry's publishedAt), or null at the end */
+  next: number | null;
+}
+export const CATALOGUE_LIMIT = 24;
+export const MAX_CATALOGUE_LIMIT = 48;
+export const ENTRY_LIMIT = 4;
+/**
+ * Entries on a server-rendered gallery page (/photos and /photos?before=). Without JavaScript, or with a short page,
+ * the browser fetches every frame before any scroll, so two entries keep the real newest posts (about 36 frames of 240
+ * AVIF, some 200KB) under the 250KB image budget (spec 10); four came to about 380KB. Older entries then load in place.
+ */
+export const PAGE_ENTRY_LIMIT = 2;
+export const MAX_ENTRY_LIMIT = 12;
+/** The previews the gallery uses (spec 3.3) */
+export const GALLERY_SIZES = [240, 480] as const;
+
+/** Every photograph has four sizes (240, 480, 960, 1600) in two formats (spec 2.2) */
+export const PREVIEW_COUNT = 8;
+
+/** True when a photograph's previews are exactly the eight: each size in each format, none repeated or missing */
+export function hasAllPreviews(previews: Preview[]): boolean {
+  if (previews.length !== PREVIEW_COUNT) return false;
+  return [240, 480, 960, 1600].every((size) => (["webp", "avif"] as const).every((format) => previews.some((preview) => preview.format === format && preview.key.endsWith(`/${size}.${format}`))));
+}
+
+const PUBLIC = "SELECT photos.*, photo_posts.published_at, photo_posts.published_on, photo_posts.place FROM photos JOIN photo_posts ON photo_posts.collection = photos.collection";
+/** A page of posts that have a published photograph, newest first; bound with (cursor, limit + 1) */
+const POSTS =
+  "SELECT collection, published_at, published_on, place FROM photo_posts WHERE published_at < ? AND EXISTS (SELECT 1 FROM photos WHERE photos.collection = photo_posts.collection AND photos.published = 1) ORDER BY published_at DESC LIMIT ?";
+/** Later than any post: ?before= allows ten digits */
+const NEWEST = 9_999_999_999;
+
+interface PostRow {
+  collection: string;
+  published_at: number;
+  published_on: string;
+  place: string | null;
+}
+
+/** A preview's size from its key: photos/previews/<id>/<sha>/240.avif is 240 */
+export const previewSize = (key: string) => Number(/\/(\d+)\.(?:avif|webp)$/.exec(key)?.[1] ?? 0);
+
+/** The public face of a photograph: no private key, no hash. `sizes` keeps only those previews (the gallery's 240 and 480) */
+export function publicPhoto(row: PublicPhotoRow, sizes: readonly number[] | null = null): PublicPhoto {
+  const previews = (JSON.parse(row.previews) as Preview[]).filter((preview) => sizes === null || sizes.includes(previewSize(preview.key)));
+  return {
+    id: row.id, collection: row.collection, title: row.title,
+    width: row.print_width, height: row.print_height, downloadBytes: row.print_bytes,
+    date: row.published_on, place: row.place,
+    previews: previews.map(({ key, width, height, format }) => ({ url: `/media/${key}`, width, height, format })),
+  };
+}
+
+export async function photoById(db: D1Database, id: string): Promise<PublicPhotoRow | null> {
+  if (!PHOTO_ID.test(id)) return null;
+  return db.prepare(`${PUBLIC} WHERE photos.id = ? AND photos.published = 1`).bind(id).first<PublicPhotoRow>();
+}
+
+export async function photoPage(db: D1Database, after = -1, limit = CATALOGUE_LIMIT, collection: string | null = null) {
+  const result = collection === null
+    ? await db.prepare(`${PUBLIC} WHERE photos.published = 1 AND photos.position > ? ORDER BY photos.position LIMIT ?`).bind(after, limit + 1).all<PublicPhotoRow>()
+    : await db.prepare(`${PUBLIC} WHERE photos.published = 1 AND photos.position > ? AND photos.collection = ? ORDER BY photos.position LIMIT ?`).bind(after, collection, limit + 1).all<PublicPhotoRow>();
+  const rows = result.results.slice(0, limit);
+  return { photos: rows.map((row) => publicPhoto(row)), next: result.results.length > limit ? rows.at(-1)!.position : null };
+}
+
+/**
+ * A page of entries posted before `before` (seconds; null for the newest), each with its published photographs in post
+ * order (spec 3.2 and 3.6). One batch: the page of posts, then their photographs, which repeats the page's subquery so
+ * both run in the same round trip (spec 3.5). It asks for limit + 1 posts to know whether a next page exists.
+ */
+export async function entryPage(db: D1Database, before: number | null, limit: number, sizes: readonly number[] = GALLERY_SIZES): Promise<EntryPage> {
+  const cursor = before ?? NEWEST;
+  const [posts, photos] = await db.batch([
+    db.prepare(POSTS).bind(cursor, limit + 1),
+    db.prepare(
+      `SELECT photos.*, page.published_at, page.published_on, page.place FROM photos JOIN (${POSTS}) AS page ON page.collection = photos.collection WHERE photos.published = 1 ORDER BY page.published_at DESC, photos.position`,
+    ).bind(cursor, limit + 1),
+  ]);
+  const postRows = posts.results as unknown as PostRow[];
+  const shown = postRows.slice(0, limit);
+  const byPost = new Map(shown.map((post) => [post.collection, [] as PublicPhoto[]]));
+  for (const row of photos.results as unknown as PublicPhotoRow[]) byPost.get(row.collection)?.push(publicPhoto(row, sizes));
+  return {
+    entries: shown.map((post) => ({ collection: post.collection, date: post.published_on, place: post.place, publishedAt: post.published_at, photos: byPost.get(post.collection) ?? [] })),
+    next: postRows.length > limit ? shown.at(-1)!.published_at : null,
+  };
+}
+
+/** The most posts the downloads page lists. Far beyond the gallery's few hundred photographs; a larger library would be cut off here, deliberately, rather than grow one query without bound. */
+export const ALL_ENTRIES_LIMIT = 10_000;
+
+/** Every published photograph, grouped into entries newest first, on one page (the downloads page, spec 5.2), up to ALL_ENTRIES_LIMIT posts */
+export async function allEntries(db: D1Database, sizes: readonly number[]): Promise<Entry[]> {
+  return (await entryPage(db, null, ALL_ENTRIES_LIMIT, sizes)).entries;
+}
+
+/** One photograph's page (spec 4): the photograph, and where it sits among its post's published photographs */
+export interface PhotoPage {
+  photo: PublicPhoto;
+  /** The post's time, for the link back to its entry */
+  publishedAt: number;
+  index: number;
+  total: number;
+  previous: string | null;
+  next: string | null;
+}
+
+/** A published photograph with only its 960 and 1600 previews, and its neighbours; null for anything else */
+export async function photoPageData(db: D1Database, id: string): Promise<PhotoPage | null> {
+  if (!PHOTO_ID.test(id)) return null;
+  const [found, siblings] = await db.batch([
+    db.prepare(`${PUBLIC} WHERE photos.id = ? AND photos.published = 1`).bind(id),
+    db.prepare("SELECT id FROM photos WHERE published = 1 AND collection = (SELECT collection FROM photos WHERE id = ?) ORDER BY position").bind(id),
+  ]);
+  const row = (found.results as unknown as PublicPhotoRow[])[0];
+  if (!row) return null;
+  const ids = (siblings.results as unknown as { id: string }[]).map((sibling) => sibling.id);
+  const index = ids.indexOf(id);
+  return { photo: publicPhoto(row, [960, 1600]), publishedAt: row.published_at, index, total: ids.length, previous: ids[index - 1] ?? null, next: ids[index + 1] ?? null };
+}
+
+/** What an active grant says about itself: a print order's grant carries the order (spec 13.3) */
+export interface ActiveGrant {
+  orderId: string | null;
+}
+
+/** The grant behind a verified token when it is still working and matches the token exactly; null otherwise */
+export async function activeGrant(db: D1Database, token: PhotoToken, now: number): Promise<ActiveGrant | null> {
+  const row = await db.prepare("SELECT photo_id, expires_at, revoked_at, order_id FROM photo_download_grants WHERE id = ?").bind(token.grantId)
+    .first<{ photo_id: string | null; expires_at: number; revoked_at: number | null; order_id: string | null }>();
+  if (!row || row.revoked_at !== null || row.expires_at <= now || row.expires_at !== token.expiresAt || row.photo_id !== token.photoId) return null;
+  return { orderId: row.order_id };
+}
+
+export async function grantIsActive(db: D1Database, token: PhotoToken, now: number): Promise<boolean> {
+  return (await activeGrant(db, token, now)) !== null;
+}
+
+/** A photograph's row whatever its publication: an order's link serves a paid print even if the photo is hidden later (spec 13.3) */
+export async function photoMaster(db: D1Database, id: string): Promise<PhotoRow | null> {
+  if (!PHOTO_ID.test(id)) return null;
+  return db.prepare("SELECT * FROM photos WHERE id = ?").bind(id).first<PhotoRow>();
+}
+
+/** The longest an order's link may work: Artelo fetches the master within this, then the grant is revoked (spec 18.2) */
+export const ORDER_GRANT_SECONDS = 72 * 3600;
+
+/**
+ * The internal link Artelo fetches a paid print's master from (spec 18.2 step 4): a photo-scoped grant carrying its
+ * order, signed for `seconds`, which can't
+ * exceed ORDER_GRANT_SECONDS. Only print fulfilment calls this; no person ever receives the link (ADR-0020 as amended).
+ */
+export async function issueOrderGrant(db: D1Database, secret: string, orderId: string, photoId: string, seconds: number, origin: string, now = Math.floor(Date.now() / 1000)): Promise<string> {
+  if (!Number.isInteger(seconds) || seconds <= 0 || seconds > ORDER_GRANT_SECONDS) throw new Error("Invalid order grant lifetime");
+  const grant = { grantId: crypto.randomUUID(), photoId, expiresAt: now + seconds };
+  const token = await signPhotoToken(secret, grant, now);
+  await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, order_id) VALUES (?, ?, ?, ?)").bind(grant.grantId, photoId, grant.expiresAt, orderId).run();
+  const url = new URL(`/photos/downloads/${photoId}`, origin);
+  url.searchParams.set("token", token);
+  return url.href;
+}
+
+/**
+ * The statement that switches off every working grant of one order, for a caller's batch. With `whileOrder` (constant
+ * SQL about the order's print_orders row, never built from input), only while the row still matches it when the
+ * statement runs, so a batch revokes by the order's state then, not by an earlier read
+ */
+export function revokeOrderGrantsStatement(db: D1Database, orderId: string, now: number, whileOrder?: string): D1PreparedStatement {
+  const condition = whileOrder ? ` AND EXISTS (SELECT 1 FROM print_orders WHERE print_orders.id = photo_download_grants.order_id AND ${whileOrder})` : "";
+  return db.prepare(`UPDATE photo_download_grants SET revoked_at = ? WHERE order_id = ? AND revoked_at IS NULL${condition}`).bind(now, orderId);
+}
+
+/** Switches off every working grant of one order, once its prints are in production (spec 18.3); returns how many */
+export async function revokeOrderGrants(db: D1Database, orderId: string, now: number): Promise<number> {
+  return (await revokeOrderGrantsStatement(db, orderId, now).run()).meta.changes;
+}
+
+/**
+ * Records a grant. A note says who a catalogue link is for; a nonce is the admin form's, unique, so the same form sent
+ * twice makes one grant (spec 6.3). False when that nonce was already used. The token itself is never stored.
+ */
+export async function insertGrant(db: D1Database, token: PhotoToken, extra: { note?: string | null; nonce?: string | null } = {}): Promise<boolean> {
+  const result = await db.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at, note, request_nonce) VALUES (?, ?, ?, ?, ?) ON CONFLICT(request_nonce) DO NOTHING")
+    .bind(token.grantId, token.photoId, token.expiresAt, extra.note ?? null, extra.nonce ?? null).run();
+  return result.meta.changes > 0;
+}
+
+/**
+ * Revokes a catalogue link only (the admin's links section). A photo grant, which plan B's print orders use, is left
+ * alone: "photo" says the id is one, "already" that it is revoked or doesn't exist (a second revoke still counts as saved).
+ */
+export async function revokeCatalogueLink(db: D1Database, id: string, now = Math.floor(Date.now() / 1000)): Promise<"revoked" | "already" | "photo"> {
+  if (!GRANT_ID.test(id)) return "already";
+  const result = await db.prepare("UPDATE photo_download_grants SET revoked_at = ? WHERE id = ? AND photo_id IS NULL AND revoked_at IS NULL").bind(now, id).run();
+  if (result.meta.changes > 0) return "revoked";
+  const row = await db.prepare("SELECT photo_id FROM photo_download_grants WHERE id = ?").bind(id).first<{ photo_id: string | null }>();
+  return row && row.photo_id !== null ? "photo" : "already";
+}

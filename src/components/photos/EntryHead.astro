@@ -1,0 +1,13 @@
+---
+import { formatLogDate } from "../../lib/text";
+
+// An h3: each entry sits under the entries row's h2
+interface Props {
+  /** null renders the empty heading the photo-sheet script fills (Task 8) */
+  date: string | null;
+  place: string | null;
+}
+
+const { date, place } = Astro.props;
+---
+<h3 class="entry-head"><time datetime={date ?? undefined}>{date && formatLogDate(date, "day")}</time><span class="entry-place">{place && ` · ${place}`}</span></h3>
