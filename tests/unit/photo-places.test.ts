@@ -56,6 +56,21 @@ describe("placeFromPlacemark", () => {
     expect(placeFromPlacemark(SURRY, CITIES)).toEqual({ place: null, missingKey: "AU/NSW/Imaginary Council" });
   });
 
+  test("a locality-specific city wins over a council mapping", () => {
+    const tura = { subLocality: null, locality: "Tura Beach", subAdministrativeArea: "Bega Valley Shire Council", administrativeArea: "NSW", isoCountryCode: "AU" };
+    const cities = { "AU/NSW/Bega Valley Shire Council": "bega", "AU/NSW/Bega Valley Shire Council/Tura Beach": "merimbula" };
+    expect(placeFromPlacemark(tura, cities)).toEqual({ place: "tura beach, merimbula" });
+    expect(placeFromPlacemark({ ...tura, locality: "Bega" }, cities)).toEqual({ place: "bega" });
+  });
+
+  test("the real Bega Valley localities are mapped without assigning the whole council to Merimbula", () => {
+    const cities = JSON.parse(readFileSync(new URL("../../scripts/photo-cities.json", import.meta.url), "utf8"));
+    const place = { subLocality: null, locality: "Tura Beach", subAdministrativeArea: "Bega Valley Shire Council", administrativeArea: "NSW", isoCountryCode: "AU" };
+    expect(placeFromPlacemark(place, cities)).toEqual({ place: "tura beach, merimbula" });
+    expect(placeFromPlacemark({ ...place, locality: "Merimbula" }, cities)).toEqual({ place: "merimbula" });
+    expect(placeFromPlacemark({ ...place, locality: "Bega" }, cities)).toEqual({ place: null, missingKey: "AU/NSW/Bega Valley Shire Council" });
+  });
+
   test("a territory with one city finds it for every suburb, with or without a council", () => {
     expect(placeFromPlacemark(BRADDON, CITIES)).toEqual({ place: "braddon, canberra" });
   });

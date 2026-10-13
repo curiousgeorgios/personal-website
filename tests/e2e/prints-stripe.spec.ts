@@ -50,8 +50,11 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
   const postal = page.locator("#billingPostalCode");
   if (await postal.isVisible().catch(() => false)) await postal.fill("2026");
   // Link's "save my information" box is ticked by default and then wants a phone number; the buyer here doesn't save
-  const save = page.getByRole("checkbox", { name: "Save my information for faster checkout" });
-  if (await save.isVisible().catch(() => false)) await save.uncheck();
+  const save = page.getByRole("checkbox", { name: /^Save my information(?: with Link)? for faster checkout$/ });
+  if (await save.isVisible()) {
+    await save.uncheck();
+    await expect(save).not.toBeChecked();
+  }
   // Events from a minute before paying on: the test account may be shared with other runs
   const started = Math.floor(Date.now() / 1000) - 60;
   // The pay button by its exact name: Stripe's isn't a submit input, and "Apple Pay" and "Pay securely with Link" sit beside it
@@ -83,7 +86,7 @@ test("two prints, one exact total, paid on stripe's page in test mode, one artel
   expect(order.isTestOrder).toBe(true);
   expect(order.customerAddress).toMatchObject({ name, street1: "12 Example Street", country: "AU" });
   expect(order.items.map((item) => [item.productInfo.size, item.productInfo.frameColor, item.productInfo.orientation, item.productInfo.paperType])).toEqual([
-    ["x12x18", "NaturalOak", "Vertical", "ArchivalMatteFineArt"], ["x8x12", null, "Horizontal", "ArchivalMatteFineArt"],
+    ["x12x18", "NaturalOak", "Vertical", "ArchivalMatteFineArt"], ["x8x12", "Unframed", "Horizontal", "ArchivalMatteFineArt"],
   ]);
   const masters = Object.fromEntries(printsD1<{ id: string; print_sha256: string }>("SELECT id, print_sha256 FROM photos WHERE id IN ('fixture-b-01', 'fixture-b-02')", STORE).map((row) => [row.id, row.print_sha256]));
   expect(designs.map((design) => [design.width, design.height, design.sha256])).toEqual([[4000, 6000, masters["fixture-b-01"]], [6000, 4000, masters["fixture-b-02"]]]);

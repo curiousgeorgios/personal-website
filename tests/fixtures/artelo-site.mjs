@@ -54,9 +54,13 @@ function start() {
 
 // Price Check (spec 23.3): US$30.00 freight for any basket, US$40.00 production a print, US$4.20 sales tax for a US
 // address and nothing elsewhere, and a refusal with a message for Antarctica
+const validProductInput = (item) => ["NaturalOak", "Unframed"].includes(item.productInfo?.frameColor)
+  && item.productInfo?.designs?.length === 1
+  && typeof item.productInfo.designs[0]?.sourceImage?.url === "string";
 route("POST", "/orders/price-check", ({ body, headers }) => {
   if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
   const order = JSON.parse(body);
+  if (order.items.some((item) => !validProductInput(item))) return [400, { message: "one source design and a valid frame color are required" }];
   received.priceChecks.push(order);
   const country = order.customerAddress?.country;
   if (country === "AQ") return [400, { message: "artelo doesn't deliver to antarctica" }];
@@ -158,6 +162,7 @@ async function fetchDesign(url) {
 route("POST", "/orders/create", async ({ body, headers }) => {
   if (!keyed(headers, FIXTURE_SECRETS.ARTELO_API_KEY)) return [401, { message: "invalid api key" }];
   const order = JSON.parse(body);
+  if (order.items.some((item) => !validProductInput(item))) return [400, { message: "one source design and a valid frame color are required" }];
   const mode = artelo.modes.get(order.orderId) ?? "ok";
   received.orders.push({ orderId: order.orderId, mode });
   // Artelo refuses a design under 150 dpi unless dangerouslySkipDPICheck is set; the only png here is the margin check's share card

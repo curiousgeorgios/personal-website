@@ -39,7 +39,7 @@ describe("placeOrder", () => {
     });
     expect(body.items.map((item: { orderItemId: string; quantity: number; unitPrice: number; productInfo: Record<string, unknown> }) => [item.orderItemId, item.quantity, item.unitPrice, item.productInfo.size, item.productInfo.frameColor, item.productInfo.orientation, item.productInfo.paperType])).toEqual([
       [`${ORDER}-1`, 1, 179, "x12x18", "NaturalOak", "Vertical", "ArchivalMatteFineArt"],
-      [`${ORDER}-2`, 1, 59, "x8x12", null, "Horizontal", "ArchivalMatteFineArt"],
+      [`${ORDER}-2`, 1, 59, "x8x12", "Unframed", "Horizontal", "ArchivalMatteFineArt"],
     ]);
     expect(JSON.stringify(body)).not.toMatch(/email|dangerouslySkipDPICheck/);
     for (const [index, photoId] of ["fixture-b-01", "fixture-b-02"].entries()) {

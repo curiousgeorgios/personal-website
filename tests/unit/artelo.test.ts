@@ -23,18 +23,20 @@ describe("the request", () => {
     expect(arteloAddress({ ...ADDRESS, state: "", postcode: "" })).toMatchObject({ city: "Bondi Beach", state: "Bondi Beach", zipcode: "" });
   });
 
-  test("one item per line with the order's product info and no designs, the price in us dollars for information", () => {
-    const body = priceCheckBody(LINES, ADDRESS, 1.5, "quote-0123456789abcdef");
+  test("one item per line with a public quote design and the required frame enum, the price in us dollars for information", () => {
+    const designUrl = "https://site.test/og.png";
+    const body = priceCheckBody(LINES, ADDRESS, 1.5, "quote-0123456789abcdef", designUrl);
     expect(body).toMatchObject({ orderId: "quote-0123456789abcdef", currency: "USD", customerAddress: arteloAddress(ADDRESS) });
     expect(body.items).toEqual([
-      { orderItemId: "1", quantity: 1, unitPrice: 119.33, productInfo: productInfo(LINES[0]) },
-      { orderItemId: "2", quantity: 2, unitPrice: 39.33, productInfo: productInfo(LINES[1]) },
+      { orderItemId: "1", quantity: 1, unitPrice: 119.33, productInfo: productInfo(LINES[0], designUrl) },
+      { orderItemId: "2", quantity: 2, unitPrice: 39.33, productInfo: productInfo(LINES[1], designUrl) },
     ]);
-    expect(productInfo(LINES[0])).toEqual({
+    expect(productInfo(LINES[0], designUrl)).toEqual({
       catalogProductId: "IndividualArtPrint", size: "x12x18", frameColor: "NaturalOak", paperType: "ArchivalMatteFineArt", orientation: "Vertical",
       canvasDesignedFor: null, canvasBorderStyle: null, includeFramingService: false, includeHangingPins: false, includeMats: false,
+      designs: [{ sourceImage: { url: designUrl }, fitOptions: { canvas: "Paper", style: "Outside" } }],
     });
-    expect(productInfo(LINES[1]).frameColor).toBeNull();
+    expect(productInfo(LINES[1], designUrl)).toMatchObject({ frameColor: "Unframed", designs: [{ sourceImage: { url: designUrl } }] });
     expect(productInfo(LINES[0], "https://x/master")).toMatchObject({ designs: [{ sourceImage: { url: "https://x/master" }, fitOptions: { canvas: "Paper", style: "Outside" } }] });
   });
 
@@ -75,6 +77,8 @@ describe("priceCheck", () => {
     const { fake, deps } = await answering(() => json({ orderCosts: { productionCost: 80, arteloShipping: 30, usSalesTax: 4.2, total: 114.2 } }));
     expect(await priceCheck(deps, LINES, US_ADDRESS, 1.5)).toEqual({ ok: true, costs: { freightCents: 3000, productionCents: 8000, taxes: [{ field: "usSalesTax", label: "us sales tax", cents: 420 }] } });
     expect(JSON.parse(fake.calls[0].body).orderId).toMatch(/^quote-[0-9a-f]{16}$/);
+    expect(JSON.parse(fake.calls[0].body).items.map((item: { productInfo: { designs: unknown[] } }) => item.productInfo.designs))
+      .toEqual(LINES.map(() => [{ sourceImage: { url: `${deps.config.siteOrigin}/og.png` }, fitOptions: { canvas: "Paper", style: "Outside" } }]));
   });
 
   test("a 400 or 422 is artelo refusing, with its message cut to 200 characters and logged only as a status", async () => {

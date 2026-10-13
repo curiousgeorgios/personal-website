@@ -22,7 +22,7 @@ test("a paid basket becomes one artelo order with every print, made from the mas
   expect(order.customerAddress).toMatchObject({ name, street1: "12 Example Street", street2: "Unit 3", city: "Bondi Beach", state: "NSW", zipcode: "2026", country: "AU", phone: "+61 400 000 000" });
   expect(order.items.map((item) => [item.orderItemId, item.productInfo.size, item.productInfo.frameColor, item.productInfo.orientation, item.productInfo.paperType])).toEqual([
     [`${orderId}-1`, "x12x18", "NaturalOak", "Vertical", "ArchivalMatteFineArt"],
-    [`${orderId}-2`, "x8x12", null, "Horizontal", "ArchivalMatteFineArt"],
+    [`${orderId}-2`, "x8x12", "Unframed", "Horizontal", "ArchivalMatteFineArt"],
   ]);
   const masters = Object.fromEntries(printsD1<{ id: string; print_sha256: string }>("SELECT id, print_sha256 FROM photos WHERE id IN ('fixture-b-01', 'fixture-b-02')").map((row) => [row.id, row.print_sha256]));
   expect(designs.map((design) => [new URL(design.url).pathname, design.status, design.type, design.width, design.height, design.sha256])).toEqual([

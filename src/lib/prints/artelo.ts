@@ -75,12 +75,12 @@ export interface ProductLine {
   orientation: Orientation;
 }
 
-/** One print as Artelo makes it (spec 14.1): its size, oak or no frame, the paper, its orientation; designs only at order time */
-export function productInfo(line: ProductLine, design?: string) {
+/** One print as Artelo makes it (spec 14.1), including the design required by quotes and orders */
+export function productInfo(line: ProductLine, design: string) {
   return {
     catalogProductId: "IndividualArtPrint",
     size: line.size.size,
-    frameColor: line.frame === "oak" ? "NaturalOak" : null,
+    frameColor: line.frame === "oak" ? "NaturalOak" : "Unframed",
     paperType: "ArchivalMatteFineArt",
     orientation: line.orientation,
     canvasDesignedFor: null,
@@ -88,7 +88,7 @@ export function productInfo(line: ProductLine, design?: string) {
     includeFramingService: false,
     includeHangingPins: false,
     includeMats: false,
-    ...(design ? { designs: [{ sourceImage: { url: design }, fitOptions: { canvas: "Paper", style: "Outside" } }] } : {}),
+    designs: [{ sourceImage: { url: design }, fitOptions: { canvas: "Paper", style: "Outside" } }],
   };
 }
 
@@ -99,13 +99,13 @@ export interface QuoteLine extends ProductLine {
   unitAmount: number;
 }
 
-export function priceCheckBody(lines: readonly QuoteLine[], address: Address, rate: number, quoteId: string) {
+export function priceCheckBody(lines: readonly QuoteLine[], address: Address, rate: number, quoteId: string, designUrl: string) {
   return {
     orderId: quoteId,
     currency: "USD",
     customerAddress: arteloAddress(address),
     // unitPrice is informational: the tier price converted to US dollars at the current rate
-    items: lines.map((line) => ({ orderItemId: String(line.line), quantity: line.quantity, unitPrice: Math.round(line.unitAmount / rate) / 100, productInfo: productInfo(line) })),
+    items: lines.map((line) => ({ orderItemId: String(line.line), quantity: line.quantity, unitPrice: Math.round(line.unitAmount / rate) / 100, productInfo: productInfo(line, designUrl) })),
   };
 }
 
@@ -116,7 +116,9 @@ export type PriceCheck = { ok: true; costs: OrderCosts } | { ok: false; refused:
 
 /** Artelo's quote for the whole basket to this address (spec 16.1). Its refusals are logged only as a status code */
 export async function priceCheck(deps: PrintDeps, lines: readonly QuoteLine[], address: Address, rate: number): Promise<PriceCheck> {
-  const result = await artelo(deps, "POST", "/orders/price-check", priceCheckBody(lines, address, rate, `quote-${hex(8)}`));
+  // Quotes use the public share card to satisfy Artelo's design input; placement uses the selected master.
+  const designUrl = new URL("/og.png", deps.config.siteOrigin).href;
+  const result = await artelo(deps, "POST", "/orders/price-check", priceCheckBody(lines, address, rate, `quote-${hex(8)}`, designUrl));
   if (!result.ok) {
     if (result.status === 400 || result.status === 422) {
       console.error("prints: artelo refused a price check", result.status);

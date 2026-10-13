@@ -30,6 +30,20 @@ Every secret lives in the `personal-website` Infisical project ([ADR-0029](adr/0
 
 Steps 1 to 6 were done on 9 October 2026, with the Infisical project and its sync.
 
+### Progress on 13 October 2026
+
+Steps 7 and 8 were completed in the Claude conversation on 9 October, including the passing Stripe test order and refund metadata check recorded in the plan 7 follow-ups. PR #2 was merged on 13 October at 16:44 Australia/Sydney as `b285b062737101988439be30dd5fcc5ca5e5064b`. [Production workflow 38352918842](https://github.com/curiousgeorgios/personal-website/actions/runs/38352918842) failed its Stripe hosted-checkout test, so deployment was skipped. The saved original and retry snapshots show Link's renamed checkbox remained checked and required a phone number. The selector now accepts both observed labels, explicitly checks it is unticked and passes a real Stripe test-mode payment locally. Prints remain configured closed.
+
+With George's approval, the live Stripe webhook `we_1UPyjAGgvaCFJZCdLP5y2P4O` was created at `https://curiousgeorge.dev/api/prints/stripe`, on `2025-09-30.clover`, subscribed to exactly the three required events. The generated signing secret was stored directly in Infisical and Production shows Synced. Artelo's API key was entered by George, and `prints:webhook --remote` registered its endpoint and stored its signing secret directly in Infisical. Registration and secret sync do not yet prove genuine delivery to the new routes, which await deployment.
+
+Artelo's real Price Check rejected the original request: unframed products require `frameColor: "Unframed"`, and every quote requires exactly one image design. The corrected request uses the public share card for quotes; actual orders still use the selected private master. The stand-in now rejects the invalid request too. `prints:check --remote` then completed with **0 failures and 30 warnings**, all warnings being Hawaii's exact freight differing from generic US catalogue shipping. Combined delivery and the just-created test-order lookup passed. The test order was `Ignored` and never produced. All four optional fee fields were zero, so non-zero fee reconciliation remains unproven and fails closed.
+
+George approved GPS preparation through Apple's geocoder and upload of the selected 462 photographs with private masters and unpublished catalogue rows. Canonical preparation completed: manifest version 2, 32 posts and 3,696 previews, with place labels for 27 posts and five still requiring a location decision. The import is running in eight disjoint batches through the same asset-validating importer. The 96 RAW candidates still need George's colour and crop review. No photographs have been published. The private bucket has public access disabled and no custom domains.
+
+Local validation of the corrections passed: 1,110 unit tests in 95 files, type checking, 46 targeted print browser tests and one payment through Stripe's real test-mode checkout with Artelo simulated. George approved committing, pushing and releasing these corrections after required CI passes. They have not yet been deployed. Receipts and the preserved failed CI artifacts are in `reports/print-launch-2026-10-13/`.
+
+The production `POSTHOG_KEY` was a personal API key, while `src/lib/ingest.ts` requires the project token for event capture. George explicitly authorised Codex to save the existing project token in Infisical, and a prefix-only check confirms the stored value is now a capture token. A fresh event must still be verified. No key value is recorded in these notes.
+
 ### Before merge
 
 1. **Cloudflare Email Service.** Turn on Email Sending for the domain, so the Worker's `send_email` binding has somewhere to send from (a deploy with the binding may fail without it):

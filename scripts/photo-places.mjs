@@ -21,7 +21,7 @@ const suburbLike = (placemark) => named(placemark.subLocality) && placemark.isoC
 
 /**
  * One photo's place from the geocoder's names. The area is a neighbourhood-like sub-locality, else the locality; the city
- * comes from the map (the council or locality key first, then the whole administrative area, which is how every
+ * comes from the map (a locality within its council first, then the council, then the whole administrative area, which is how every
  * Canberra suburb finds its city), else the locality when the sub-locality was used, else the administrative area. An
  * Australian place with no map entry gives its missing key, because there the geocoder never names a metropolitan city.
  * The council keys beyond Waverley and the City of Sydney in photo-cities.json use the councils' official names and are
@@ -32,8 +32,10 @@ export function placeFromPlacemark(placemark, cities) {
   const area = suburbLike(placemark) ? placemark.subLocality : placemark.locality;
   if (!named(area)) return { place: null };
   const key = cityKey(placemark);
+  const localityKey = `${key}/${placemark.locality}`;
   const territory = `${placemark.isoCountryCode}/${placemark.administrativeArea}`;
-  let city = Object.hasOwn(cities, key) ? cities[key] : Object.hasOwn(cities, territory) ? cities[territory] : undefined;
+  let city = Object.hasOwn(cities, localityKey) ? cities[localityKey]
+    : Object.hasOwn(cities, key) ? cities[key] : Object.hasOwn(cities, territory) ? cities[territory] : undefined;
   if (city === undefined) {
     if (placemark.isoCountryCode === "AU") return { place: null, missingKey: key };
     city = suburbLike(placemark) ? placemark.locality : placemark.administrativeArea;
