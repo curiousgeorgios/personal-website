@@ -16,6 +16,8 @@ if (config.vars?.PRINTS_OPEN !== "false") problems.push(`PRINTS_OPEN is ${JSON.s
 const entry = readFileSync(`dist/server/${config.main}`, "utf8");
 // A handler method or property, not just the word somewhere in the bundle
 if (!/\basync\s+scheduled\s*\(|\bscheduled\s*:\s*(?:async\b|function\b|\()/.test(entry)) problems.push(`${config.main} doesn't export a scheduled handler`);
+if (!config.durable_objects?.bindings?.some((binding) => binding.name === "PRINT_SCHEDULER" && binding.class_name === "PrintScheduler")) problems.push("the private print scheduler binding is missing");
+if (!/export\s*\{[^}]*\bPrintScheduler\b[^}]*\}/.test(entry)) problems.push(`${config.main} doesn't export PrintScheduler`);
 if (problems.length > 0) {
   console.error(`the built worker lost what prints need:\n- ${problems.join("\n- ")}`);
   process.exit(1);

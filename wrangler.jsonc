@@ -31,6 +31,8 @@
   },
   // The prints cron (spec 18.6): the webhooks accelerate, this guarantees
   "triggers": { "crons": ["*/5 * * * *"] },
+  "durable_objects": { "bindings": [{ "name": "PRINT_SCHEDULER", "class_name": "PrintScheduler" }] },
+  "migrations": [{ "tag": "print-scheduler-v1", "new_sqlite_classes": ["PrintScheduler"] }],
   // Cloudflare Email Service, from prints@curiousgeorge.dev (spec 18.4)
   "send_email": [{ "name": "EMAIL" }],
   // Quotes call Artelo, so they are limited without cookies (spec 21.3)
