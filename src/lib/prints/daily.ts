@@ -5,6 +5,7 @@ import type { PrintConfig, PrintDeps } from "./config";
 import { mailAdmin } from "./mail";
 import { askArtelo, mailNow } from "./place";
 import { writeSetting } from "./store";
+import { cleanPhotoAccess } from "../photos/access";
 
 // The cron's daily jobs beside the exchange rate (spec 18.6 step 5), and the stranded-refund lookup (ADR-0026)
 
@@ -45,6 +46,7 @@ export const EVENTS_KEEP = 90 * 86_400;
 export async function cleanUp(deps: PrintDeps): Promise<boolean> {
   const { db } = deps;
   const now = deps.now();
+  await cleanPhotoAccess(db, now);
   await db.batch([
     db.prepare("DELETE FROM print_order_items WHERE order_id IN (SELECT id FROM print_orders WHERE status = 'expired' AND created_at < ?)").bind(now - EXPIRED_KEEP),
     db.prepare("DELETE FROM print_orders WHERE status = 'expired' AND created_at < ?").bind(now - EXPIRED_KEEP),

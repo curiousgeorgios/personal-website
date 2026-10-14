@@ -1,9 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ADMIN } from "./admin";
 import { SLOW } from "./deck";
 import { GALLERY } from "./gallery-site";
 import { withGpc } from "./gpc";
-import { catalogueLink } from "./photo-store";
 import { auAddress, quoteDelivery } from "./prints";
 import { PRINTS } from "./prints-site";
 
@@ -76,13 +74,18 @@ test("the photo pages set no cookies, keep storage empty and stay first party", 
   await expectPrivate(page, seen);
 });
 
-test("a downloads page sets no cookies and loads nothing from elsewhere", async ({ page, request }) => {
-  test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "needs a link from the local admin server");
-  const { url } = await catalogueLink(request);
-  const seen = watch(page, ADMIN);
-  await page.goto(url, { waitUntil: "networkidle" });
+// The sign-in sets nothing until someone asks for a code: its cookies come only from the sign-in's own routes (spec 5.2
+// as amended), which photo-access-session.spec.ts checks
+test("the downloads sign-in sets no cookies, stores nothing, counts no visit and loads nothing from elsewhere", async ({ page, baseURL }) => {
+  const site = process.env.PLAYWRIGHT_BASE_URL ? new URL(baseURL!).origin : GALLERY;
+  const seen = watch(page, site);
+  const counted: string[] = [];
+  page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/ingest")) counted.push(request.url()); });
+  await page.goto(`${site}/photos/downloads`, { waitUntil: "networkidle" });
   await expect(page.locator("h1")).toHaveText("photos, full size");
+  await expect(page.getByLabel("email address")).toBeVisible();
   await expectPrivate(page, seen);
+  expect(counted).toEqual([]);
 });
 
 // Only against a deployed site: the local test build's Access bypass answers /admin/ with the page, by design.

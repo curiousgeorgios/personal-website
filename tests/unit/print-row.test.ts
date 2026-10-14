@@ -153,15 +153,19 @@ describe("the print row's preview", () => {
     );
   });
 
-  test("invites a request for a high-resolution file by email, never a download", async () => {
+  test("asks George for access to the full-resolution jpeg by email, and sends approved people to sign in, never to a file", async () => {
     const doc = await render(PhotoView, { page, prints });
     const contact = doc.querySelector("#prints .print-contact")!;
-    expect(text(contact)).toBe("want a high-resolution file to print yourself? ask george at hello@curiousgeorge.dev.");
+    expect(text(contact)).toBe("want the full-resolution jpeg to print yourself? ask george for access at hello@curiousgeorge.dev. already approved? sign in to download it.");
     const links = [...contact.querySelectorAll("a")];
-    expect(links.map((link) => [link.getAttribute("href"), text(link)])).toEqual([["mailto:hello@curiousgeorge.dev?subject=a%20high-resolution%20file%20of%20fixture-b-01", "hello@curiousgeorge.dev"]]);
-    // Nothing on the row links to a file: the master stays behind its signed, revocable links
-    expect([...doc.querySelectorAll("#prints a")].map((link) => link.getAttribute("href"))).toEqual([links[0].getAttribute("href")]);
-    expect(doc.querySelector('#prints [href*="/photos/download"], #prints [href*="prints/"], #prints [download]')).toBeNull();
+    expect(links.map((link) => [link.getAttribute("href"), text(link)])).toEqual([
+      ["mailto:hello@curiousgeorge.dev?subject=full-resolution%20jpeg%20access%20for%20fixture-b-01", "hello@curiousgeorge.dev"],
+      ["/photos/downloads", "sign in to download it"],
+    ]);
+    // Those are the row's only links: the sign-in page, never a file, a token or a download; the master stays behind the
+    // approved person's session
+    expect([...doc.querySelectorAll("#prints a")].map((link) => link.getAttribute("href"))).toEqual(links.map((link) => link.getAttribute("href")));
+    expect(doc.querySelector('#prints [href^="/photos/downloads/"], #prints [href*="token"], #prints [href*="prints/"], #prints [download]')).toBeNull();
   });
 });
 

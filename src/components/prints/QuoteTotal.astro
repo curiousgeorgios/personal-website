@@ -17,5 +17,5 @@ const { quote, gst } = Astro.props;
 <div class="basket-form pay-form">
   <input type="hidden" name="quote" value={quote.token} form="deliver" />
   <button type="submit" name="intent" value="checkout" form="deliver" id="pay" class="print-button">continue to payment</button>
-  <p class="prints-hint">payment happens on stripe's own checkout page, which sets its own cookies. this site sets none. your address is fixed there; to change it, change it here and quote again.</p>
+  <p class="prints-hint">payment happens on stripe's own checkout page, which sets its own cookies. this site sets none for prints. your address is fixed there; to change it, change it here and quote again.</p>
 </div>

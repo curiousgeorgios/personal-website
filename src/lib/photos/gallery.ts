@@ -100,4 +100,4 @@ export function photoName(photo: Pick<PublicPhoto, "title" | "date">, index: num
 }
 
 /** What the downloads page shows (spec 5.2 and 5.3): the list, a link that has run out (whatever the reason) or downloads that aren't working */
-export type DownloadsView = { state: "ok"; entries: Entry[]; token: string; expiresAt: number } | { state: "gone" } | { state: "down" };
+export type DownloadsView = { state: "ok"; entries: Entry[]; expiresAt: number } | { state: "signin" } | { state: "down" };

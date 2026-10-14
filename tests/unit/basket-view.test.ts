@@ -106,7 +106,7 @@ describe("the basket page", () => {
     // Enter in a field submits the first submit button in tree order: quote delivery, inside the form, before the total row
     const buttons = [...doc.querySelectorAll("button")];
     expect(buttons.map((button) => button.getAttribute("value"))).toEqual(["quote", "checkout"]);
-    expect(text(doc.querySelector("#total .pay-form .prints-hint"))).toBe("payment happens on stripe's own checkout page, which sets its own cookies. this site sets none. your address is fixed there; to change it, change it here and quote again.");
+    expect(text(doc.querySelector("#total .pay-form .prints-hint"))).toBe("payment happens on stripe's own checkout page, which sets its own cookies. this site sets none for prints. your address is fixed there; to change it, change it here and quote again.");
   });
 
   test("an empty basket says so; closed prints show the lines and no form; notes are shown", async () => {

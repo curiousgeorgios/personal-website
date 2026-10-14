@@ -9,11 +9,12 @@ import RecordsAdmin from "../../components/admin/RecordsAdmin.astro";
 import LatelyAdmin from "../../components/admin/LatelyAdmin.astro";
 import SnapshotsAdmin from "../../components/admin/SnapshotsAdmin.astro";
 import PhotographsAdmin from "../../components/admin/PhotographsAdmin.astro";
-import LinksAdmin from "../../components/admin/LinksAdmin.astro";
+import AccessAdmin, { type Approval } from "../../components/admin/AccessAdmin.astro";
 import OrdersAdmin from "../../components/admin/OrdersAdmin.astro";
 import { sessionEnds } from "../../lib/admin/access";
-import type { ActionFailure, AdminSection, IssuedLink } from "../../lib/admin/actions";
+import type { ActionFailure, AdminSection } from "../../lib/admin/actions";
 import { loadAdmin } from "../../lib/admin/store";
+import { approvedEmails } from "../../lib/photos/access";
 import { submitForm } from "../../lib/admin/submit";
 import { loadOrdersAdmin, type OrdersAdmin as OrdersData } from "../../lib/prints/admin";
 import { printConfig, printDeps } from "../../lib/prints/config";
@@ -21,13 +22,11 @@ import { sendTestMail } from "../../lib/prints/mail";
 import { placeOrder } from "../../lib/prints/place";
 import "../../styles/admin.css";
 
-const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records", "snapshots", "photographs", "links", "orders"];
+const SECTIONS: readonly AdminSection[] = ["now", "before", "log", "lately", "records", "snapshots", "photographs", "downloads", "orders"];
 
 // Every write (spec 7). Success redirects with 303 (post, redirect, get), so a reload never repeats a write; a failure
 // renders the page again below with its status (422, or 500 when something unexpected broke) and the failed form open.
 let failure: ActionFailure | null = null;
-// A link just issued: shown in this response only, at status 200 (spec 6.3)
-let issued: IssuedLink | null = null;
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData().catch(() => null);
   const waitUntil = (promise: Promise<unknown>) => Astro.locals.cfContext.waitUntil(promise);
@@ -46,8 +45,8 @@ if (Astro.request.method === "POST") {
   };
   const outcome = await submitForm(form, deps, Astro.cache, waitUntil);
   if ("redirect" in outcome) return Astro.redirect(outcome.redirect, 303);
-  if ("issued" in outcome) issued = outcome.issued;
-  else {
+  // No form here issues catalogue links any more, and they no longer open anything (spec 5.1 as amended)
+  if ("failure" in outcome) {
     failure = outcome.failure;
     Astro.response.status = outcome.status;
   }
@@ -60,6 +59,13 @@ try {
   orders = await loadOrdersAdmin(env.DB, printConfig(env), Math.floor(Date.now() / 1000));
 } catch (error) {
   console.error("admin: the orders section couldn't load", error instanceof Error ? error.message : String(error));
+}
+// Its own read too: the approved addresses (spec 6.3 as amended). An error names no address
+let approvals: Approval[] | null = null;
+try {
+  approvals = await approvedEmails(env.DB);
+} catch (error) {
+  console.error("admin: the downloads section couldn't load", error instanceof Error ? error.name : typeof error);
 }
 const saved = failure ? null : (SECTIONS.find((section) => section === Astro.url.searchParams.get("saved")) ?? null);
 // Photographs show on the gallery, everything else on the logbook (spec 6.2)
@@ -75,7 +81,9 @@ const savedLine = (section: AdminSection) => {
     if (note === "testmail") return "test email sent";
     return "saved - it applies to the next quote.";
   }
-  if (section === "links") return "saved - that link no longer works.";
+  if (section === "downloads") {
+    return Astro.url.searchParams.get("note") === "revoked" ? "saved - that address can't sign in any more." : "saved - that address can sign in now.";
+  }
   const where = section === "photographs" ? "gallery" : "logbook";
   return later ? `saved - the ${where} may show the old version for a little while.` : `saved - it's on the ${where} now.`;
 };
@@ -98,7 +106,7 @@ const until = Astro.locals.adminUntil === undefined ? null : sessionEnds(Astro.l
     <AdminRow label="before" id="before" notice={notice("before")}><ItemsAdmin section="before" items={data.before} failure={failure} /></AdminRow>
     <AdminRow label="snapshots" id="snapshots" notice={notice("snapshots")}><SnapshotsAdmin items={[...data.now, ...data.before]} failure={failure} /></AdminRow>
     <AdminRow label="photographs" id="photographs" notice={notice("photographs")}><PhotographsAdmin posts={data.photographs} failure={failure} /></AdminRow>
-    <AdminRow label="links" id="links" notice={notice("links")}><LinksAdmin links={data.links} failure={failure} issued={issued} /></AdminRow>
+    <AdminRow label="downloads" id="downloads" notice={notice("downloads")}><AccessAdmin approvals={approvals} /></AdminRow>
     <AdminRow label="orders" id="orders" notice={notice("orders")}><OrdersAdmin data={orders} failure={failure} /></AdminRow>
   </main>
 </Notebook>

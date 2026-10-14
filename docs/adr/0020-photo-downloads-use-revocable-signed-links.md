@@ -6,6 +6,8 @@
 
 ## Decision
 
+Update, 2026-10-14: [ADR-0033](0033-photo-downloads-require-approved-email-codes.md) supersedes the human catalogue-link authentication described below. Human downloads now require an owner-approved email address, a one-time code and a fourteen-day cookie session. The private master storage, attachment semantics and internal Artelo order grants below remain. The original bearer-link decision is retained as history.
+
 Public responsive previews use the existing media delivery route. Full-resolution print JPEGs use a separate private R2 binding, `PHOTO_PRINTS`, and `/photos/downloads/<id>?token=…`. Photograph recipients do not authenticate with Cloudflare Access and do not need accounts or cookies.
 
 The token is a purpose-specific HS256 JWT signed with a 32-byte Worker secret. It identifies a stored grant and is scoped to one photo or the published catalogue. Links last seven days by default and at most thirty days. The Worker checks the signature, issuer, audience, issue/expiry times, stored grant scope, revocation and publication before reading R2. Private responses cannot enter public caches. Removing a publication or revoking a grant takes effect on subsequent downloads.

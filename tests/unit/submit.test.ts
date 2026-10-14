@@ -127,11 +127,11 @@ describe("submitForm", () => {
     expect(purge.invalidate).toHaveBeenCalledWith({ tags: ["photos", "logbook", "photo-post-01"] });
   });
 
-  test("issuing a link answers with it, without a redirect or a purge", async () => {
+  test("a stale issue-link submission is refused, without a redirect or a purge", async () => {
     const purge = cache();
     const form = formOf({ intent: "link.issue", days: "7", note: "", nonce: "AbCdEfGhIjKlMnOpQrStUv" });
     const outcome = await submitForm(form, { ...deps(), photoLinkSecret: "1".repeat(64), origin: "https://curiousgeorge.dev" }, purge, waiter().waitUntil);
-    expect(outcome).toEqual({ issued: { url: expect.stringMatching(/^https:\/\/curiousgeorge\.dev\/photos\/downloads\?token=/) } });
+    expect(outcome).toMatchObject({ status: 422, failure: { ok: false, errors: { form: "download links have been replaced by approved email sign-in. reload the page." } } });
     expect(purge.invalidate).not.toHaveBeenCalled();
   });
 

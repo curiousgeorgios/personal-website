@@ -4,6 +4,7 @@ import EntryHead from "./EntryHead.astro";
 import { photoAlt, photoName, previewOf, type DownloadsView } from "../../lib/photos/gallery";
 import { formatLogDate } from "../../lib/text";
 import { sydneyDate, sydneyTime } from "../../lib/time";
+import "../../styles/access.css";
 
 interface Props {
   view: DownloadsView;
@@ -11,7 +12,7 @@ interface Props {
 
 const { view } = Astro.props;
 const list = view.state === "ok" ? view : null;
-// The token's expiry in Sydney's wall time: 15.10.26, 2:30 pm
+// The session's end in Sydney's wall time: 28.10.26, 2:30 pm
 const until = (seconds: number) => {
   const when = new Date(seconds * 1000);
   return `${formatLogDate(sydneyDate(when), "day")}, ${sydneyTime(when)}`;
@@ -19,24 +20,57 @@ const until = (seconds: number) => {
 // Decimal megabytes, one decimal (spec 5.2)
 const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
 ---
-<main class="book downloads">
+{/* data-expires tells the script when this browser's session ends, so the list never outstays it (seconds) */}
+<main class="book downloads" data-access={view.state} data-expires={list?.expiresAt}>
   <Row label="downloads" head>
-    {view.state === "gone" ? (
+    <h1>photos, full size</h1>
+    {list && (
       <>
-        <h1>this link has run out</h1>
-        <p class="intro">it may have expired or been switched off. if you were expecting photos, ask george for a fresh one: <a href="mailto:hello@curiousgeorge.dev">hello@curiousgeorge.dev</a>.</p>
-      </>
-    ) : (
-      <>
-        <h1>photos, full size</h1>
-        {list ? (
-          <p class="intro">every photo in the gallery as a full-resolution jpeg. this link works until {until(list.expiresAt)} sydney time. please keep it to yourself.</p>
-        ) : (
-          <p class="intro">downloads aren't working right now. try again in a bit.</p>
-        )}
+        <p class="intro">full-resolution jpegs of every photo in the gallery. this browser is signed in until {until(list.expiresAt)} sydney time. please keep them to yourself.</p>
+        {/* Signing out is a DELETE, so it needs the script, which shows this form; without it the session simply ends on time.
+            Every form here names post and its same-origin JSON route, so a native submit can never put a field in a URL */}
+        <form id="access-signout" class="access-form inline" method="post" action="/api/photos/access/session" hidden>
+          <button type="submit" class="access-button quiet">sign out</button>
+          <p class="access-error" id="access-signout-error" role="alert"></p>
+        </form>
+        <noscript><p class="where">signing out needs javascript. this browser's session ends by itself at that time.</p></noscript>
       </>
     )}
+    {view.state === "signin" && (
+      <>
+        <p class="intro">full-resolution jpegs of george's photos, for the people he has approved. sign in with your approved email address and a six-digit code will be sent to it.</p>
+        {/* Both steps are fetches to same-origin JSON routes, so they need the script; it reveals them. Without it, nothing is
+            sent anywhere: no address ever goes in a URL */}
+        <noscript><p class="access-noscript">signing in needs javascript, which is off in this browser. turn it on for this page to sign in.</p></noscript>
+        <form id="access-email" class="access-form" method="post" action="/api/photos/access/code" novalidate hidden>
+          <div class="field">
+            <label for="access-email-address">email address</label>
+            <input id="access-email-address" name="email" type="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="254" required aria-describedby="access-email-error" />
+          </div>
+          <p class="access-error" id="access-email-error" role="alert"></p>
+          <button type="submit" class="access-button">send a code</button>
+        </form>
+        <form id="access-code" class="access-form" method="post" action="/api/photos/access/session" novalidate hidden>
+          <p class="access-sent" id="access-code-sent" role="status"></p>
+          <div class="field">
+            <label for="access-code-digits">six-digit code</label>
+            <input id="access-code-digits" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required aria-describedby="access-code-sent access-code-error" />
+          </div>
+          <p class="access-error" id="access-code-error" role="alert"></p>
+          <button type="submit" class="access-button">sign in</button>
+          <p class="access-more">
+            <button type="button" class="access-link" data-resend disabled>send a new code</button>
+            <span aria-hidden="true">·</span>
+            <button type="button" class="access-link" data-restart>use a different address</button>
+          </p>
+        </form>
+        <p class="where">not approved yet? ask george at <a href="mailto:hello@curiousgeorge.dev">hello@curiousgeorge.dev</a>.</p>
+      </>
+    )}
+    {view.state === "down" && <p class="intro">downloads aren't working right now. try again in a bit.</p>}
   </Row>
+  {/* Page-level news a screen reader should hear: signing in, signing out, a session that has just ended */}
+  <p class="sr-only" role="status" data-access-status></p>
   {list && (
     <Row label="entries" id="entries">
       {list.entries.length === 0 ? (
@@ -58,9 +92,9 @@ const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
                           <img id={`download-${photo.id}`} src={webp.url} width={webp.width} height={webp.height} alt={photoAlt(photo, index, entry.photos.length)} loading="lazy" decoding="async" />
                         </picture>
                       )}
-                      {/* The token lives only in these links (spec 5.2). Each link's name says which photograph, so a
-                          screen reader's list of links tells them apart */}
-                      <a href={`/photos/downloads/${photo.id}?token=${encodeURIComponent(list.token)}`} download={`${photo.id}.jpg`}>download · {megabytes(photo.downloadBytes)}<span class="sr-only">, {photoName(photo, index, entry.photos.length)}</span></a>
+                      {/* A plain address: the browser's session cookie is what lets it through (spec 5.2 as amended). Each
+                          link's name says which photograph, so a screen reader's list of links tells them apart */}
+                      <a href={`/photos/downloads/${photo.id}`} download={`${photo.id}.jpg`}>download jpeg · {megabytes(photo.downloadBytes)}<span class="sr-only">, {photoName(photo, index, entry.photos.length)}</span></a>
                     </li>
                   );
                 })}
@@ -72,3 +106,6 @@ const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
     </Row>
   )}
 </main>
+<script>
+  import "../../scripts/photo-access";
+</script>

@@ -14,7 +14,7 @@ export const PRIVATE_HEADERS = {
  * route sent, so they are never cached, indexed or passed on as a referrer (spec 5.2): the downloads and a buyer's order page (spec 13.3).
  */
 export const isPrivatePath = (pathname: string) =>
-  pathname === "/api/photos/downloads" || pathname === "/api/photos/downloads/" || pathname === "/photos/downloads" || pathname.startsWith("/photos/downloads/") || pathname.startsWith("/prints/");
+  pathname.startsWith("/api/photos/access/") || pathname === "/api/photos/downloads" || pathname === "/api/photos/downloads/" || pathname === "/photos/downloads" || pathname.startsWith("/photos/downloads/") || pathname.startsWith("/prints/");
 
 export function photoJson(value: unknown, status = 200, privateResponse = false): Response {
   return new Response(JSON.stringify(value), { status, headers: {
@@ -51,18 +51,47 @@ export function requestToken(request: Request): string {
   return tokens.length === 1 ? tokens[0] : "";
 }
 
+// Finish small rejected uploads without retaining their bytes. A partly-read body can reset the dev proxy's next
+// request (workers-sdk #15709); both the byte cap and deadline keep this from draining an unlimited or slow upload.
+async function discardRemainder(reader: ReadableStreamDefaultReader<Uint8Array>, consumed: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      (async () => {
+        while (consumed <= 65536) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          consumed += value.length;
+        }
+      })(),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, 50); }),
+    ]);
+  } catch {
+    // A disconnected client still gets no parsed data.
+  } finally { clearTimeout(timer); }
+}
+
 export async function readPhotoJson(request: Request): Promise<{ data: unknown } | { response: Response }> {
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") return { response: photoError("Use application/json.", 415) };
+  const declared = request.headers.get("content-length");
+  const declaredTooLarge = !!declared && /^\d+$/.test(declared) && Number(declared) > 4096;
   const reader = request.body?.getReader();
   if (!reader) return { response: photoError("Invalid JSON.", 400) };
   try {
+    if (declaredTooLarge) {
+      await discardRemainder(reader, 0);
+      return { response: photoError("Request too large.", 413) };
+    }
     const chunks: Uint8Array[] = [];
     let length = 0;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       length += value.length;
-      if (length > 4096) { await reader.cancel(); return { response: photoError("Request too large.", 413) }; }
+      if (length > 4096) {
+        await discardRemainder(reader, length);
+        return { response: photoError("Request too large.", 413) };
+      }
       chunks.push(value);
     }
     const bytes = new Uint8Array(length);

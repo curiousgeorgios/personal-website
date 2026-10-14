@@ -93,7 +93,7 @@ describe("Logbook", () => {
     expect(pairs).toEqual([
       ["open", "whenever you are"],
       ["entry", "free"],
-      ["cookies", "none. nothing to accept."],
+      ["cookies", "none, except a sign-in cookie if you download photos. nothing to accept."],
       ["analytics", "anonymous counts of visits and clicks, no cookies"],
       ["based", "sydney and canberra"],
     ]);

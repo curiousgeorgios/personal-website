@@ -1,5 +1,4 @@
 import { beforeEach, expect, test, vi } from "vitest";
-import { verifyPhotoToken } from "../../src/lib/photos/tokens";
 import { sqliteD1 } from "./sqlite-d1";
 
 // The route reads the Worker's env; stand in the fixture key and a D1 over the real migrations
@@ -15,28 +14,21 @@ beforeEach(() => {
   env.DB = sqliteD1();
 });
 
-test("a photo id is refused: photo links are internal, and nothing is granted", async () => {
-  const response = await call({ photoId: "fixture-01" });
-  expect(response.status).toBe(400);
-  expect(await response.json()).toEqual({ error: "photo links are internal" });
-  expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM photo_download_grants").first("n"))).toBe(0);
-});
-
-test("a catalogue link points at the downloads page, signed for its grant", async () => {
-  const response = await call({ expiresInSeconds: 3600 });
-  expect(response.status).toBe(201);
-  const link = (await response.json()) as { grantId: string; expiresAt: number; url: string };
-  const url = new URL(link.url);
-  expect(`${url.origin}${url.pathname}`).toBe("https://curiousgeorge.dev/photos/downloads");
-  expect(await verifyPhotoToken(env.PHOTO_LINK_SECRET, url.searchParams.get("token")!)).toEqual({ grantId: link.grantId, photoId: null, expiresAt: link.expiresAt });
-  expect(await env.DB.prepare("SELECT photo_id FROM photo_download_grants WHERE id = ?").bind(link.grantId).first("photo_id")).toBeNull();
+test("legacy catalogue-link issuance is gone and creates no grants", async () => {
+  for (const body of [{}, { photoId: "fixture-01" }, { expiresInSeconds: 3600 }]) {
+    const response = await call(body);
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual({ error: "Download links have been replaced by approved email sign-in." });
+  }
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM photo_download_grants").first("n")).toBe(0);
 });
 
 const revoke = async (id: string) =>
   DELETE({ url: new URL(`${ROUTE}?grantId=${id}`) } as unknown as Parameters<typeof DELETE>[0]) as Promise<Response>;
 
 test("revoking switches a catalogue link off, once", async () => {
-  const { grantId } = (await (await call({})).json()) as { grantId: string };
+  const grantId = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO photo_download_grants (id, photo_id, expires_at) VALUES (?, NULL, 9999999999)").bind(grantId).run();
   expect((await revoke(grantId)).status).toBe(200);
   expect(await env.DB.prepare("SELECT revoked_at FROM photo_download_grants WHERE id = ?").bind(grantId).first("revoked_at")).not.toBeNull();
   expect((await revoke(grantId)).status).toBe(404);
