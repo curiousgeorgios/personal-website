@@ -24,6 +24,14 @@ How print ordering works on curiousgeorge.dev, how George launches it and how he
 
 ## Launch checklist
 
+### Progress on 14 October 2026
+
+The production scheduling gate passed after PR #5: native cron recovered before that deployment, and the private alarm fallback subsequently ran automatically and checked at five-minute intervals. All four daily jobs completed and the stored USD/AUD rate passed validation. Evidence: `reports/cron-fix-2026-10-13/review.md`.
+
+George asked Codex to review and publish the catalogue and open print ordering. All 462 local masters passed checksum, JPEG, byte-size and dimension checks. Every prepared preview was visually reviewed, with larger contact sheets for the 96 RAW renders and individual inspection of ambiguous images. 458 photographs were published through the owner admin, whose publish action verifies each private master and eight stored previews. Four photos with medical or work-screen content remain hidden. No originals or owner labels were changed. Live admin readback matches every publication decision, and the public gallery shows the reviewed photos. Evidence: `reports/photo-opening-2026-10-14/review-decisions.json` and `publication-acceptance.json`.
+
+George approved the opening release on `codex/open-print-ordering`: `PRINTS_OPEN` becomes `"true"` and the pre-launch build guard is removed. Production and fixture builds, the remaining Worker guard, all 1,126 unit tests and 23 basket/checkout browser tests passed. This note records the reviewed and approved change, not deployment; the PR and main CI gates still apply. Live ordering remains closed until that release deploys. The first real two-print order remains the check of supplier charging, genuine provider delivery and physical quality.
+
 Scheduler repair prepared on 13 October 2026: the registered cron has no production execution records, and a minimal new cron probe in the same account also did not activate while older schedules continued running. [ADR-0031](adr/0031-print-jobs-have-a-persistent-timer-fallback.md) adds a private five-minute alarm fallback, armed by a successful authenticated admin visit. It reuses the existing jobs and skips their work after a recent cron completion. Local automatic alarm execution fetched a valid USD/AUD rate and scheduled the next pass. Production release and two automatic production passes still need verification; this preparation does not close the launch gate. Evidence: `reports/cron-fix-2026-10-13/`.
 
 In this order. An agent can run any step that needs no login or pasted key; George does the rest. Prints stay closed (`PRINTS_OPEN` is `"false"` in `wrangler.jsonc`) until the last step, so the merge itself changes nothing a visitor can buy. Plan 6 (the gallery) and plan 7 (prints) merge together from `feature/photos-and-prints`.
