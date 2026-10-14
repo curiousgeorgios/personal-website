@@ -1,9 +1,10 @@
 import Foundation
 import CoreImage
 import ImageIO
+import Darwin
 
 guard CommandLine.arguments.count == 3 else {
-    fputs("usage: photo-render input output.jpg\n", stderr)
+    fputs("usage: photo-render input output.tiff\n", stderr)
     exit(1)
 }
 let input = URL(fileURLWithPath: CommandLine.arguments[1])
@@ -14,10 +15,10 @@ guard let image = CIImage(contentsOf: input, options: [.applyOrientationProperty
     exit(1)
 }
 do {
-    try CIContext(options: [.useSoftwareRenderer: false]).writeJPEGRepresentation(
-        of: image, to: output, colorSpace: colourSpace,
-        options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.96])
+    umask(0o077)
+    try CIContext(options: [.useSoftwareRenderer: false]).writeTIFFRepresentation(
+        of: image, to: output, format: .RGBA16, colorSpace: colourSpace)
 } catch {
-    fputs("Cannot write rendered JPEG\n", stderr)
+    fputs("Cannot write rendered TIFF\n", stderr)
     exit(1)
 }

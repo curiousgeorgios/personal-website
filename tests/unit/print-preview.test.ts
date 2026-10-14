@@ -14,7 +14,7 @@ describe("the preview's sizes", () => {
       const upright = printsFor(w, h)!;
       expect(upright.family).toBe(family.name);
       const portrait = previewSizes(upright, w, h);
-      expect(portrait.map((size) => size.tier)).toEqual(TIERS);
+      expect(portrait.map((size) => size.tier)).toEqual(family.name === "2:3" ? ["small", "medium"] : TIERS);
       for (const size of portrait) expect([size.width, size.height]).toEqual([family.tiers[size.tier].short, family.tiers[size.tier].long]);
       if (family.name === "1:1") continue;
       const sideways = printsFor(h, w)!;
@@ -39,7 +39,6 @@ describe("the preview's sizes", () => {
     expect(upright).toEqual([
       "the print: 20 cm wide, 30 cm tall (8 × 12 in)",
       "the print: 30 cm wide, 46 cm tall (12 × 18 in)",
-      "the print: 41 cm wide, 61 cm tall (16 × 24 in)",
     ]);
     expect(nbsp(previewSizes(printsFor(6000, 4000)!, 6000, 4000)[1].dimensions)).toBe("the print: 46 cm wide, 30 cm tall (18 × 12 in)");
     expect(nbsp(previewSizes(printsFor(4000, 5657)!, 4000, 5657)[0].dimensions)).toBe("the print: 21 cm wide, 30 cm tall (8.3 × 11.7 in)");

@@ -53,8 +53,8 @@ export interface PhotoPrints {
   offers: Offer[];
 }
 
-/** The sizes a master of width × height pixels prints at, or null when it gets none (spec 14.1) */
-export function printsFor(width: number, height: number): PhotoPrints | null {
+/** Native density and crop eligibility, including sizes retained for paid-order recovery. */
+function eligiblePrints(width: number, height: number): PhotoPrints | null {
   if (!(width > 0 && height > 0)) return null;
   const short = Math.min(width, height);
   const long = Math.max(width, height);
@@ -68,6 +68,18 @@ export function printsFor(width: number, height: number): PhotoPrints | null {
   });
   return offers.length > 0 ? { family: family.name, orientation: width > height ? "Horizontal" : "Vertical", offers } : null;
 }
+
+/** The sizes currently sold. Historical geometry stays available to recorded orders and the preview scale. */
+export function printsFor(width: number, height: number): PhotoPrints | null {
+  const prints = eligiblePrints(width, height);
+  if (!prints) return null;
+  const offers = prints.offers.filter((offer) => offer.size.size !== "x16x24");
+  return offers.length ? { ...prints, offers } : null;
+}
+
+/** Only for recovering a paid checkout whose stored order row is missing; never used to offer or quote a new print. */
+export const recoveredSizeFor = (width: number, height: number, tier: Tier): PrintSize | undefined =>
+  eligiblePrints(width, height)?.offers.find((offer) => offer.tier === tier)?.size;
 
 export const offerFor = (prints: PhotoPrints | null, tier: Tier): Offer | undefined => prints?.offers.find((offer) => offer.tier === tier);
 

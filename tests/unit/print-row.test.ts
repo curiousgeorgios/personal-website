@@ -28,11 +28,10 @@ describe("the print row", () => {
   test("one size radio per tier it gets, the first checked; unframed checked, oak offered", async () => {
     const doc = await render(PhotoView, { page, prints });
     const sizes = [...doc.querySelectorAll('input[name="size"]')];
-    expect(sizes.map((input) => [input.getAttribute("value"), input.hasAttribute("checked")])).toEqual([["small", true], ["medium", false], ["large", false]]);
+    expect(sizes.map((input) => [input.getAttribute("value"), input.hasAttribute("checked")])).toEqual([["small", true], ["medium", false]]);
     expect([...doc.querySelectorAll(".size-choice")].map(text)).toEqual([
       "small · 8 × 12 in (20 × 30 cm) · $59, or $139 framed",
       "medium · 12 × 18 in (30 × 46 cm) · $79, or $179 framed",
-      "large · 16 × 24 in (41 × 61 cm) · $119, or $259 framed",
     ]);
     expect([...doc.querySelectorAll('input[name="frame"]')].map((input) => [input.getAttribute("value"), input.hasAttribute("checked")])).toEqual([["unframed", true], ["oak", false]]);
     expect([...doc.querySelectorAll(".frame-choice")].map(text)).toEqual(["unframed", "oak frame"]);
@@ -75,7 +74,7 @@ describe("the print row's preview", () => {
     const stage = doc.querySelector("#prints .preview-stage")!;
     expect(stage.getAttribute("aria-hidden")).toBe("true");
     expect([...stage.classList]).toEqual(["preview-stage", "vertical", "family-2-3"]);
-    expect([...stage.querySelectorAll(".preview-outline")].map((outline) => outline.getAttribute("data-tier"))).toEqual(["small", "medium", "large"]);
+    expect([...stage.querySelectorAll(".preview-outline")].map((outline) => outline.getAttribute("data-tier"))).toEqual(["small", "medium"]);
     // The same sources and sizes as the head row's picture, so the browser reuses the copy it has; never a master
     const head = doc.querySelector(".photo img")!;
     const img = stage.querySelector(".preview-print img")!;
@@ -93,12 +92,10 @@ describe("the print row's preview", () => {
     expect([...caption.querySelectorAll(".preview-choice")].map((line) => [line.getAttribute("data-tier"), line.getAttribute("data-frame"), text(line)])).toEqual([
       ["small", "unframed", "small · unframed · $59"], ["small", "oak", "small · oak frame · $139"],
       ["medium", "unframed", "medium · unframed · $79"], ["medium", "oak", "medium · oak frame · $179"],
-      ["large", "unframed", "large · unframed · $119"], ["large", "oak", "large · oak frame · $259"],
     ]);
     expect([...caption.querySelectorAll(".preview-size")].map((line) => nbsp(text(line)))).toEqual([
       "the print: 20 cm wide, 30 cm tall (8 × 12 in), 500 pixels per inch",
       "the print: 30 cm wide, 46 cm tall (12 × 18 in), 333 pixels per inch",
-      "the print: 41 cm wide, 61 cm tall (16 × 24 in), 250 pixels per inch",
     ]);
     expect(text(caption.querySelector(".preview-note"))).toBe("drawn to scale against the ruler. the frame is illustrative; screen colour and timber grain vary.");
     const status = doc.querySelector("#prints .preview-status")!;
@@ -120,7 +117,7 @@ describe("the print row's preview", () => {
       const doc = await render(PhotoView, at(width, height));
       const stage = doc.querySelector("#prints .preview-stage")!;
       expect(stage.classList.contains(family), family).toBe(true);
-      expect(stage.querySelectorAll(".preview-outline")).toHaveLength(3);
+      expect(stage.querySelectorAll(".preview-outline")).toHaveLength(family === "family-2-3" ? 2 : 3);
       const medium = text(doc.querySelector('#prints .preview-size[data-tier="medium"]'));
       if (mediumTrim) expect(medium).toContain(`; ${mediumTrim}`);
       else expect(medium).not.toContain("trims");
@@ -146,8 +143,8 @@ describe("the print row's preview", () => {
       "a print of this photo, made by artelo on archival matte paper and posted from the us.",
       "printed from the full-resolution file, 3,648 × 5,472 pixels, not from the smaller images on this page.",
     ]);
-    // At least 200 on both sides at every size offered (the catalogue's rule), rounded down: 3648 / 16 = 228
-    expect([...doc.querySelectorAll("#prints .preview-size")].map((line) => text(line).match(/(\d+) pixels per inch/)?.[1])).toEqual(["456", "304", "228"]);
+    // At least 200 on both sides at every size offered (the catalogue's rule), rounded down: 3648 / 12 = 304
+    expect([...doc.querySelectorAll("#prints .preview-size")].map((line) => text(line).match(/(\d+) pixels per inch/)?.[1])).toEqual(["456", "304"]);
     const details = doc.querySelector("#prints details.print-details")!;
     expect(text(details.querySelector("summary"))).toBe("about the print file");
     expect(details.hasAttribute("open")).toBe(false);

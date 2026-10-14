@@ -11,7 +11,7 @@ const POSTS = [
   { collection: "fixture", publishedAt: "2026-09-27T18:30:00+10:00", place: "bondi, sydney", photos: [["fixture-01", 2048, 2048, "a test photograph"], ["fixture-02", 2048, 2048], ["fixture-03", 2048, 2048]] },
   { collection: "fixture-b", publishedAt: "2026-06-14T09:15:00+10:00", place: null, photos: [["fixture-b-01", 4000, 6000], ["fixture-b-02", 6000, 4000]] },
   { collection: "fixture-c", publishedAt: "2026-03-01T12:00:00+11:00", place: "fremantle, perth", photos: [["fixture-c-01", 1200, 1800]] },
-  { collection: "fixture-d", publishedAt: "2025-12-25T08:00:00+11:00", place: "manly, sydney", photos: [["fixture-d-01", 2048, 2048]] },
+  { collection: "fixture-d", publishedAt: "2025-12-25T08:00:00+11:00", place: "manly, sydney", photos: [["fixture-d-01", 4000, 5000]] },
   { collection: "fixture-e", publishedAt: "2025-08-09T16:45:00+10:00", place: "braddon, canberra", photos: [["fixture-e-01", 2048, 2048]] },
   { collection: "fixture-f", publishedAt: "2025-02-02T20:27:48+11:00", place: "valletta, malta", photos: [["fixture-f-01", 2048, 2048]] },
 ];

@@ -159,7 +159,7 @@ for (const path of ["/photos/fixture-b-01", "/basket?items=fixture-b-01:medium:o
 test("the basket's previews load eagerly, at most ten", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "measured once, in Chromium");
   test.skip(!!process.env.PLAYWRIGHT_BASE_URL, "measured on the local prints server");
-  const ten = ["fixture-b-01:small:oak", "fixture-b-02:small:oak", "fixture-01:small:oak", "fixture-02:small:oak", "fixture-b-01:medium:oak", "fixture-b-02:medium:oak", "fixture-b-01:large:oak", "fixture-b-02:large:oak", "fixture-b-01:small:unframed", "fixture-b-02:small:unframed"].join(",");
+  const ten = ["fixture-b-01:small:oak", "fixture-b-02:small:oak", "fixture-01:small:oak", "fixture-02:small:oak", "fixture-b-01:medium:oak", "fixture-b-02:medium:oak", "fixture-d-01:large:oak", "fixture-d-01:large:unframed", "fixture-b-01:small:unframed", "fixture-b-02:small:unframed"].join(",");
   await page.goto(`${PRINTS}/basket?items=${ten}`);
   const loading = await page.locator(".basket-line img").evaluateAll((images) => images.map((image) => image.getAttribute("loading")));
   expect(loading).toHaveLength(10);

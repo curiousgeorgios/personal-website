@@ -1,6 +1,6 @@
 import { photoMaster, revokeOrderGrantsStatement } from "../photos/store";
 import { REFUND_REASON } from "./artelo-status";
-import { isFrame, isTier, offerFor, printsFor } from "./catalogue";
+import { isFrame, isTier, recoveredSizeFor } from "./catalogue";
 import type { PrintDeps } from "./config";
 import { sendAdminNote } from "./mail";
 import { isOrderId } from "./order-id";
@@ -81,7 +81,7 @@ async function recreate(deps: PrintDeps, session: StripeSession, orderId: string
     // A quantity outside 1 to 10 would make the store refuse the whole batch, and with it the paid order
     if (!photoId || !isTier(tier) || !isFrame(frame) || !/^(?:[1-9]|10)$/.test(quantity)) continue;
     const photo = await photoMaster(db, photoId);
-    const size = photo ? (offerFor(printsFor(photo.print_width, photo.print_height), tier)?.size.size ?? "") : "";
+    const size = photo ? (recoveredSizeFor(photo.print_width, photo.print_height, tier)?.size ?? "") : "";
     statements.push(
       db.prepare("INSERT INTO print_order_items (order_id, line, photo_id, tier, size, frame, quantity, unit_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
         .bind(orderId, line, photoId, tier, size, frame, Number(quantity), prices[tier][frame]),

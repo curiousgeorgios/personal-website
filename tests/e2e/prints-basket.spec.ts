@@ -18,7 +18,6 @@ test("a photograph's page offers the sizes it prints at, priced, with how delive
   await expect(form.locator(".size-choice")).toHaveText([
     "small · 8 × 12 in (20 × 30 cm) · $59, or $139 framed",
     "medium · 12 × 18 in (30 × 46 cm) · $79, or $179 framed",
-    "large · 16 × 24 in (41 × 61 cm) · $119, or $259 framed",
   ]);
   await expect(form.locator(".frame-choice")).toHaveText(["unframed", "oak frame"]);
   await expect(form.locator(".prints-hint")).toHaveText("delivery is quoted for your address in the basket. prices include no gst; the seller isn't registered for gst.");
@@ -268,7 +267,7 @@ for (const [width, height] of [[1280, 900], [375, 812]]) {
         for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) if (!entry.hadRecentInput) (window as unknown as { cls: number }).cls += entry.value;
       }).observe({ type: "layout-shift", buffered: true });
     });
-    const five = ["small:oak", "small:unframed", "medium:oak", "medium:unframed", "large:oak"].map((print) => `fixture-b-01:${print}`).join(",");
+    const five = ["small:oak", "small:unframed", "medium:oak", "medium:unframed", "large:oak"].map((print) => `fixture-d-01:${print}`).join(",");
     await page.goto(`/basket?items=${five}`);
     await expect(page.locator(".basket-line")).toHaveCount(5);
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>(".basket-line img")].every((img) => img.complete && img.naturalWidth > 0), undefined, { timeout: 10_000 });

@@ -217,6 +217,16 @@ describe("the guard", () => {
     expect(logs()).toContain(missing);
   });
 
+  test("recovery retains a withdrawn size from a paid session for manual review", async () => {
+    const { db, deps } = await setup();
+    const paid = session({ amount_total: 30800, metadata: { order_id: ORDER, country: "AU", print_total: "25900", delivery_amount: "4900", line_1: "fixture-b-01:large:oak:1" } });
+    expect(await handleStripeEvent(deps, event("checkout.session.completed", paid))).toBe(200);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", print_total: 25900 });
+    expect((await db.prepare("SELECT size FROM print_order_items WHERE order_id = ?").bind(ORDER).all()).results).toEqual([{ size: "x16x24" }]);
+    await Promise.all(deps.waited);
+    expect(await getOrder(db, ORDER)).toMatchObject({ status: "needs_attention", attempts: 0 });
+  });
+
   test("a paid session whose order is missing recreates it from the metadata, straight into needs attention", async () => {
     const { db, deps } = await setup();
     expect(await handleStripeEvent(deps, event("checkout.session.completed", session()))).toBe(200);

@@ -1,12 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, stat, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat, rename, rm, chmod } from "node:fs/promises";
 import { dirname, resolve, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import sharp from "sharp";
 import { PREVIEW_FORMATS, PREVIEW_SIZES, PUBLISHED_AT } from "./photo-manifest.mjs";
 import { pickGeocoded, placeFromPlacemark, postPlace } from "./photo-places.mjs";
+import { needsNativeRender, photoFingerprint } from "./photo-recipe.mjs";
 
 const run = promisify(execFile);
 const args = process.argv.slice(2);
@@ -50,9 +51,10 @@ for (const { selected } of tasks) {
   posts.push({ collection: selected.post, publishedAt, place: null });
 }
 await mkdir(join(output, "metadata"), { recursive: true });
-await mkdir(join(output, ".work"), { recursive: true });
+await mkdir(join(output, ".work"), { recursive: true, mode: 0o700 });
+await chmod(join(output, ".work"), 0o700);
 let renderer;
-if (tasks.some(({ source }) => [".arw", ".dng", ".heic"].includes(extname(source.path).toLowerCase()))) {
+if (tasks.some(({ source }) => needsNativeRender(source.path))) {
   if (process.platform !== "darwin") throw new Error("RAW/HEIC preparation requires macOS's native renderer");
   renderer = join(output, ".work/photo-render");
   execFileSync("xcrun", ["swiftc", fileURLToPath(new URL("./photo-render.swift", import.meta.url)), "-o", renderer], { stdio: "inherit" });
@@ -91,7 +93,7 @@ let cursor = 0;
 async function prepare(task) {
   const { selected, source, position } = task;
   const sourceBytes = await readFile(source.path);
-  const fingerprint = hash(Buffer.concat([sourceBytes, Buffer.from(`gallery-v1:${source.kind}:${source.display_width}:${source.display_height}`)]));
+  const fingerprint = photoFingerprint(sourceBytes, source);
   const checkpoint = join(output, "metadata", `${selected.id}.json`);
   try {
     const cached = JSON.parse(await readFile(checkpoint, "utf8"));
@@ -109,11 +111,17 @@ async function prepare(task) {
     }
   } catch (error) { if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error; }
   let input = source.path;
-  if ([".arw", ".dng", ".heic"].includes(extname(input).toLowerCase())) {
-    input = join(output, ".work", `${selected.id}.jpg`);
-    execFileSync(renderer, [source.path, input], { stdio: "pipe" });
+  let rendered;
+  try {
+    if (needsNativeRender(input)) {
+      input = join(output, ".work", `${selected.id}.tiff`);
+      execFileSync(renderer, [source.path, input], { stdio: "pipe" });
+    }
+    rendered = await sharp(input).rotate().withIccProfile("srgb").jpeg({ quality: 96, chromaSubsampling: "4:4:4" }).toBuffer({ resolveWithObject: true });
+  } finally {
+    if (input !== source.path) await rm(input, { force: true });
   }
-  const { data, info } = await sharp(input).rotate().withIccProfile("srgb").jpeg({ quality: 96, chromaSubsampling: "4:4:4" }).toBuffer({ resolveWithObject: true });
+  const { data, info } = rendered;
   if (info.width !== source.display_width || info.height !== source.display_height) throw new Error(`Rendered dimensions differ from the source: ${selected.id} (${info.width}x${info.height})`);
   const sha256 = hash(data);
   const printKey = `prints/${selected.id}/${sha256}.jpg`;

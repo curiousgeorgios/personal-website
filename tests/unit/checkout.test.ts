@@ -182,6 +182,20 @@ describe("startCheckout", () => {
 });
 
 describe("POST /basket, intent=checkout", () => {
+  test("a sealed quote containing a withdrawn 16 by 24 cannot create a new checkout", async () => {
+    const { fake, db, deps } = await setup();
+    for (const photoId of ["fixture-b-01", "fixture-b-02"]) {
+      for (const frame of ["oak", "unframed"]) {
+        const items = `${photoId}:large:${frame},fixture-01:small:oak`;
+        const token = await sealQuote(VIEW_SECRET, payload({ items, printTotal: frame === "oak" ? 39800 : 25800 }));
+        const outcome = await basketPost(deps, await pay(token), url(items), {});
+        expect(outcome).toMatchObject({ status: 422, view: { basket: { unavailable: 1 } } });
+      }
+    }
+    expect(fake.calls).toHaveLength(0);
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM print_orders").first("n")).toBe(0);
+  });
+
   test("a good quote answers 303 to stripe's page, charging the sealed amounts", async () => {
     const { fake, deps } = await setup();
     const outcome = await basketPost(deps, await pay(await sealQuote(VIEW_SECRET, payload())), url(), {});

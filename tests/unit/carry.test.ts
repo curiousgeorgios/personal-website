@@ -31,8 +31,8 @@ describe("loadBasket", () => {
 
 describe("the carried basket", () => {
   test("a valid items parameter is carried in its canonical form, with its count", async () => {
-    expect(await readCarry(await printDb(), at("?items=fixture-b-02:small:oak,fixture-b-01:large:unframed,fixture-b-02:small:oak"))).toEqual({
-      items: "fixture-b-02:small:oak,fixture-b-02:small:oak,fixture-b-01:large:unframed", count: 3,
+    expect(await readCarry(await printDb(), at("?items=fixture-b-02:small:oak,fixture-b-01:medium:unframed,fixture-b-02:small:oak"))).toEqual({
+      items: "fixture-b-02:small:oak,fixture-b-02:small:oak,fixture-b-01:medium:unframed", count: 3,
     });
   });
 
