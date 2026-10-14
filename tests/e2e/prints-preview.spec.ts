@@ -6,7 +6,6 @@ import { PRINTS } from "./prints-site";
 // The print row's preview (spec 15.1 as amended), on the prints server (4337): the drawing follows the radios through
 // CSS alone, to one scale, and agrees with what the basket receives
 test.use({ baseURL: PRINTS });
-test.skip(({ browserName }) => browserName !== "chromium", "the print specs run in chromium");
 
 const box = async (locator: Locator) => (await locator.boundingBox())!;
 /** Where an element sits on the page, whatever the scroll: a click on a label may scroll it into view */
@@ -113,7 +112,7 @@ test("the preview, its caption and the basket agree on the chosen print", async 
   await expect(page.locator(".line-what")).toHaveText(["large · 16 × 24 in · oak frame · $259"]);
 });
 
-test("from the keyboard the radios move the preview, and a screen reader hears the caption", async ({ page }) => {
+test("from the keyboard the radios move the preview, and a screen reader hears the caption", async ({ page, browserName }) => {
   await page.goto("/photos/fixture-b-01");
   const status = page.locator(".preview-status");
   await expect(status).toHaveText("");
@@ -123,8 +122,15 @@ test("from the keyboard the radios move the preview, and a screen reader hears t
   await expect(page.locator('input[name="size"][value="medium"]')).toBeChecked();
   expect((await settled(page)).height).toBeGreaterThan(small.height);
   await expect(status).toHaveText("medium · unframed · $79. the print: 30 cm wide, 46 cm tall (12 × 18 in)");
-  await page.keyboard.press("Tab");
-  await expect(page.locator('input[name="frame"][value="unframed"]')).toBeFocused();
+  const unframed = page.locator('input[name="frame"][value="unframed"]');
+  // macOS Safari's full-item navigation uses Option-Tab (support.apple.com/guide/safari/cpsh003/mac).
+  // Native browsers differ on whether navigation visits the unchecked sizes too. The next group must remain reachable
+  const next = browserName === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab";
+  for (let step = 0; step < 3; step++) {
+    await page.keyboard.press(next);
+    if (await unframed.evaluate((element) => element === document.activeElement)) break;
+  }
+  await expect(unframed).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(page.locator('input[name="frame"][value="oak"]')).toBeChecked();
   await expect(status).toHaveText("medium · oak frame · $179. the print: 30 cm wide, 46 cm tall (12 × 18 in)");
@@ -198,24 +204,40 @@ test("a photo with no print sizes has no preview", async ({ page }) => {
   await expect(page.locator(".print-preview, form#prints")).toHaveCount(0);
 });
 
-// Spec 23.1: images held back 1.5 s, as on a slow phone; the drawing's boxes are sized before any byte arrives
+// Spec 23.1: hold image bytes until the initial boxes are measured. WebKit has no layout-shift entries, so also
+// compare the photo, preview and button geometry before and after loading on every browser
 for (const [width, height] of [[1280, 900], [375, 812]]) {
   test(`a late image shifts nothing in the print row at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height });
+    let releaseImages!: () => void;
+    const imagesReady = new Promise<void>((resolve) => { releaseImages = resolve; });
     await page.route(/\/media\/photos\/previews\/.*\.(avif|webp)$/, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await imagesReady;
       await route.continue();
     });
     await page.addInitScript(() => {
-      (window as unknown as { cls: number }).cls = 0;
+      if (!PerformanceObserver.supportedEntryTypes.includes("layout-shift")) return;
+      (window as unknown as { cls?: number }).cls = 0;
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) if (!entry.hadRecentInput) (window as unknown as { cls: number }).cls += entry.value;
       }).observe({ type: "layout-shift", buffered: true });
     });
-    await page.goto("/photos/fixture-b-01");
+    await page.goto("/photos/fixture-b-01", { waitUntil: "domcontentloaded" });
     await page.locator(".print-preview").scrollIntoViewIfNeeded();
+    const geometry = () => Promise.all([
+      onPage(page.locator(".photo img")), onPage(page.locator(".print-preview")),
+      onPage(page.getByRole("button", { name: "add to basket" })),
+    ]);
+    const before = await geometry();
+    releaseImages();
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>(".photo img, .preview-print img")].every((img) => img.complete && img.naturalWidth > 0), undefined, { timeout: 10_000 });
     await page.waitForTimeout(300);
-    expect(await page.evaluate(() => (window as unknown as { cls: number }).cls)).toBeLessThan(0.01);
+    const after = await geometry();
+    // Rounded responsive-image dimensions can alter the intrinsic ratio by a fraction of a CSS pixel in WebKit
+    for (const [index, rect] of after.entries()) {
+      for (const axis of ["x", "y", "width", "height"] as const) expect(Math.abs(rect[axis] - before[index][axis])).toBeLessThan(0.5);
+    }
+    const cls = await page.evaluate(() => (window as unknown as { cls?: number }).cls);
+    if (cls !== undefined) expect(cls).toBeLessThan(0.01);
   });
 }

@@ -51,7 +51,7 @@ The gallery merges together with prints (plan 7), so George follows the combined
 
 Print ordering is live as of 14 October 2026, following [PR #6](https://github.com/curiousgeorgios/personal-website/pull/6) and its successful [main deployment](https://github.com/curiousgeorgios/personal-website/actions/runs/38493167634). `PRINTS_OPEN` is `"true"`. A photograph's page gets a `prints` row, the basket lives in the URL, Artelo's Price Check quotes delivery for the buyer's address, Stripe's hosted checkout takes payment, each paid basket becomes one Artelo order and the buyer gets a private order page and a shipped email; George runs it from the `orders` section of `/admin`. The first physical sample order remains the proof of real supplier fulfilment and print quality. How it works and how to run it: [prints guide](docs/prints.md).
 
-The next requested UI feature is [interactive size and frame previews](docs/print-preview-handoff.md), assigned to Claude. The populated gallery's mobile loading performance remains a separate follow-up.
+Photo pages include [interactive size and frame previews](docs/print-preview-handoff.md), built by Claude and checked in Chromium and WebKit. The populated gallery's mobile loading performance remains a separate follow-up.
 
 The e2e suite stands in for Stripe, Artelo, the exchange rate and the mail binding (`tests/fixtures/artelo-site.mjs`, port 4401) on the prints servers (4337, and 4339 with no exchange rate). Set `STRIPE_TEST_SECRET_KEY` to a Stripe test key in your shell to also run the one full order through Stripe's test mode (4338); without it that spec is skipped.
 

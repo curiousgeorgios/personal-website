@@ -76,3 +76,9 @@ Validation in the cloud task:
 - Production build and the built-Worker guard: pass.
 
 All browser runs were in Chromium, the only browser in the container. The phone project also ran in Chromium instead of WebKit, so a genuine WebKit check is still needed before release.
+
+## WebKit and release approval, 14 October 2026
+
+George authorised Codex to run the WebKit checks, then merge and deploy if all checks pass. The local check used genuine macOS WebKit for the preview, photo-page and gallery suites in the desktop and iPhone projects. The combined run passed 78 tests with two intentional gallery skips; the remaining two keyboard tests passed in a focused run after using macOS Safari's Option-Tab navigation. A responsive image's intrinsic-ratio rounding moved the layout by 0.16 CSS pixels, so the added geometry check allows less than half a CSS pixel in every axis while Chromium retains its CLS limit of 0.01. Original failing traces and the corrected runs are saved in reports/print-previews-2026-10-14 on George's Mac and excluded from Git.
+
+The preview spec now runs in Chromium, WebKit and the iPhone project in CI. The release still requires the PR checks and main deployment pipeline to pass. Supplier choices, prices, opening settings and the illustrative-frame boundary are unchanged.

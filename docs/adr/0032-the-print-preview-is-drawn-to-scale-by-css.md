@@ -1,6 +1,6 @@
 # ADR-0032: The print preview is drawn to scale by CSS, with an illustrative frame
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-14
 - Authors: Claude, for George Vlachos
 
@@ -27,4 +27,4 @@ The oak moulding is drawn outside the paper with an illustrative 1.5 cm face and
 - The size difference is visible and measurable, and the preview, caption, radios and basket share one state.
 - The page gains about 1KB of gzipped CSS and a script of a few hundred bytes. The CSS family table must change whenever `FAMILIES` does, and the unit test fails until it does.
 - The frame profile `NaturalOak` selects, its overlap with the paper and whether it arrives assembled (`includeFramingService: false`; Artelo's bulk-order tutorial and API documentation disagree) stay unverified. These need Artelo's confirmation or the first physical sample before the drawing or copy claims supplier accuracy. Fulfilment settings stay as they are until then.
-- Browser evidence so far is Chromium only (the cloud container's browser), including the phone-sized checks. A genuine WebKit check is still needed before release.
+- The cloud evidence was Chromium only. On 14 October Codex checked the preview, photo page and gallery in genuine macOS WebKit on desktop and an iPhone-sized project. CI now runs the preview spec in Chromium, WebKit and the phone project. Late-image checks compare geometry in every browser and retain the CLS limit where that metric is exposed.
