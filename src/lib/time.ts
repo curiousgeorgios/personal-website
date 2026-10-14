@@ -1,7 +1,10 @@
-const SYDNEY = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit", timeZone: "Australia/Sydney" });
+// Built on first use, not at import: a phone's first Intl formatter costs it about 55ms, which the home page's clock
+// spends after the first paint (clock.ts)
+let sydney: Intl.DateTimeFormat | undefined;
 
 export function sydneyTime(now: Date): string {
-  return SYDNEY.format(now).replace(/\s?(am|pm)$/i, (_match, period: string) => ` ${period.toLowerCase()}`);
+  sydney ??= new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit", timeZone: "Australia/Sydney" });
+  return sydney.format(now).replace(/\s?(am|pm)$/i, (_match, period: string) => ` ${period.toLowerCase()}`);
 }
 
 // en-CA writes dates as YYYY-MM-DD, the format a date input and the log use. Built on first use, not at import: the

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { FAMILIES, printsFor, TIERS } from "../../src/lib/prints/catalogue";
-import { CM_PER_INCH, familyClass, FRAME_FACE_CM, ORIGIN_CM, previewArea, previewChoice, previewSizes, rulerMarks, trimNote } from "../../src/lib/prints/preview";
+import { CM_PER_INCH, familyClass, ppiAt, FRAME_FACE_CM, ORIGIN_CM, previewArea, previewChoice, previewSizes, rulerMarks, trimNote } from "../../src/lib/prints/preview";
 
 // One master per ratio family, each sharp enough for all three of its sizes, upright and on its side
 const MASTERS: Record<string, [number, number]> = { "2:3": [4000, 6000], "3:4": [4284, 5712], "4:5": [4000, 5000], "iso a": [4000, 5657], "1:1": [4000, 4000] };
@@ -48,6 +48,19 @@ describe("the preview's sizes", () => {
   test("a photo with one size gets one", () => {
     const prints = printsFor(2048, 2048)!;
     expect(previewSizes(prints, 2048, 2048).map((size) => [size.tier, size.width, size.height])).toEqual([["small", 10, 10]]);
+  });
+});
+
+describe("the pixels per inch", () => {
+  test("is the lesser side's density when the master fills the paper, rounded down, and at least 200 for every size offered", () => {
+    expect(ppiAt(3648, 5472, FAMILIES[0].tiers.large)).toBe(228);
+    expect(ppiAt(5472, 3648, FAMILIES[0].tiers.large)).toBe(228);
+    // 4:5 on 11 × 14 trims the width, so the height sets the density: 5000 / 14 = 357.1, not 4000 / 11 = 363.6
+    expect(ppiAt(4000, 5000, FAMILIES[2].tiers.medium)).toBe(357);
+    for (const [w, h] of [[3648, 5472], [3024, 4032], [2858, 3811], [2194, 3291], [1660, 2340], [2048, 2048], [4000, 5657]]) {
+      const prints = printsFor(w, h);
+      for (const size of prints ? previewSizes(prints, w, h) : []) expect(size.ppi, `${w} × ${h} ${size.tier}`).toBeGreaterThanOrEqual(200);
+    }
   });
 });
 

@@ -3,7 +3,7 @@ import { photoSizes, previewOf, srcsetOf } from "../../lib/photos/gallery";
 import type { PublicPhoto } from "../../lib/photos/store";
 import { FRAMES, sizeLabel, type PhotoPrints } from "../../lib/prints/catalogue";
 import { aud } from "../../lib/prints/money";
-import { familyClass, previewArea, previewChoice, previewSizes, rulerMarks } from "../../lib/prints/preview";
+import { familyClass, previewArea, previewChoice, previewSizes, rulerMarks, sizeLine } from "../../lib/prints/preview";
 import type { PriceList } from "../../lib/prints/store";
 import "../../styles/prints.css";
 
@@ -25,9 +25,14 @@ const area = previewArea(prints.orientation);
 // The photo page's own image, with the same sources and sizes, so the browser takes the copy it already has
 const medium = previewOf(photo, 960, "webp");
 const sizes = photoSizes(photo.width, photo.height);
+// The master's own pixel size (publicPhoto's width and height are the print file's): 3,648 × 5,472
+const pixels = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+// A request, not a download: George decides each one himself
+const fileRequest = `mailto:hello@curiousgeorge.dev?subject=${encodeURIComponent(`a high-resolution file of ${photo.id}`)}`;
 ---
 <form method="get" action="/basket" id="prints" class="print-form">
   <p>a print of this photo, made by artelo on archival matte paper and posted from the us.</p>
+  <p class="print-file">printed from the full-resolution file, {pixels(photo.width)} × {pixels(photo.height)} pixels, not from the smaller images on this page.</p>
   <figure class="print-preview">
     {/* A drawing for the eye; the caption below says the same in words */}
     <div class:list={["preview-stage", prints.orientation.toLowerCase(), familyClass(prints.family)]} aria-hidden="true">
@@ -48,7 +53,7 @@ const sizes = photoSizes(photo.width, photo.height);
       {views.map((view) => FRAMES.map((frame) => (
         <p class="preview-choice" data-tier={view.tier} data-frame={frame}>{previewChoice(view.tier, frame, aud(prices[view.tier][frame]))}</p>
       )))}
-      {views.map((view) => <p class="preview-size" data-tier={view.tier}>{view.dimensions}{view.trim && `; ${view.trim}`}</p>)}
+      {views.map((view) => <p class="preview-size" data-tier={view.tier}>{sizeLine(view)}</p>)}
       <p class="preview-note">drawn to scale against the ruler. the frame is illustrative; screen colour and timber grain vary.</p>
     </figcaption>
   </figure>
@@ -68,6 +73,12 @@ const sizes = photoSizes(photo.width, photo.height);
   </fieldset>
   <button type="submit" class="print-button">add to basket</button>
   <p class="prints-hint">delivery is quoted for your address in the basket. {gst}</p>
+  {/* A disclosure, so it opens from the keyboard and without JavaScript; every claim here is in prepare-photos.mjs or catalogue.ts */}
+  <details class="print-details">
+    <summary>about the print file</summary>
+    <p>we prepare the file at its full pixel size, without upscaling: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. a screen can't show a print's exact colour.</p>
+  </details>
+  <p class="print-contact">want a high-resolution file to print yourself? ask george at <a href={fileRequest}>hello@curiousgeorge.dev</a>.</p>
 </form>
 <script>
   import "../../scripts/print-preview";

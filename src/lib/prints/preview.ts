@@ -49,7 +49,17 @@ export interface PreviewSize {
   dimensions: string;
   /** How the photograph is trimmed to fill this paper, or null when it fits exactly */
   trim: string | null;
+  /** The master's pixels per inch at this size, rounded down: 333 */
+  ppi: number;
 }
+
+/**
+ * Pixels per inch when the master fills this paper (Artelo's Outside fit): the lesser of the two sides' ratios, as the
+ * catalogue's 200 ppi rule measures it, rounded down so the page never overstates it. In tenths of an inch, as the
+ * catalogue counts, so an exact 200 (1660 px on 8.3 in) isn't shown as 199
+ */
+export const ppiAt = (photoWidth: number, photoHeight: number, print: { short: number; long: number }) =>
+  Math.floor(Math.min((Math.min(photoWidth, photoHeight) * 10) / Math.round(print.short * 10), (Math.max(photoWidth, photoHeight) * 10) / Math.round(print.long * 10)));
 
 /**
  * The trim Artelo's Outside fit makes: the photograph fills the paper and the excess is cut evenly from both edges of
@@ -76,9 +86,13 @@ export function previewSizes(prints: PhotoPrints, photoWidth: number, photoHeigh
       height,
       dimensions: `the print: ${cm(width)} cm wide, ${cm(height)} cm tall (${width}\u00a0×\u00a0${height}\u00a0in)`,
       trim: trimNote(photoWidth, photoHeight, size),
+      ppi: ppiAt(photoWidth, photoHeight, size),
     };
   });
 }
+
+/** The caption's size line: the print: 30 cm wide, 46 cm tall (12 × 18 in), 333 pixels per inch; and any trim */
+export const sizeLine = (view: PreviewSize) => `${view.dimensions}, ${view.ppi} pixels per inch${view.trim ? `; ${view.trim}` : ""}`;
 
 /** medium · oak frame · $179 */
 export const previewChoice = (tier: Tier, frame: Frame, price: string) => `${tier} · ${frameLabel(frame)} · ${price}`;

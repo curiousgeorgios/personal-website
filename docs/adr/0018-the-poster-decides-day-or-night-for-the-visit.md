@@ -21,3 +21,7 @@ Poster and scene always agree at take-over, whatever the visitor's own time zone
 
 - **The scene reads the clock when it starts:** simpler, but a visit that crosses 19:00 or 06:00 between load and take-over swaps the lighting, the jump the night posters exist to prevent.
 - **A third poster pair for golden hour:** would match the late afternoon more closely, but golden hour is a gentle warm shift, not a jump, and isn't worth two more images.
+
+## Amendment, 14 October 2026
+
+The inline script now reads Sydney's hour with `Date` and the New South Wales rule: clocks change at 16:00 UTC on the Saturday before the first Sunday of April and of October. It no longer uses `Intl.DateTimeFormat`, whose first use cost a 4×-throttled phone about 55ms of parser-blocking work before the home page's first paint. The decision, the one poster fetch, the no-JavaScript day poster and the CSP hash are unchanged. `tests/unit/night-poster.test.ts` compares the script's own hour with `Intl`'s at every quarter hour through 2035, and minute by minute around every clock change, and compares its poster choice with one made from `Intl`'s hour at the same moments. If New South Wales changes its rule, that test fails against updated time-zone data and the script needs the new rule.

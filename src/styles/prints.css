@@ -8,6 +8,23 @@
 .choice input { flex: none; width: 18px; height: 18px; margin: 1.5px 0 0; accent-color: var(--ink); }
 .choice input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .prints-hint { font-size: 14px; color: var(--muted); max-width: 34rem; text-wrap: pretty; }
+/* What the print is made from, under the intro it qualifies; the file's details and the request for a file of one's own
+   sit under the hint, in the same quiet voice */
+.print-form > .print-file, .print-contact, .print-details p { font-size: 14px; color: var(--muted); max-width: 34rem; text-wrap: pretty; }
+.print-form > .print-file { margin-top: -8px; }
+.print-details summary {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 44px; cursor: pointer; list-style: none;
+  font: 12.5px/1.55 var(--mono); color: var(--muted);
+}
+.print-details summary::-webkit-details-marker { display: none; }
+/* A chevron drawn as a shape, as the order page's: it turns down when the details open */
+.print-details summary::before { content: ""; width: 6px; height: 9px; background: currentColor; clip-path: polygon(0 0, 22% 0, 100% 50%, 22% 100%, 0 100%, 78% 50%); }
+.print-details[open] summary::before { transform: rotate(90deg); }
+.print-details summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 3px; }
+.print-details p { margin-top: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .print-details summary:hover { color: var(--ink); }
+}
 .print-button {
   justify-self: start; min-height: 44px; padding: 0 16px; cursor: pointer;
   font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat);

@@ -96,7 +96,9 @@ describe("the print row's preview", () => {
       ["large", "unframed", "large · unframed · $119"], ["large", "oak", "large · oak frame · $259"],
     ]);
     expect([...caption.querySelectorAll(".preview-size")].map((line) => nbsp(text(line)))).toEqual([
-      "the print: 20 cm wide, 30 cm tall (8 × 12 in)", "the print: 30 cm wide, 46 cm tall (12 × 18 in)", "the print: 41 cm wide, 61 cm tall (16 × 24 in)",
+      "the print: 20 cm wide, 30 cm tall (8 × 12 in), 500 pixels per inch",
+      "the print: 30 cm wide, 46 cm tall (12 × 18 in), 333 pixels per inch",
+      "the print: 41 cm wide, 61 cm tall (16 × 24 in), 250 pixels per inch",
     ]);
     expect(text(caption.querySelector(".preview-note"))).toBe("drawn to scale against the ruler. the frame is illustrative; screen colour and timber grain vary.");
     const status = doc.querySelector("#prints .preview-status")!;
@@ -106,7 +108,7 @@ describe("the print row's preview", () => {
   test("a landscape is drawn on its side, its width first", async () => {
     const doc = await render(PhotoView, at(6000, 4000));
     expect(doc.querySelector("#prints .preview-stage")!.classList.contains("horizontal")).toBe(true);
-    expect(nbsp(text(doc.querySelector('#prints .preview-size[data-tier="medium"]')))).toBe("the print: 46 cm wide, 30 cm tall (18 × 12 in)");
+    expect(nbsp(text(doc.querySelector('#prints .preview-size[data-tier="medium"]')))).toBe("the print: 46 cm wide, 30 cm tall (18 × 12 in), 333 pixels per inch");
   });
 
   test("every ratio family gets its class, an outline per size and its trim where the paper's shape differs", async () => {
@@ -136,4 +138,33 @@ describe("the print row's preview", () => {
     const doc = await render(PhotoView, { page });
     expect(doc.querySelector(".print-preview")).toBeNull();
   });
+
+  test("says what the print is made from: this photo's own pixel size, each size's density and the file's details", async () => {
+    const doc = await render(PhotoView, at(3648, 5472, "fixture-x-02"));
+    const intro = [...doc.querySelectorAll("#prints > p")].map(text);
+    expect(intro.slice(0, 2)).toEqual([
+      "a print of this photo, made by artelo on archival matte paper and posted from the us.",
+      "printed from the full-resolution file, 3,648 × 5,472 pixels, not from the smaller images on this page.",
+    ]);
+    // At least 200 on both sides at every size offered (the catalogue's rule), rounded down: 3648 / 16 = 228
+    expect([...doc.querySelectorAll("#prints .preview-size")].map((line) => text(line).match(/(\d+) pixels per inch/)?.[1])).toEqual(["456", "304", "228"]);
+    const details = doc.querySelector("#prints details.print-details")!;
+    expect(text(details.querySelector("summary"))).toBe("about the print file");
+    expect(details.hasAttribute("open")).toBe(false);
+    expect(text(details.querySelector("p"))).toBe(
+      "we prepare the file at its full pixel size, without upscaling: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. a screen can't show a print's exact colour.",
+    );
+  });
+
+  test("invites a request for a high-resolution file by email, never a download", async () => {
+    const doc = await render(PhotoView, { page, prints });
+    const contact = doc.querySelector("#prints .print-contact")!;
+    expect(text(contact)).toBe("want a high-resolution file to print yourself? ask george at hello@curiousgeorge.dev.");
+    const links = [...contact.querySelectorAll("a")];
+    expect(links.map((link) => [link.getAttribute("href"), text(link)])).toEqual([["mailto:hello@curiousgeorge.dev?subject=a%20high-resolution%20file%20of%20fixture-b-01", "hello@curiousgeorge.dev"]]);
+    // Nothing on the row links to a file: the master stays behind its signed, revocable links
+    expect([...doc.querySelectorAll("#prints a")].map((link) => link.getAttribute("href"))).toEqual([links[0].getAttribute("href")]);
+    expect(doc.querySelector('#prints [href*="/photos/download"], #prints [href*="prints/"], #prints [download]')).toBeNull();
+  });
 });
+
