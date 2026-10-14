@@ -88,17 +88,26 @@ describe("eventBody", () => {
 describe("the beacon script", () => {
   const ENDPOINT = "/ingest/i/v0/e/";
 
-  // The script runs when it loads, so each test stubs the browser it finds and imports it fresh
-  async function load(sendBeacon?: (url: string, body: string) => boolean) {
+  // The script runs when it loads, so each test stubs the browser it finds and imports it fresh. It starts the visit a
+  // task after the first frame; `frame` runs that frame and lets the task go, unless the test holds it back
+  async function load(sendBeacon?: (url: string, body: string) => boolean, { painted = true } = {}) {
     const beacon = sendBeacon && vi.fn(sendBeacon);
     const fetched = vi.fn((_url: string, _init: RequestInit) => Promise.resolve(new Response(null, { status: 204 })));
+    const frames: FrameRequestCallback[] = [];
+    const listeners = new Map<string, (event: { detail: unknown }) => void>();
     vi.stubGlobal("navigator", { userAgent: "UA/1", sendBeacon: beacon });
     vi.stubGlobal("location", { href: "https://curiousgeorge.dev/" });
-    vi.stubGlobal("document", { referrer: "", addEventListener: vi.fn() });
+    vi.stubGlobal("document", { referrer: "", addEventListener: vi.fn((name: string, listener: (event: { detail: unknown }) => void) => listeners.set(name, listener)) });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
     vi.stubGlobal("fetch", fetched);
     vi.resetModules();
     await import("../../src/scripts/beacon");
-    return { beacon, fetched };
+    const frame = async () => {
+      for (const callback of frames.splice(0)) callback(0);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    if (painted) await frame();
+    return { beacon, fetched, frame, track: (detail: unknown) => listeners.get("logbook:track")?.({ detail }) };
   }
 
   afterEach(() => vi.unstubAllGlobals());
@@ -124,4 +133,15 @@ describe("the beacon script", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({ event: "$pageview", distinct_id: "$posthog_cookieless" });
     if (beacon) expect(beacon.mock.calls[0]).toEqual([ENDPOINT, init.body]);
   });
+
+  test("waits for the first frame, so its Intl formatter never holds the first paint, and holds an earlier event until then", async () => {
+    const { beacon, frame, track } = await load(() => true, { painted: false });
+    track({ event: "label_opened", properties: { slug: "canberra-events" } });
+    expect(beacon).not.toHaveBeenCalled();
+    await frame();
+    expect(beacon?.mock.calls.map(([, body]) => JSON.parse(body).event)).toEqual(["$pageview", "label_opened"]);
+    track({ event: "record_played" });
+    expect(beacon?.mock.calls.map(([, body]) => JSON.parse(body).event)).toEqual(["$pageview", "label_opened", "record_played"]);
+  });
 });
+

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { FAMILIES, printsFor, TIERS } from "../../src/lib/prints/catalogue";
-import { CM_PER_INCH, familyClass, previewArea, previewSizes } from "../../src/lib/prints/preview";
+import { CM_PER_INCH, familyClass, previewArea, previewSizes, sizeLine } from "../../src/lib/prints/preview";
 import { PRINTS } from "./prints-site";
 
 // The print row's preview (spec 15.1 as amended), on the prints server (4337): the drawing follows the radios through
@@ -81,7 +81,7 @@ for (const width of [1280, 375]) {
         const [photoWidth, photoHeight] = orientation === "vertical" ? [short, long] : [long, short];
         const prints = printsFor(photoWidth, photoHeight)!;
         const views = previewSizes(prints, photoWidth, photoHeight);
-        const lines = views.map((view) => view.dimensions + (view.trim ? `; ${view.trim}` : ""));
+        const lines = views.map(sizeLine);
         await page.locator(".preview-stage").evaluate((stage, name) => stage.setAttribute("class", name), `preview-stage ${orientation} ${familyClass(prints.family)}`);
         await page.locator(".preview-size").evaluateAll((elements, captions) => {
           elements.forEach((element, index) => { element.textContent = captions[index]; });
@@ -116,7 +116,7 @@ test("a landscape lies on its side, cropped from the centre to the paper's shape
   expect(await img.evaluate((element) => [getComputedStyle(element).objectFit, getComputedStyle(element).objectPosition])).toEqual(["cover", "50% 50%"]);
   const shown = await box(img);
   expect([shown.width, shown.height]).toEqual([drawn.width, drawn.height]);
-  await expect(caption(page)).toHaveText(["medium · unframed · $79", "the print: 46 cm wide, 30 cm tall (18 × 12 in)", /^drawn to scale/]);
+  await expect(caption(page)).toHaveText(["medium · unframed · $79", "the print: 46 cm wide, 30 cm tall (18 × 12 in), 333 pixels per inch", /^drawn to scale/]);
 });
 
 test("oak draws a frame around the paper, never over it, and the caption's price follows", async ({ page }) => {
@@ -133,7 +133,7 @@ test("oak draws a frame around the paper, never over it, and the caption's price
   // The frame sits outside the paper: its face is drawn out from the paper's edge, and the paper keeps its size
   expect(parseFloat((await frame()).inset)).toBeLessThan(0);
   expect(await settled(page)).toEqual(unframed);
-  await expect(caption(page)).toHaveText(["medium · oak frame · $179", "the print: 30 cm wide, 46 cm tall (12 × 18 in)", /the frame is illustrative/]);
+  await expect(caption(page)).toHaveText(["medium · oak frame · $179", "the print: 30 cm wide, 46 cm tall (12 × 18 in), 333 pixels per inch", /the frame is illustrative/]);
 });
 
 test("the preview, its caption and the basket agree on the chosen print", async ({ page }) => {
@@ -155,7 +155,7 @@ test("from the keyboard the radios move the preview, and a screen reader hears t
   await page.keyboard.press("ArrowDown");
   await expect(page.locator('input[name="size"][value="medium"]')).toBeChecked();
   expect((await settled(page)).height).toBeGreaterThan(small.height);
-  await expect(status).toHaveText("medium · unframed · $79. the print: 30 cm wide, 46 cm tall (12 × 18 in)");
+  await expect(status).toHaveText("medium · unframed · $79. the print: 30 cm wide, 46 cm tall (12 × 18 in), 333 pixels per inch");
   const unframed = page.locator('input[name="frame"][value="unframed"]');
   // macOS Safari's full-item navigation uses Option-Tab (support.apple.com/guide/safari/cpsh003/mac).
   // Native browsers differ on whether navigation visits the unchecked sizes too. The next group must remain reachable
@@ -167,7 +167,7 @@ test("from the keyboard the radios move the preview, and a screen reader hears t
   await expect(unframed).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(page.locator('input[name="frame"][value="oak"]')).toBeChecked();
-  await expect(status).toHaveText("medium · oak frame · $179. the print: 30 cm wide, 46 cm tall (12 × 18 in)");
+  await expect(status).toHaveText("medium · oak frame · $179. the print: 30 cm wide, 46 cm tall (12 × 18 in), 333 pixels per inch");
   await expect(page.locator(".print-preview [aria-hidden='true']")).toHaveCount(1);
 });
 

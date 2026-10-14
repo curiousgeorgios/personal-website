@@ -39,10 +39,31 @@ test.each([
   expect(posterAt(iso)).toEqual([`/posters/deck-phone${suffix}.webp`, `/posters/deck-desktop${suffix}.webp`, night]);
 });
 
-test.each([["7 pm"], ["NaN"]])("an hour that doesn't parse (%j) keeps the day poster, as no JavaScript does", (formatted) => {
-  vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function () {
-    return { format: () => formatted };
-  } as never);
+test("an hour that can't be read keeps the day poster, as no JavaScript does", () => {
+  vi.spyOn(Date.prototype, "getUTCHours").mockReturnValue(Number.NaN);
   // 21:00 in Sydney is night, so only an unreadable hour can leave the day poster
   expect(posterAt("2026-10-05T10:00:00Z")).toEqual(["/posters/deck-phone.webp", "/posters/deck-desktop.webp", false]);
+});
+
+// The script reads Sydney's hour with Date alone (Intl's first use costs a throttled phone about 55ms before first paint).
+// Its daylight-saving rule is held to Intl's own time-zone data, the scene's source, through 2035: every hour, and every
+// minute of the six hours either side of each change
+test("its Sydney hour agrees with Intl's time-zone data at every hour to 2035 and every minute around each clock change", () => {
+  const sydney = new Intl.DateTimeFormat("en-AU", { hour: "numeric", hourCycle: "h23", timeZone: "Australia/Sydney" });
+  const offset = (time: number) => (Number(sydney.format(time)) - new Date(time).getUTCHours() + 24) % 24;
+  const moments: number[] = [];
+  const start = Date.UTC(2026, 0, 1);
+  const end = Date.UTC(2036, 0, 1);
+  for (let time = start; time < end; time += 3_600_000) {
+    moments.push(time);
+    if (offset(time) !== offset(time + 3_600_000)) for (let minute = time - 6 * 3_600_000; minute < time + 6 * 3_600_000; minute += 60_000) moments.push(minute);
+  }
+  const changes = moments.filter((time, index) => index > 0 && offset(time) !== offset(moments[index - 1]) && time - moments[index - 1] === 60_000);
+  // Two clock changes a year, each pinned to its minute
+  expect(changes.length).toBeGreaterThanOrEqual(20);
+  const disagreements = moments.filter((time) => {
+    const night = Number(sydney.format(time)) < 6 || Number(sydney.format(time)) >= 19;
+    return posterAt(new Date(time).toISOString())[2] !== night;
+  });
+  expect(disagreements.map((time) => new Date(time).toISOString())).toEqual([]);
 });

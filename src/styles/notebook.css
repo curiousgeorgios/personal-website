@@ -1,5 +1,9 @@
-@font-face { font-family: "Schibsted Grotesk"; src: url("/fonts/schibsted-grotesk.woff2") format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; }
-@font-face { font-family: "DM Mono"; src: url("/fonts/dm-mono.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+/* Each font is a preloaded core (ASCII, the copy's own punctuation and Latin-1's lowercase letters) and Latin-1's capitals
+   and symbols, fetched only by a page that shows one of them (scripts/build-fonts.mjs, which checks these ranges) */
+@font-face { font-family: "Schibsted Grotesk"; src: url("/fonts/schibsted-grotesk.woff2") format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; unicode-range: U+0020-007E, U+00A0, U+00B7, U+00D7, U+00DF-00FF, U+2013-2014, U+2018-2019, U+201C-201D, U+2026, U+2039-203A; }
+@font-face { font-family: "Schibsted Grotesk"; src: url("/fonts/schibsted-grotesk-latin1.woff2") format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; unicode-range: U+00A1-00B6, U+00B8-00D6, U+00D8-00DE; }
+@font-face { font-family: "DM Mono"; src: url("/fonts/dm-mono.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; unicode-range: U+0020-007E, U+00A0, U+00B7, U+00D7, U+00DF-00FF, U+2013-2014, U+2018-2019, U+201C-201D, U+2026, U+2039-203A; }
+@font-face { font-family: "DM Mono"; src: url("/fonts/dm-mono-latin1.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; unicode-range: U+00A1-00B6, U+00B8-00D6, U+00D8-00DE; }
 /* Metric-matched fallbacks (Capsize) so the swap to the web fonts does not move text */
 @font-face { font-family: "Schibsted Grotesk Fallback"; src: local("Arial"), local("ArialMT"); ascent-override: 93.4593%; descent-override: 24.6733%; line-gap-override: 0%; size-adjust: 104.4907%; }
 @font-face { font-family: "DM Mono Fallback"; src: local("Courier New"), local("CourierNewPSMT"); ascent-override: 99.2161%; descent-override: 31.005%; size-adjust: 99.9837%; }
