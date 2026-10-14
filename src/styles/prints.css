@@ -22,6 +22,89 @@
 }
 .basket-link { margin-top: 8px; }
 
+/* The print preview (spec 15.1 as amended): the chosen size drawn to one scale against a centimetre ruler, the paper's
+   corner at the rulers' 0. It reads the radios through :has() alone, so it needs no script; a browser without :has()
+   keeps the plain row. The drawing area is the same for every photograph of an orientation (preview.ts's previewArea),
+   so a small looks small on every page. A centimetre is at most 5px, less on a phone so the area fits the column */
+.print-preview { display: none; margin: 2px 0 4px; }
+@supports selector(:has(a)) { .print-preview { display: block; } }
+.preview-stage {
+  --ruler: 30px; --origin: 2.5; --face: 1.5;
+  --cm: min(5px, (100vw - 67px - var(--ruler)) / var(--area-w));
+  display: grid; grid-template-columns: var(--ruler) calc(var(--cm) * var(--area-w)); grid-template-rows: calc(var(--cm) * var(--area-h)) 24px;
+  font: 10px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.preview-stage.vertical { --area-w: 57; --area-h: 67; }
+.preview-stage.horizontal { --area-w: 67; --area-h: 57; }
+/* Each family's sizes in inches, short side then long, as FAMILIES in catalogue.ts (a unit test holds them equal) */
+.family-2-3 { --small-s: 8; --small-l: 12; --medium-s: 12; --medium-l: 18; --large-s: 16; --large-l: 24; }
+.family-3-4 { --small-s: 9; --small-l: 12; --medium-s: 12; --medium-l: 16; --large-s: 18; --large-l: 24; }
+.family-4-5 { --small-s: 8; --small-l: 10; --medium-s: 11; --medium-l: 14; --large-s: 16; --large-l: 20; }
+.family-iso-a { --small-s: 8.3; --small-l: 11.7; --medium-s: 11.7; --medium-l: 16.5; --large-s: 16.5; --large-l: 23.4; }
+.family-1-1 { --small-s: 10; --small-l: 10; --medium-s: 12; --medium-l: 12; --large-s: 20; --large-l: 20; }
+.preview-outline[data-tier="small"], .print-form:has([name="size"][value="small"]:checked) .preview-print { --s: var(--small-s); --l: var(--small-l); }
+.preview-outline[data-tier="medium"], .print-form:has([name="size"][value="medium"]:checked) .preview-print { --s: var(--medium-s); --l: var(--medium-l); }
+.preview-outline[data-tier="large"], .print-form:has([name="size"][value="large"]:checked) .preview-print { --s: var(--large-s); --l: var(--large-l); }
+.vertical :is(.preview-outline, .preview-print) { --w: var(--s); --h: var(--l); }
+.horizontal :is(.preview-outline, .preview-print) { --w: var(--l); --h: var(--s); }
+.preview-wall { grid-column: 2; grid-row: 1; position: relative; background: var(--mat); outline: 1px solid var(--rule); }
+.preview-outline, .preview-print {
+  position: absolute; left: calc(var(--cm) * var(--origin)); bottom: calc(var(--cm) * var(--origin));
+  width: calc(var(--cm) * var(--w) * 2.54); height: calc(var(--cm) * var(--h) * 2.54);
+}
+.preview-outline { border: 1px dashed #b5b4ab; box-sizing: border-box; }
+.preview-outline span { position: absolute; top: 4px; right: 5px; }
+/* The paper, filled edge to edge and cut evenly from the centre as Artelo's Outside fit does */
+.preview-print { z-index: 1; background: #ecebe5; box-shadow: 0 0 0 1px rgba(0, 0, 0, .05), 0 1px 2px rgba(0, 0, 0, .14), 0 6px 14px -8px rgba(0, 0, 0, .3); transition: width 260ms ease, height 260ms ease; }
+.preview-print img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+/* The oak frame around the paper, never over it, and a faint glaze on the paper; both only shown while oak is chosen */
+.preview-print::before, .preview-print::after { content: ""; position: absolute; opacity: 0; transition: opacity 200ms ease; }
+.preview-print::before {
+  z-index: -1; inset: calc(var(--cm) * var(--face) * -1);
+  background: linear-gradient(135deg, #d2ab7c, #bb8d5d 40%, #a97b4c);
+  box-shadow: inset 0 0 0 1px rgba(92, 60, 28, .35), 0 1px 2px rgba(0, 0, 0, .2), 0 8px 16px -8px rgba(0, 0, 0, .45);
+}
+.preview-print::after { inset: 0; box-shadow: inset 0 0 0 1px rgba(70, 45, 20, .3), inset 1px 1px 3px rgba(0, 0, 0, .3); background: linear-gradient(120deg, rgba(255, 255, 255, .12), transparent 45%); }
+.print-form:has([name="frame"][value="oak"]:checked) .preview-print { box-shadow: none; }
+.print-form:has([name="frame"][value="oak"]:checked) .preview-print::before,
+.print-form:has([name="frame"][value="oak"]:checked) .preview-print::after { opacity: 1; }
+/* Rulers: a tick every 5 cm, a longer one and a number every 10, from the paper's corner */
+.preview-ruler { position: relative; display: flex; --tick: #9d9c93; }
+.ruler-x {
+  grid-column: 2; grid-row: 2; padding-left: calc(var(--cm) * var(--origin)); border-top: 1px solid #b5b4ab;
+  background:
+    linear-gradient(to right, var(--tick) 1px, transparent 1px) calc(var(--cm) * var(--origin)) 0 / calc(var(--cm) * 10) 7px repeat-x,
+    linear-gradient(to right, var(--tick) 1px, transparent 1px) calc(var(--cm) * var(--origin)) 0 / calc(var(--cm) * 5) 4px repeat-x;
+}
+.ruler-x span { flex: none; width: calc(var(--cm) * 10); padding-top: 10px; }
+.ruler-x b { display: inline-block; font-weight: 400; transform: translateX(-50%); }
+.ruler-y {
+  grid-column: 1; grid-row: 1; flex-direction: column-reverse; padding-bottom: calc(var(--cm) * var(--origin)); border-right: 1px solid #b5b4ab;
+  background:
+    linear-gradient(to top, var(--tick) 1px, transparent 1px) right 0 bottom calc(var(--cm) * var(--origin)) / 7px calc(var(--cm) * 10) repeat-y,
+    linear-gradient(to top, var(--tick) 1px, transparent 1px) right 0 bottom calc(var(--cm) * var(--origin)) / 4px calc(var(--cm) * 5) repeat-y;
+}
+.ruler-y span { flex: none; height: calc(var(--cm) * 10); display: flex; align-items: flex-end; justify-content: flex-end; padding-right: 10px; }
+.ruler-y b { font-weight: 400; transform: translateY(50%); }
+/* The unit, in the corner where the rulers meet */
+.preview-unit { grid-column: 1; grid-row: 2; justify-self: end; padding: 10px 10px 0 0; }
+/* The caption shows the chosen size and frame; the rest of its lines wait for their radios. Each set of alternatives
+   shares one grid cell and the waiting ones are only invisible, so the cell keeps the height of its longest line (a
+   size with a trim note wraps further on a phone) and the radios and button below never move. visibility: hidden also
+   takes them out of the accessibility tree, as display: none did */
+.preview-caption { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1fr); text-wrap: pretty; font: 12.5px/1.55 var(--mono); color: var(--muted); max-width: 34rem; }
+.preview-caption .preview-choice { grid-area: 1 / 1; color: var(--ink); }
+.preview-caption .preview-size { grid-area: 2 / 1; }
+.preview-caption .preview-note { grid-area: 3 / 1; margin-top: 4px; font-size: 12px; }
+.print-form:has([name="size"][value="small"]:checked) .preview-caption [data-tier]:not([data-tier="small"]),
+.print-form:has([name="size"][value="medium"]:checked) .preview-caption [data-tier]:not([data-tier="medium"]),
+.print-form:has([name="size"][value="large"]:checked) .preview-caption [data-tier]:not([data-tier="large"]),
+.print-form:has([name="frame"][value="unframed"]:checked) .preview-caption [data-frame="oak"],
+.print-form:has([name="frame"][value="oak"]:checked) .preview-caption [data-frame="unframed"] { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .preview-print, .preview-print::before, .preview-print::after { transition: none; }
+}
+
 /* The basket (spec 15.2) */
 .basket-lines { display: grid; gap: 14px; }
 .basket-line { display: flex; gap: 14px; align-items: flex-start; }

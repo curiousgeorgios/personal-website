@@ -43,7 +43,7 @@ const sizes = photoSizes(photo.width, photo.height);
   </Row>
   {prints && (
     <Row label="prints" id="print-row">
-      <PrintRow photoId={photo.id} prints={prints.offers} prices={prints.prices} items={carry?.items ?? null} gst={prints.gst} />
+      <PrintRow photo={photo} prints={prints.offers} prices={prints.prices} items={carry?.items ?? null} gst={prints.gst} />
     </Row>
   )}
   <Row label="say hi" id="say-hi"><SayHi /></Row>

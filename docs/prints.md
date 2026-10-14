@@ -5,6 +5,7 @@ How print ordering works on curiousgeorge.dev, how George launches it and how he
 ## What a buyer sees
 
 - A photograph that prints well has a `prints` row: small, medium and large (the frameable Artelo size nearest A4, A3 and A2 for its ratio, at 200 pixels per inch or better), unframed or in oak. Prices are the fixed list in `print_prices`, in AUD, with no GST.
+- Above the choices, a preview draws the chosen size to scale against centimetre rulers, unframed or in oak, with the other sizes as dashed outlines and a caption giving the choice, its price and the print's dimensions. It follows the radios through CSS alone and reuses the photo page's own image. The oak moulding is illustrative: we have not verified which of Artelo's oak profiles our `NaturalOak` payload selects, its lip overlap or its outer size, so no outer frame size is shown and nothing promises ready-to-hang delivery ([ADR-0032](adr/0032-the-print-preview-is-drawn-to-scale-by-css.md)).
 - `add to basket` lands on `/basket`, whose basket lives only in the query string (`items=<photo>:<tier>:<frame>,…`, at most ten prints). The gallery carries it while browsing; those pages are never cached.
 - The buyer types a delivery address and presses `quote delivery`. Artelo's Price Check quotes the whole basket to that address; delivery is its freight plus any destination tax it quotes, converted at the ECB's rate plus the buffer (`print_settings.delivery_buffer`, 8% to start), rounded up to the dollar. The quote is sealed with `PRINT_VIEW_SECRET` for 30 minutes.
 - `continue to payment` writes the order, then sends the buyer to Stripe's hosted checkout, where the quoted address is fixed on the payment and shown read-only. Adaptive Pricing is off, so they pay the AUD total they saw.
@@ -23,6 +24,16 @@ How print ordering works on curiousgeorge.dev, how George launches it and how he
 - `bun run prints:check --local` and `bun run prints:webhook --local` run against whatever `ARTELO_API_BASE` points at; their spec points them at the stand-in.
 
 ## Launch checklist
+
+### Live release on 14 October 2026
+
+[PR #6](https://github.com/curiousgeorgios/personal-website/pull/6) merged as `3f8b4d1cc342b6c47f7700ba8a481e5c4537c558`. [Main workflow 38493167634](https://github.com/curiousgeorgios/personal-website/actions/runs/38493167634) passed check and deploy with 1,126 unit tests, 493 browser tests and 175 intentional skips. Both Workers deployed, cache purge succeeded and all five live privacy and media checks passed. The website Worker is `1ca003d1-9640-4b87-b207-fdab7a9af78e`, deployed at 12:22:51 Sydney.
+
+Fresh authenticated browser acceptance confirms prints are open, 458 photographs are published and the same four private holds remain hidden. The public print choices and a two-line basket passed: small unframed at $59 plus medium oak at $179 gave $238 before delivery. No address, delivery quote or payment was submitted. The first real two-print sample remains the check of actual supplier charging, image retrieval, combined shipping, genuine provider events, tracking and physical quality.
+
+Five-run median mobile Lighthouse LCP is 1,822ms for home, 1,989ms for the populated gallery and 2,137ms for the photo page, above the 1,500ms target. CLS is zero on all three; TBT is 28ms for home and zero on the photo pages. A 375 × 812 browser read loaded 210,411 bytes of 240px previews, below the 256,000-byte image budget. Receipts: `reports/photo-opening-2026-10-14/main-workflow-final.json` and `print-opening-live.json` on George's Mac; those local reports are not committed.
+
+George requested interactive framed, unframed and size previews next, with Claude responsible for their design and implementation. See the [preview handoff](print-preview-handoff.md). The earlier progress notes below are dated snapshots.
 
 ### Progress on 14 October 2026
 

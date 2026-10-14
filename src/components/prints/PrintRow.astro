@@ -1,12 +1,16 @@
 ---
-import { sizeLabel, type PhotoPrints } from "../../lib/prints/catalogue";
+import { photoSizes, previewOf, srcsetOf } from "../../lib/photos/gallery";
+import type { PublicPhoto } from "../../lib/photos/store";
+import { FRAMES, sizeLabel, type PhotoPrints } from "../../lib/prints/catalogue";
 import { aud } from "../../lib/prints/money";
+import { familyClass, previewArea, previewChoice, previewSizes, rulerMarks } from "../../lib/prints/preview";
 import type { PriceList } from "../../lib/prints/store";
 import "../../styles/prints.css";
 
-// The print row (spec 15.1): a plain get form with no script, landing on /basket with this print appended
+// The print row (spec 15.1): a plain get form landing on /basket with this print appended. Its preview follows the
+// radios through CSS alone, so choosing works the same without JavaScript; the one small script only announces the change
 interface Props {
-  photoId: string;
+  photo: PublicPhoto;
   prints: PhotoPrints;
   prices: PriceList;
   /** The carried basket's items, or null */
@@ -15,12 +19,42 @@ interface Props {
   gst: string;
 }
 
-const { photoId, prints, prices, items, gst } = Astro.props;
+const { photo, prints, prices, items, gst } = Astro.props;
+const views = previewSizes(prints, photo.width, photo.height);
+const area = previewArea(prints.orientation);
+// The photo page's own image, with the same sources and sizes, so the browser takes the copy it already has
+const medium = previewOf(photo, 960, "webp");
+const sizes = photoSizes(photo.width, photo.height);
 ---
 <form method="get" action="/basket" id="prints" class="print-form">
   <p>a print of this photo, made by artelo on archival matte paper and posted from the us.</p>
+  <figure class="print-preview">
+    {/* A drawing for the eye; the caption below says the same in words */}
+    <div class:list={["preview-stage", prints.orientation.toLowerCase(), familyClass(prints.family)]} aria-hidden="true">
+      <div class="preview-wall">
+        {views.map((view) => <span class="preview-outline" data-tier={view.tier}><span>{view.tier}</span></span>)}
+        <span class="preview-print">
+          <picture>
+            <source type="image/avif" srcset={srcsetOf(photo, [960, 1600], "avif")} sizes={sizes} />
+            <img src={medium?.url} srcset={srcsetOf(photo, [960, 1600], "webp")} sizes={sizes} alt="" loading="lazy" decoding="async" />
+          </picture>
+        </span>
+      </div>
+      <div class="preview-ruler ruler-y">{rulerMarks(area.height).map((mark) => <span><b>{mark}</b></span>)}</div>
+      <div class="preview-ruler ruler-x">{rulerMarks(area.width).map((mark) => <span><b>{mark}</b></span>)}</div>
+      <span class="preview-unit">cm</span>
+    </div>
+    <figcaption class="preview-caption">
+      {views.map((view) => FRAMES.map((frame) => (
+        <p class="preview-choice" data-tier={view.tier} data-frame={frame}>{previewChoice(view.tier, frame, aud(prices[view.tier][frame]))}</p>
+      )))}
+      {views.map((view) => <p class="preview-size" data-tier={view.tier}>{view.dimensions}{view.trim && `; ${view.trim}`}</p>)}
+      <p class="preview-note">drawn to scale against the ruler. the frame is illustrative; screen colour and timber grain vary.</p>
+    </figcaption>
+  </figure>
+  <p class="sr-only preview-status" role="status"></p>
   {items && <input type="hidden" name="items" value={items} />}
-  <input type="hidden" name="add" value={photoId} />
+  <input type="hidden" name="add" value={photo.id} />
   <fieldset>
     <legend>size</legend>
     {prints.offers.map((offer, index) => (
@@ -35,3 +69,6 @@ const { photoId, prints, prices, items, gst } = Astro.props;
   <button type="submit" class="print-button">add to basket</button>
   <p class="prints-hint">delivery is quoted for your address in the basket. {gst}</p>
 </form>
+<script>
+  import "../../scripts/print-preview";
+</script>
