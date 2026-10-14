@@ -152,7 +152,7 @@ describe("the print row's preview", () => {
     expect(text(details.querySelector("summary"))).toBe("about the print file");
     expect(details.hasAttribute("open")).toBe(false);
     expect(text(details.querySelector("p"))).toBe(
-      "the file is the photo at its full size, never enlarged: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. when you order, artelo fetches the file through a private link that opens only this photo and lasts 72 hours. a screen can't show a print's exact colour.",
+      "we prepare the file at its full pixel size, without upscaling: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. a screen can't show a print's exact colour.",
     );
   });
 

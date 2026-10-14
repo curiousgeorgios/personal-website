@@ -5,8 +5,8 @@
 // Each font is two files with the same family name, split by unicode-range: a core file, which Notebook.astro preloads,
 // with ASCII, the punctuation the site's own copy uses and Latin-1's lowercase letters (the site writes in lowercase, so
 // a place like "københavn" stays in the core), and the rest of Latin-1 (capitals and symbols), which a browser fetches
-// only for a page that shows one of them. Every page loads 7.6KB less font before its first paint and still draws any
-// Latin-1 name in the web font. notebook.css's @font-face rules carry the same unicode-range lists; this script checks
+// only for a page that shows one of them. The usual preloaded core is 7.6 KB lighter than the old full files, and a page
+// that needs a capital or symbol still draws it in the web font: full Latin-1 coverage is 54.6 KB, still under 60 KB. notebook.css's @font-face rules carry the same unicode-range lists; this script checks
 // them. The files keep their names: an old copy in a browser's or the edge's cache is a superset of the new core
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import subsetFont from "subset-font";

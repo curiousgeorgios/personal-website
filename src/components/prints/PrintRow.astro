@@ -73,10 +73,10 @@ const fileRequest = `mailto:hello@curiousgeorge.dev?subject=${encodeURIComponent
   </fieldset>
   <button type="submit" class="print-button">add to basket</button>
   <p class="prints-hint">delivery is quoted for your address in the basket. {gst}</p>
-  {/* A disclosure, so it opens from the keyboard and without JavaScript; every claim here is in prepare-photos.mjs, catalogue.ts or place.ts */}
+  {/* A disclosure, so it opens from the keyboard and without JavaScript; every claim here is in prepare-photos.mjs or catalogue.ts */}
   <details class="print-details">
     <summary>about the print file</summary>
-    <p>the file is the photo at its full size, never enlarged: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. when you order, artelo fetches the file through a private link that opens only this photo and lasts 72 hours. a screen can't show a print's exact colour.</p>
+    <p>we prepare the file at its full pixel size, without upscaling: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. a screen can't show a print's exact colour.</p>
   </details>
   <p class="print-contact">want a high-resolution file to print yourself? ask george at <a href={fileRequest}>hello@curiousgeorge.dev</a>.</p>
 </form>

@@ -8,7 +8,7 @@
 // It reads Sydney's hour with Date alone. Intl.DateTimeFormat costs about 55ms of a 4x-throttled phone's main thread on
 // first use (Chromium loads its locale data), and this script blocks parsing before the page's first paint. New South Wales
 // changes its clocks at 16:00 UTC on the Saturday before the first Sunday of April (03:00 AEDT back to 02:00) and of
-// October (02:00 AEST on to 03:00); a unit test holds this rule to Intl's own time-zone data minute by minute.
+// October (02:00 AEST on to 03:00); unit tests compare its hour, and its poster choice, with Intl's own time-zone data.
 export const NIGHT_POSTER = `(() => {
   const picture = document.currentScript.previousElementSibling;
   const now = new Date();

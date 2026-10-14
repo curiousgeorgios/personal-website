@@ -46,24 +46,40 @@ test("an hour that can't be read keeps the day poster, as no JavaScript does", (
 });
 
 // The script reads Sydney's hour with Date alone (Intl's first use costs a throttled phone about 55ms before first paint).
-// Its daylight-saving rule is held to Intl's own time-zone data, the scene's source, through 2035: every hour, and every
-// minute of the six hours either side of each change
-test("its Sydney hour agrees with Intl's time-zone data at every hour to 2035 and every minute around each clock change", () => {
+// Its New South Wales daylight-saving rule is held to Intl's own time-zone data, the scene's source, through 2035: every
+// quarter hour (every hour for the slower poster check), and every minute of the six hours either side of each change
+function moments(step = 900_000) {
   const sydney = new Intl.DateTimeFormat("en-AU", { hour: "numeric", hourCycle: "h23", timeZone: "Australia/Sydney" });
-  const offset = (time: number) => (Number(sydney.format(time)) - new Date(time).getUTCHours() + 24) % 24;
-  const moments: number[] = [];
-  const start = Date.UTC(2026, 0, 1);
-  const end = Date.UTC(2036, 0, 1);
-  for (let time = start; time < end; time += 3_600_000) {
-    moments.push(time);
-    if (offset(time) !== offset(time + 3_600_000)) for (let minute = time - 6 * 3_600_000; minute < time + 6 * 3_600_000; minute += 60_000) moments.push(minute);
+  const hour = (time: number) => Number(sydney.format(time));
+  const offset = (time: number) => (hour(time) - new Date(time).getUTCHours() + 24) % 24;
+  const times: number[] = [];
+  let changes = 0;
+  for (let time = Date.UTC(2026, 0, 1); time < Date.UTC(2036, 0, 1); time += step) {
+    times.push(time);
+    if (offset(time) !== offset(time + step)) {
+      changes++;
+      for (let minute = time - 6 * 3_600_000; minute < time + 6 * 3_600_000; minute += 60_000) times.push(minute);
+    }
   }
-  const changes = moments.filter((time, index) => index > 0 && offset(time) !== offset(moments[index - 1]) && time - moments[index - 1] === 60_000);
-  // Two clock changes a year, each pinned to its minute
-  expect(changes.length).toBeGreaterThanOrEqual(20);
-  const disagreements = moments.filter((time) => {
-    const night = Number(sydney.format(time)) < 6 || Number(sydney.format(time)) >= 19;
-    return posterAt(new Date(time).toISOString())[2] !== night;
+  return { times, changes, hour };
+}
+
+test("its Sydney hour is Intl's at every quarter hour to 2035 and every minute around each clock change", () => {
+  const { times, changes, hour } = moments();
+  // Two clock changes a year
+  expect(changes).toBe(20);
+  // The script itself, stopped where it has the hour, so an offset error at 02:00 or 03:00 can't hide behind "night"
+  const scriptHour = new Function("document", `return ${NIGHT_POSTER.replace("if (!(hour < 6 || hour >= 19)) return;", "return hour;")}`);
+  expect(NIGHT_POSTER).toContain("if (!(hour < 6 || hour >= 19)) return;");
+  const wrong = times.filter((time) => {
+    vi.setSystemTime(time);
+    return scriptHour({ currentScript: { previousElementSibling: null } }) !== hour(time);
   });
+  expect(wrong.map((time) => new Date(time).toISOString())).toEqual([]);
+}, 30_000);
+
+test("its poster choice agrees with one made from Intl's hour, every hour to 2035 and every minute around each clock change", () => {
+  const { times, hour } = moments(3_600_000);
+  const disagreements = times.filter((time) => posterAt(new Date(time).toISOString())[2] !== (hour(time) < 6 || hour(time) >= 19));
   expect(disagreements.map((time) => new Date(time).toISOString())).toEqual([]);
-});
+}, 30_000);
