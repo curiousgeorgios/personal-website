@@ -152,7 +152,7 @@ describe("the print row's preview", () => {
     expect(text(details.querySelector("summary"))).toBe("about the print file");
     expect(details.hasAttribute("open")).toBe(false);
     expect(text(details.querySelector("p"))).toBe(
-      "we prepare the file at its full pixel size, without upscaling: a jpeg at quality 96 with no colour subsampling and an srgb colour profile. every size offered here has at least 200 pixels per inch along both sides. a screen can't show a print's exact colour.",
+      "full-resolution jpeg at quality 96, with an srgb colour profile and no colour subsampling. at least 200 pixels per inch at every available print size.",
     );
   });
 
