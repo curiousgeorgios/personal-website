@@ -88,15 +88,19 @@
 .ruler-y b { font-weight: 400; transform: translateY(50%); }
 /* The unit, in the corner where the rulers meet */
 .preview-unit { grid-column: 1; grid-row: 2; justify-self: end; padding: 10px 10px 0 0; }
-/* The caption shows the chosen size and frame; the rest of its lines wait for their radios */
-.preview-caption { margin-top: 12px; text-wrap: pretty; font: 12.5px/1.55 var(--mono); color: var(--muted); max-width: 34rem; }
-.preview-caption .preview-choice { color: var(--ink); }
-.preview-caption .preview-note { margin-top: 4px; font-size: 12px; }
+/* The caption shows the chosen size and frame; the rest of its lines wait for their radios. Each set of alternatives
+   shares one grid cell and the waiting ones are only invisible, so the cell keeps the height of its longest line (a
+   size with a trim note wraps further on a phone) and the radios and button below never move. visibility: hidden also
+   takes them out of the accessibility tree, as display: none did */
+.preview-caption { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1fr); text-wrap: pretty; font: 12.5px/1.55 var(--mono); color: var(--muted); max-width: 34rem; }
+.preview-caption .preview-choice { grid-area: 1 / 1; color: var(--ink); }
+.preview-caption .preview-size { grid-area: 2 / 1; }
+.preview-caption .preview-note { grid-area: 3 / 1; margin-top: 4px; font-size: 12px; }
 .print-form:has([name="size"][value="small"]:checked) .preview-caption [data-tier]:not([data-tier="small"]),
 .print-form:has([name="size"][value="medium"]:checked) .preview-caption [data-tier]:not([data-tier="medium"]),
 .print-form:has([name="size"][value="large"]:checked) .preview-caption [data-tier]:not([data-tier="large"]),
 .print-form:has([name="frame"][value="unframed"]:checked) .preview-caption [data-frame="oak"],
-.print-form:has([name="frame"][value="oak"]:checked) .preview-caption [data-frame="unframed"] { display: none; }
+.print-form:has([name="frame"][value="oak"]:checked) .preview-caption [data-frame="unframed"] { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .preview-print, .preview-print::before, .preview-print::after { transition: none; }
 }

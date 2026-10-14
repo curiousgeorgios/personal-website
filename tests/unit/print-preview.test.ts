@@ -136,6 +136,13 @@ describe("prints.css", () => {
   test("follows every size and frame radio, and holds still for reduced motion", () => {
     for (const value of [...TIERS, "unframed", "oak"]) expect(css).toContain(`.print-form:has([name="${value === "unframed" || value === "oak" ? "frame" : "size"}"][value="${value}"]:checked)`);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.preview-print, \.preview-print::before, \.preview-print::after \{ transition: none; \}/);
+    // The caption's alternatives share a grid cell and wait invisibly rather than leaving the layout, so a longer line
+    // (a trim note on one size only) can't move the radios and button below when the choice changes
+    expect(css).toMatch(/\.preview-caption \{[^}]*display: grid;[^}]*\}/);
+    expect(css).toMatch(/\.preview-caption \.preview-choice \{ grid-area: 1 \/ 1;/);
+    expect(css).toMatch(/\.preview-caption \.preview-size \{ grid-area: 2 \/ 1; \}/);
+    expect(css).toMatch(/\.preview-caption \[data-frame="unframed"\] \{ visibility: hidden; \}/);
+    expect(css).not.toMatch(/\.preview-caption [^{]*\{ display: none; \}/);
     // Hidden unless the browser has :has(), so a browser without it never shows a preview that ignores the radios
     expect(css).toMatch(/\.print-preview \{ display: none;[^}]*\}\s*@supports selector\(:has\(a\)\) \{ \.print-preview \{ display: block; \} \}/);
   });
