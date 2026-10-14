@@ -82,3 +82,9 @@ All browser runs were in Chromium, the only browser in the container. The phone 
 George authorised Codex to run the WebKit checks, then merge and deploy if all checks pass. The local check used genuine macOS WebKit for the preview, photo-page and gallery suites in the desktop and iPhone projects. The combined run passed 78 tests with two intentional gallery skips; the remaining two keyboard tests passed in a focused run after using macOS Safari's Option-Tab navigation. A responsive image's intrinsic-ratio rounding moved the layout by 0.16 CSS pixels, so the added geometry check allows less than half a CSS pixel in every axis while Chromium retains its CLS limit of 0.01. Original failing traces and the corrected runs are saved in reports/print-previews-2026-10-14 on George's Mac and excluded from Git.
 
 The preview spec now runs in Chromium, WebKit and the iPhone project in CI. The release still requires the PR checks and main deployment pipeline to pass. Supplier choices, prices, opening settings and the illustrative-frame boundary are unchanged.
+
+### Crop captions keep the controls still
+
+Final review found that the longer crop note for a 4:5 medium print moved the controls by 19.4px at 1280px and 375px and 38.8px at 320px. Claude reproduced this with real 4:5 fixtures, with and without JavaScript, and repaired it in commit 44c204c. Each group of alternative captions now shares a grid cell and hidden lines retain their space while leaving the accessibility tree. The longest actual caption determines the height without clipping or a fixed pixel height.
+
+Codex added regression cases for crop-bearing 4:5 and ISO A captions in both orientations at 1280px and 375px. All 57 preview checks passed locally across Chromium, desktop WebKit and the iPhone project on the repaired release branch. Type checking and the 25 relevant unit tests passed. The full PR and main release pipelines remain the deployment gate.
