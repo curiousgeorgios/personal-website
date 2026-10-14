@@ -170,7 +170,7 @@ Server-rendered (`src/pages/photos/downloads/index.astro`) from `photoDownloadsV
 
 | Margin label | Content |
 |---|---|
-| `downloads` (head row) | `<h1>photos, full size</h1>`. Signed in: `full-resolution jpegs of every photo in the gallery. this browser is signed in until 28.10.26, 2:30 pm sydney time. please keep them to yourself.` and a `sign out` button. Otherwise: `full-resolution jpegs of george's photos, for the people he has approved. sign in with your approved email address and a six-digit code will be sent to it.` |
+| `downloads` (head row) | `<h1>photos, full size</h1>`. Signed in: `full-resolution jpegs of every photo in the gallery. this browser is signed in until 28.10.26, 2:30 pm sydney time. please keep them to yourself.` and a `sign out` button. Otherwise: `sign in with your approved email address and a six-digit code will be sent to it.` |
 | `entries` (signed in) | Every published photograph, grouped as 3.2, newest first. Each: its 240 preview and a link `download jpeg · 12.4 mb` to `/photos/downloads/<id>` with `download="<id>.jpg"`; the session cookie is the only credential |
 
 The sign-in (`src/scripts/photo-access.ts`, messages in `src/lib/photos/access-ui.ts`):

@@ -38,7 +38,7 @@ const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} mb`;
     )}
     {view.state === "signin" && (
       <>
-        <p class="intro">full-resolution jpegs of george's photos, for the people he has approved. sign in with your approved email address and a six-digit code will be sent to it.</p>
+        <p class="intro">sign in with your approved email address and a six-digit code will be sent to it.</p>
         {/* Both steps are fetches to same-origin JSON routes, so they need the script; it reveals them. Without it, nothing is
             sent anywhere: no address ever goes in a URL */}
         <noscript><p class="access-noscript">signing in needs javascript, which is off in this browser. turn it on for this page to sign in.</p></noscript>

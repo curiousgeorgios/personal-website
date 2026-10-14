@@ -65,7 +65,7 @@ describe("Downloads, signed out", () => {
     expect(labels(doc)).toEqual(["downloads"]);
     expect(text(doc.querySelector("h1"))).toBe("photos, full size");
     expect(text(doc.querySelector(".intro"))).toBe(
-      "full-resolution jpegs of george's photos, for the people he has approved. sign in with your approved email address and a six-digit code will be sent to it.",
+      "sign in with your approved email address and a six-digit code will be sent to it.",
     );
     expect(doc.querySelector(".download-list, #entries")).toBeNull();
     expect(doc.querySelector("main")!.getAttribute("data-access")).toBe("signin");
