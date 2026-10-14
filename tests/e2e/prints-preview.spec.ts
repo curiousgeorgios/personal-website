@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { FAMILIES, TIERS } from "../../src/lib/prints/catalogue";
-import { CM_PER_INCH, familyClass, previewArea } from "../../src/lib/prints/preview";
+import { FAMILIES, printsFor, TIERS } from "../../src/lib/prints/catalogue";
+import { CM_PER_INCH, familyClass, previewArea, previewSizes } from "../../src/lib/prints/preview";
 import { PRINTS } from "./prints-site";
 
 // The print row's preview (spec 15.1 as amended), on the prints server (4337): the drawing follows the radios through
@@ -69,6 +69,40 @@ test("every family's sizes are drawn from the catalogue, upright and on their si
     }
   }
 });
+
+for (const width of [1280, 375]) {
+  for (const orientation of ["vertical", "horizontal"] as const) {
+    test(`crop captions keep the choices and button still at ${width}px, ${orientation}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/photos/fixture-b-01");
+      await page.evaluate(() => document.fonts.ready);
+      // As with the geometry check above, use the fixture row with real catalogue captions for crop-bearing families
+      for (const [short, long] of [[4000, 5000], [4000, 5657]]) {
+        const [photoWidth, photoHeight] = orientation === "vertical" ? [short, long] : [long, short];
+        const prints = printsFor(photoWidth, photoHeight)!;
+        const views = previewSizes(prints, photoWidth, photoHeight);
+        const lines = views.map((view) => view.dimensions + (view.trim ? `; ${view.trim}` : ""));
+        await page.locator(".preview-stage").evaluate((stage, name) => stage.setAttribute("class", name), `preview-stage ${orientation} ${familyClass(prints.family)}`);
+        await page.locator(".preview-size").evaluateAll((elements, captions) => {
+          elements.forEach((element, index) => { element.textContent = captions[index]; });
+        }, lines);
+        await choose(page, "small", "unframed");
+        const controls = () => Promise.all([
+          ...[0, 1].map((index) => onPage(page.locator("#prints fieldset").nth(index))),
+          onPage(page.getByRole("button", { name: "add to basket" })),
+        ]);
+        const before = await controls();
+        for (const tier of TIERS) {
+          for (const frame of ["unframed", "oak"]) {
+            await choose(page, tier, frame);
+            await expect(page.locator(".preview-size:visible")).toHaveText(lines[TIERS.indexOf(tier)]);
+            expect(await controls(), `${prints.family} ${tier} ${frame}`).toEqual(before);
+          }
+        }
+      }
+    });
+  }
+}
 
 test("a landscape lies on its side, cropped from the centre to the paper's shape", async ({ page }) => {
   await page.goto("/photos/fixture-b-02");
