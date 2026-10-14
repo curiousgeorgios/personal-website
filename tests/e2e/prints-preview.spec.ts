@@ -30,12 +30,26 @@ async function settled(page: Page) {
 }
 const caption = (page: Page) => page.locator(".preview-caption > :visible");
 
+test("16 by 24 is absent for portrait and landscape, and saved baskets drop it in both frames", async ({ page }) => {
+  for (const id of ["fixture-b-01", "fixture-b-02"]) {
+    await page.goto(`/photos/${id}`);
+    await expect(page.locator('input[name="size"]')).toHaveCount(2);
+    await expect(page.locator('input[name="size"][value="large"]')).toHaveCount(0);
+    for (const frame of ["oak", "unframed"]) {
+      await page.goto(`/basket?items=${id}:large:${frame},fixture-01:small:oak`);
+      await expect(page.locator(".basket-note")).toHaveText("1 print was taken out: that photo isn't available as a print any more.");
+      await expect(page.locator(".basket-line")).toHaveCount(1);
+      await expect(page.locator(".line-what")).toHaveText("small · 10 × 10 in · oak frame · $139");
+    }
+  }
+});
+
 test("each size is drawn at its own size against one scale, and the area and the controls hold still", async ({ page }) => {
-  await page.goto("/photos/fixture-b-01");
+  await page.goto("/photos/fixture-d-01");
   const cm = await centimetre(page);
   const wall = await onPage(page.locator(".preview-wall"));
   const button = await onPage(page.getByRole("button", { name: "add to basket" }));
-  const family = FAMILIES.find((candidate) => candidate.name === "2:3")!;
+  const family = FAMILIES.find((candidate) => candidate.name === "4:5")!;
   for (const tier of TIERS) {
     // A click on the label, as a mouse would
     await page.locator(".size-choice", { hasText: `${tier} ·` }).click();
@@ -49,9 +63,9 @@ test("each size is drawn at its own size against one scale, and the area and the
 });
 
 test("every family's sizes are drawn from the catalogue, upright and on their side", async ({ page }) => {
-  // The fixture's 2:3 page with its family and orientation swapped in, so the stylesheet's numbers for every family are
+  // The fixture's 4:5 page with its family and orientation swapped in, so the stylesheet's numbers for every family are
   // measured in a real browser (the unit tests hold them to the catalogue)
-  await page.goto("/photos/fixture-b-01");
+  await page.goto("/photos/fixture-d-01");
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const orientation of ["vertical", "horizontal"] as const) {
     for (const family of FAMILIES) {
@@ -74,7 +88,7 @@ for (const width of [1280, 375]) {
   for (const orientation of ["vertical", "horizontal"] as const) {
     test(`crop captions keep the choices and button still at ${width}px, ${orientation}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto("/photos/fixture-b-01");
+      await page.goto("/photos/fixture-d-01");
       await page.evaluate(() => document.fonts.ready);
       // As with the geometry check above, use the fixture row with real catalogue captions for crop-bearing families
       for (const [short, long] of [[4000, 5000], [4000, 5657]]) {
@@ -137,13 +151,13 @@ test("oak draws a frame around the paper, never over it, and the caption's price
 });
 
 test("the preview, its caption and the basket agree on the chosen print", async ({ page }) => {
-  await page.goto("/photos/fixture-b-01");
+  await page.goto("/photos/fixture-d-01");
   await choose(page, "large", "oak");
   await expect(caption(page).first()).toHaveText("large · oak frame · $259");
   await expect(page.locator(".size-choice", { hasText: "large ·" })).toContainText("$259 framed");
   await page.getByRole("button", { name: "add to basket" }).click();
-  await expect(page).toHaveURL(/\/basket\?items=fixture-b-01:large:oak$/);
-  await expect(page.locator(".line-what")).toHaveText(["large · 16 × 24 in · oak frame · $259"]);
+  await expect(page).toHaveURL(/\/basket\?items=fixture-d-01:large:oak$/);
+  await expect(page.locator(".line-what")).toHaveText(["large · 16 × 20 in · oak frame · $259"]);
 });
 
 test("from the keyboard the radios move the preview, and a screen reader hears the caption", async ({ page, browserName }) => {
@@ -188,7 +202,7 @@ test("without JavaScript the preview still follows the radios and the form still
 });
 
 test("with reduced motion the paper and frame change at once", async ({ page }) => {
-  await page.goto("/photos/fixture-b-01");
+  await page.goto("/photos/fixture-d-01");
   expect(await paper(page).evaluate((element) => getComputedStyle(element).transitionDuration)).not.toBe("0s");
   await page.emulateMedia({ reducedMotion: "reduce" });
   const durations = () => paper(page).evaluate((element) => [getComputedStyle(element).transitionDuration, getComputedStyle(element, "::before").transitionDuration]);
@@ -200,7 +214,7 @@ test("with reduced motion the paper and frame change at once", async ({ page }) 
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
 
-  for (const id of ["fixture-b-01", "fixture-b-02", "fixture-01"]) {
+  for (const id of ["fixture-b-01", "fixture-b-02", "fixture-d-01", "fixture-01"]) {
     test(`${id}: the drawing fits the column, nothing scrolls sideways and every choice is a full tap target`, async ({ page }) => {
       await page.goto(`/photos/${id}`);
       const stage = await box(page.locator(".preview-stage"));
@@ -213,7 +227,7 @@ test.describe("on a phone", () => {
       await page.locator(".frame-choice", { hasText: "oak frame" }).tap();
       await expect(page.locator('input[name="frame"][value="oak"]')).toBeChecked();
       if (id !== "fixture-01") {
-        await page.locator(".size-choice", { hasText: "large ·" }).tap();
+        await page.locator(".size-choice", { hasText: `${id === "fixture-d-01" ? "large" : "medium"} ·` }).tap();
         expect((await settled(page)).width).toBeGreaterThan(before.width);
       }
     });

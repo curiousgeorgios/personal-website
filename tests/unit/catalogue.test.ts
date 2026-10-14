@@ -1,11 +1,20 @@
 import { describe, expect, test } from "vitest";
-import { crop, offerFor, parseSize, printLine, printsFor, sizeLabel } from "../../src/lib/prints/catalogue";
+import { crop, offerFor, parseSize, printLine, printsFor, recoveredSizeFor, sizeLabel } from "../../src/lib/prints/catalogue";
 
 const tiers = (width: number, height: number) => printsFor(width, height)?.offers.map((offer) => `${offer.tier} ${offer.size.size}`) ?? null;
 
 describe("printsFor", () => {
+  test("16 by 24 is withdrawn even for very high-resolution portraits and landscapes", () => {
+    for (const [width, height] of [[8000, 12000], [12000, 8000]]) {
+      expect(tiers(width, height)).toEqual(["small x8x12", "medium x12x18"]);
+      expect(recoveredSizeFor(width, height, "large")?.size).toBe("x16x24");
+    }
+    expect(tiers(8000, 10000)).toContain("large x16x20");
+    expect(tiers(9000, 12000)).toContain("large x18x24");
+  });
+
   test("the real dimension classes of spec 14.1", () => {
-    expect(tiers(3648, 5472)).toEqual(["small x8x12", "medium x12x18", "large x16x24"]);
+    expect(tiers(3648, 5472)).toEqual(["small x8x12", "medium x12x18"]);
     expect(tiers(3024, 4032)).toEqual(["small x9x12", "medium x12x16"]);
     expect(tiers(6048, 8064)).toEqual(["small x9x12", "medium x12x16", "large x18x24"]);
     expect(tiers(2194, 3291)).toEqual(["small x8x12"]);
@@ -16,7 +25,7 @@ describe("printsFor", () => {
 
   test("the crop tolerance is 3%: 2.9% gets prints, 3.1% doesn't", () => {
     expect(crop(6179 / 4000, 1.5)).toBeCloseTo(0.029, 3);
-    expect(tiers(4000, 6179)).toEqual(["small x8x12", "medium x12x18", "large x16x24"]);
+    expect(tiers(4000, 6179)).toEqual(["small x8x12", "medium x12x18"]);
     expect(crop(6192 / 4000, 1.5)).toBeCloseTo(0.031, 3);
     expect(tiers(4000, 6192)).toBeNull();
   });
@@ -29,9 +38,10 @@ describe("printsFor", () => {
   });
 
   test("a print needs 200 pixels per inch on both sides", () => {
-    // 3200 / 16 is exactly 200: large qualifies; one pixel less and it doesn't
-    expect(tiers(3200, 4800)).toContain("large x16x24");
-    expect(tiers(3199, 4800)).not.toContain("large x16x24");
+    // 3200 / 16 and 4000 / 20 are exactly 200; either side one pixel short fails.
+    expect(tiers(3200, 4000)).toContain("large x16x20");
+    expect(tiers(3199, 4000)).not.toContain("large x16x20");
+    expect(tiers(3200, 3999)).not.toContain("large x16x20");
   });
 
   test("an exact 200 pixels per inch on an ISO size isn't lost to float drift", () => {
@@ -58,7 +68,7 @@ describe("printsFor", () => {
 describe("labels", () => {
   test("both units, rounded to whole centimetres; the ISO sizes keep their decimal", () => {
     expect(sizeLabel(offerFor(printsFor(4000, 6000), "small")!)).toBe("small · 8 × 12 in (20 × 30 cm)");
-    expect(sizeLabel(offerFor(printsFor(4000, 6000), "large")!)).toBe("large · 16 × 24 in (41 × 61 cm)");
+    expect(sizeLabel({ tier: "large", size: parseSize("x16x24") })).toBe("large · 16 × 24 in (41 × 61 cm)");
     expect(sizeLabel({ tier: "small", size: parseSize("x8dot3x11dot7") })).toBe("small · 8.3 × 11.7 in (21 × 30 cm)");
     expect(printLine("medium", parseSize("x12x18"), "oak")).toBe("medium · 12 × 18 in · oak frame");
     expect(printLine("small", parseSize("x8x12"), "unframed")).toBe("small · 8 × 12 in · unframed");

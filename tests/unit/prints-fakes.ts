@@ -72,7 +72,7 @@ const previews = (id: string, width: number, height: number) =>
 
 /**
  * The e2e fixture's print-relevant photographs (spec 11.3): fixture-b-01 (4000 × 6000) and fixture-b-02 (6000 × 4000)
- * get all three sizes, fixture-01 and fixture-02 (2048 square) small only, fixture-03 is hidden and fixture-c-01
+ * get small and medium, fixture-01 and fixture-02 (2048 square) small only, fixture-03 is hidden and fixture-c-01
  * (1200 × 1800) gets none. A rate of 1.50 is stored, as the e2e servers seed it.
  */
 export async function printDb(): Promise<D1Database> {

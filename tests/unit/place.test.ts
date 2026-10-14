@@ -26,6 +26,15 @@ const creates = (fake: ReturnType<typeof world>) => fake.calls.filter((call) => 
 afterEach(() => vi.restoreAllMocks());
 
 describe("placeOrder", () => {
+  test("an already paid 16 by 24 order still uses its stored size", async () => {
+    captureLogs();
+    const { db, fake, deps } = await setup();
+    await db.prepare("UPDATE print_order_items SET tier = 'large', size = 'x16x24', unit_amount = 25900 WHERE order_id = ? AND line = 1").bind(ORDER).run();
+    await db.prepare("UPDATE print_orders SET print_total = 31800 WHERE id = ?").bind(ORDER).run();
+    expect(await placeOrder(deps, ORDER)).toBe("placed");
+    expect(JSON.parse(creates(fake)[0].body).items[0].productInfo.size).toBe("x16x24");
+  });
+
   test("places the whole order once, to the quoted address, each print made from its own master", async () => {
     captureLogs();
     const { db, fake, deps } = await setup();
