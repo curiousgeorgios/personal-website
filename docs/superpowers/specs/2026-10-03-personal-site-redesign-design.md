@@ -71,7 +71,7 @@ Tokens (from the agreed prototype, with `--muted` darkened to pass contrast):
 
 Type: Schibsted Grotesk for text (17px base, 1.55 line height; h1 clamp 30 to 40px, weight 500), DM Mono 400 for labels, dates and controls (11.5 to 12.5px). Only weights 400 and 500; no italics as accents, no gradients, no emoji, no glassmorphism.
 
-Fonts are self-hosted woff2: Schibsted Grotesk as one variable file limited to the 400 to 500 weight range and DM Mono 400. Both are subset to printable ASCII, all of Latin-1 (so names typed in `/admin`, like "Lépi", never fall back to Arial) and the symbols the page uses (`‹ › · – — ‘ ’ “ ” … ×`), `font-display: swap` with metric-matched fallbacks. Each is two files of one family, split by `unicode-range` (amended 14 October 2026, to lighten the mobile first paint): a preloaded core with ASCII, those symbols, the no-break space and Latin-1's lowercase letters (places are lowercase, so "københavn" stays in it), and Latin-1's capitals and symbols, which a browser fetches only for a page that shows one. `bun run fonts` builds both and checks `notebook.css`'s ranges against them. DM Mono has no arrow glyphs, so chevrons are drawn in CSS.
+Fonts are self-hosted woff2: Schibsted Grotesk as one variable file limited to the 400 to 500 weight range and DM Mono 400. Both are subset to printable ASCII, all of Latin-1 (so names typed in `/admin`, like "Lépi", never fall back to Arial) and the symbols the page uses (`‹ › · – — ‘ ’ “ ” … ×`), preloaded, `font-display: swap` with metric-matched fallbacks. DM Mono has no arrow glyphs, so chevrons are drawn in CSS.
 
 Layout: book width 940px max, 24px side gutter, margin column 150px, 40px gap either side of the rule.
 
@@ -264,7 +264,7 @@ Largest contentful paint is measured with Lighthouse (mobile preset: simulated 4
 
 - JavaScript before any interaction: under 10KB gzipped total (page scripts and the deck runner), no framework runtime.
 - HTML for `/`: under 30KB gzipped. CSS: under 15KB gzipped.
-- Fonts: four woff2 files, 54.6 KB in all (under 60 KB); only the two cores, 41.4 KB, preloaded.
+- Fonts: two woff2 files under 60KB total, preloaded.
 - Largest contentful paint under 1.5s; cumulative layout shift under 0.01; interaction to next paint under 200ms.
 - Scene chunk (Three.js plus scene code, loaded after `load` and only near the row): measured and recorded at build; target under 190KB gzipped. No scene task over 50ms at 4× CPU throttle, except generating the environment map, about 70ms at 4×, once, before the canvas shows, while the poster is still on screen (ADR-0017). The first press after the scene goes live was last measured after plan 5's Task 8: one cold first press showed a long task of about 64ms (the next run showed none), so it can still show one; no run of `scene-perf.spec.ts` since (plan 5 follow-ups). The first frame uploads nothing, because the scene's textures upload one per idle moment beforehand, so it takes 6 to 8ms at 4×. Measured locally with `SCENE_PERF=1` in a browser drawing WebGL on a GPU (CI renders in software, so it is reported there, not gated).
 - Covers: 512px WebP under 40KB each. Posters (four): under 60KB each. Snapshots: 480px variant under 30KB, 960px under 70KB.
