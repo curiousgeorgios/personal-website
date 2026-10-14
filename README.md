@@ -33,7 +33,7 @@ The photo gallery: `/photos`, a page for each photograph and a private downloads
 
 Decisions: [ADR-0020](docs/adr/0020-photo-downloads-use-revocable-signed-links.md) (amended; revocable signed links), [ADR-0022](docs/adr/0022-photo-places-are-area-and-city-only.md) (amended; area and city only), [ADR-0023](docs/adr/0023-the-gallery-stays-light-on-phones.md) (the gallery stays light on phones) and [ADR-0024](docs/adr/0024-test-servers-never-hold-the-real-signing-key.md) (test servers never hold the real signing key).
 
-Launch steps for the gallery, all George's, in this order:
+The gallery is live as of 14 October 2026: 458 reviewed photographs are published and four private holds remain hidden. Full-resolution masters stay private. The following checklist records the original launch sequence:
 
 1. Create the `curiousgeorge-photo-prints` R2 bucket before this branch deploys, because `wrangler.jsonc` binds it.
 2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`; the deploy job runs it). Production has never had the photo backend, so both arrive with this merge, along with the owner's JSON photo routes.
@@ -49,7 +49,9 @@ The gallery merges together with prints (plan 7), so George follows the combined
 
 ## Prints
 
-Print ordering (plan 7) is built and stays closed until George has worked through the launch checklist; `PRINTS_OPEN` is `"false"` in `wrangler.jsonc` until its last step. A photograph's page gets a `prints` row, the basket lives in the URL, Artelo's Price Check quotes delivery exactly for the buyer's address, Stripe's hosted checkout takes the payment, each paid basket becomes one Artelo order and the buyer gets a private order page and a shipped email; George runs it from the `orders` section of `/admin`. How it works, the launch checklist and how to run it: [prints guide](docs/prints.md). What is left: [the plan 7 follow-ups](docs/superpowers/plans/2026-10-08-plan-7-followups.md).
+Print ordering is live as of 14 October 2026, following [PR #6](https://github.com/curiousgeorgios/personal-website/pull/6) and its successful [main deployment](https://github.com/curiousgeorgios/personal-website/actions/runs/38493167634). `PRINTS_OPEN` is `"true"`. A photograph's page gets a `prints` row, the basket lives in the URL, Artelo's Price Check quotes delivery for the buyer's address, Stripe's hosted checkout takes payment, each paid basket becomes one Artelo order and the buyer gets a private order page and a shipped email; George runs it from the `orders` section of `/admin`. The first physical sample order remains the proof of real supplier fulfilment and print quality. How it works and how to run it: [prints guide](docs/prints.md).
+
+The next requested UI feature is [interactive size and frame previews](docs/print-preview-handoff.md), assigned to Claude. The populated gallery's mobile loading performance remains a separate follow-up.
 
 The e2e suite stands in for Stripe, Artelo, the exchange rate and the mail binding (`tests/fixtures/artelo-site.mjs`, port 4401) on the prints servers (4337, and 4339 with no exchange rate). Set `STRIPE_TEST_SECRET_KEY` to a Stripe test key in your shell to also run the one full order through Stripe's test mode (4338); without it that spec is skipped.
 

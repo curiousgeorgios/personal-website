@@ -15,13 +15,14 @@ const prints = { offers: printsFor(4000, 6000)!, prices: PRICES, gst: GST };
 const labels = (doc: Document) => [...doc.querySelectorAll(".row > .label")].map(text);
 
 describe("the print row", () => {
-  test("sits between the photo and say hi, a plain get form to the basket", async () => {
+  test("sits between the photo and say hi, a plain get form to the basket with one small script", async () => {
     const doc = await render(PhotoView, { page, prints });
     expect(labels(doc)).toEqual(["photo", "prints", "say hi"]);
     const form = doc.querySelector("form#prints")!;
     expect([form.getAttribute("method"), form.getAttribute("action")]).toEqual(["get", "/basket"]);
     expect(text(form.querySelector("p"))).toBe("a print of this photo, made by artelo on archival matte paper and posted from the us.");
-    expect(doc.querySelector("script")).toBeNull();
+    // The preview's announcement (print-preview.ts), bundled and inlined by the build; nothing else
+    expect([...doc.querySelectorAll("script")].map((script) => script.getAttribute("src"))).toEqual([expect.stringContaining("PrintRow.astro?astro&type=script")]);
   });
 
   test("one size radio per tier it gets, the first checked; unframed checked, oak offered", async () => {
@@ -57,5 +58,82 @@ describe("the print row", () => {
     expect([...doc.querySelectorAll(".photo-nav a")].at(-1)!.getAttribute("href")).toBe("/photos?before=1781392501&items=fixture-01:small:oak#post-fixture-b");
     const basket = doc.querySelector(".basket-link a")!;
     expect([basket.getAttribute("href"), text(basket)]).toEqual(["/basket?items=fixture-01:small:oak", "basket · 1 print"]);
+  });
+});
+
+describe("the print row's preview", () => {
+  const nbsp = (text: string) => text.replace(/ /g, " ");
+  /** The fixture photo at another master size, its previews fitted inside the square as photos:prepare makes them */
+  const at = (width: number, height: number, id = "fixture-x-01"): { page: PhotoPage; prints: typeof prints } => {
+    const fit = (size: number) => ({ width: Math.round((size * width) / Math.max(width, height)), height: Math.round((size * height) / Math.max(width, height)) });
+    const previews = [960, 1600].flatMap((size) => (["webp", "avif"] as const).map((format) => ({ url: `/media/photos/previews/${id}/sha/${size}.${format}`, ...fit(size), format })));
+    return { page: { ...page, photo: { ...photo, id, width, height, previews } }, prints: { offers: printsFor(width, height)!, prices: PRICES, gst: GST } };
+  };
+
+  test("draws the chosen print from the photo page's own image, for the eye only", async () => {
+    const doc = await render(PhotoView, { page, prints });
+    const stage = doc.querySelector("#prints .preview-stage")!;
+    expect(stage.getAttribute("aria-hidden")).toBe("true");
+    expect([...stage.classList]).toEqual(["preview-stage", "vertical", "family-2-3"]);
+    expect([...stage.querySelectorAll(".preview-outline")].map((outline) => outline.getAttribute("data-tier"))).toEqual(["small", "medium", "large"]);
+    // The same sources and sizes as the head row's picture, so the browser reuses the copy it has; never a master
+    const head = doc.querySelector(".photo img")!;
+    const img = stage.querySelector(".preview-print img")!;
+    for (const name of ["src", "srcset", "sizes"]) expect(img.getAttribute(name)).toBe(head.getAttribute(name));
+    expect(stage.querySelector(".preview-print source")!.getAttribute("srcset")).toBe(doc.querySelector(".photo source")!.getAttribute("srcset"));
+    expect([img.getAttribute("alt"), img.getAttribute("loading")]).toEqual(["", "lazy"]);
+    for (const url of [img.getAttribute("src")!, ...img.getAttribute("srcset")!.split(", ")]) expect(url).toMatch(/^\/media\/p\/(960|1600)\.webp/);
+    expect([...stage.querySelectorAll(".ruler-x b")].map(text)).toEqual(["0", "10", "20", "30", "40", "50"]);
+    expect([...stage.querySelectorAll(".ruler-y b")].map(text)).toEqual(["0", "10", "20", "30", "40", "50", "60"]);
+  });
+
+  test("its caption has a line for every size and frame the row offers, at the row's prices, and an empty status for the script", async () => {
+    const doc = await render(PhotoView, { page, prints });
+    const caption = doc.querySelector("#prints .preview-caption")!;
+    expect([...caption.querySelectorAll(".preview-choice")].map((line) => [line.getAttribute("data-tier"), line.getAttribute("data-frame"), text(line)])).toEqual([
+      ["small", "unframed", "small · unframed · $59"], ["small", "oak", "small · oak frame · $139"],
+      ["medium", "unframed", "medium · unframed · $79"], ["medium", "oak", "medium · oak frame · $179"],
+      ["large", "unframed", "large · unframed · $119"], ["large", "oak", "large · oak frame · $259"],
+    ]);
+    expect([...caption.querySelectorAll(".preview-size")].map((line) => nbsp(text(line)))).toEqual([
+      "the print: 20 cm wide, 30 cm tall (8 × 12 in)", "the print: 30 cm wide, 46 cm tall (12 × 18 in)", "the print: 41 cm wide, 61 cm tall (16 × 24 in)",
+    ]);
+    expect(text(caption.querySelector(".preview-note"))).toBe("drawn to scale against the ruler. the frame is illustrative; screen colour and timber grain vary.");
+    const status = doc.querySelector("#prints .preview-status")!;
+    expect([status.getAttribute("role"), text(status)]).toEqual(["status", ""]);
+  });
+
+  test("a landscape is drawn on its side, its width first", async () => {
+    const doc = await render(PhotoView, at(6000, 4000));
+    expect(doc.querySelector("#prints .preview-stage")!.classList.contains("horizontal")).toBe(true);
+    expect(nbsp(text(doc.querySelector('#prints .preview-size[data-tier="medium"]')))).toBe("the print: 46 cm wide, 30 cm tall (18 × 12 in)");
+  });
+
+  test("every ratio family gets its class, an outline per size and its trim where the paper's shape differs", async () => {
+    const families: [number, number, string, string | null][] = [
+      [4000, 6000, "family-2-3", null], [4284, 5712, "family-3-4", null], [4000, 5000, "family-4-5", "trims 1.8% of the photo's width, evenly from both sides"],
+      [4000, 5657, "family-iso-a", "trims 0.3% of the photo's height, evenly from top and bottom"], [4000, 4000, "family-1-1", null],
+    ];
+    for (const [width, height, family, mediumTrim] of families) {
+      const doc = await render(PhotoView, at(width, height));
+      const stage = doc.querySelector("#prints .preview-stage")!;
+      expect(stage.classList.contains(family), family).toBe(true);
+      expect(stage.querySelectorAll(".preview-outline")).toHaveLength(3);
+      const medium = text(doc.querySelector('#prints .preview-size[data-tier="medium"]'));
+      if (mediumTrim) expect(medium).toContain(`; ${mediumTrim}`);
+      else expect(medium).not.toContain("trims");
+    }
+  });
+
+  test("a photo with one size draws one, with its two frames", async () => {
+    const doc = await render(PhotoView, at(2048, 2048));
+    expect([...doc.querySelectorAll("#prints .preview-outline")].map((outline) => outline.getAttribute("data-tier"))).toEqual(["small"]);
+    expect([...doc.querySelectorAll("#prints .preview-choice")].map(text)).toEqual(["small · unframed · $59", "small · oak frame · $139"]);
+    expect([...doc.querySelectorAll('#prints input[name="size"]')].map((input) => input.getAttribute("value"))).toEqual(["small"]);
+  });
+
+  test("no preview without prints", async () => {
+    const doc = await render(PhotoView, { page });
+    expect(doc.querySelector(".print-preview")).toBeNull();
   });
 });

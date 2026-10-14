@@ -375,12 +375,13 @@ A size's price is its tier's price whatever the exact Artelo size, so a 3:4 larg
 Shown when prints are open (16.5) and the photograph has at least one size (14.1). Margin label `prints`, one `<form method="get" action="/basket" id="prints">`:
 
 - Intro: `a print of this photo, made by artelo on archival matte paper and posted from the us.`
+- A preview of the chosen print (amended 14 October 2026, [handoff](../../print-preview-handoff.md), [ADR-0032](../../adr/0032-the-print-preview-is-drawn-to-scale-by-css.md)): the photo page's own image, cropped from the centre to the paper's shape as Artelo's Outside fit cuts it, drawn at the chosen size against centimetre rulers from the paper's corner. The other sizes the photograph gets are dashed outlines at their own sizes. The drawing area and scale are the same for every photograph of an orientation (at most 5px a centimetre, less on a phone so it fits the column), so the controls never move and a small looks small on every page. `oak frame` draws an oak moulding around the paper, never over it; its 1.5cm face is illustrative, because we have not verified which of Artelo's oak profiles our `NaturalOak` payload selects or how much of the paper its lip covers, and no outer frame size is shown. There is no mat and no ready-to-hang promise. A caption gives the choice and its price (`medium · oak frame · $179`), the print's dimensions width first (`the print: 30 cm wide, 46 cm tall (12 × 18 in)`), any trim (`trims 1.8% of the photo's width, evenly from both sides`) and `drawn to scale against the ruler. the frame is illustrative; screen colour and timber grain vary.`
 - `size` radios, one per qualifying tier, the first checked: `small · 8 × 12 in (20 × 30 cm) · $59, or $139 framed`.
 - `frame` radios: `unframed` (checked) and `oak frame`.
 - Hidden `add` (the photo id) and, when the page was reached with a basket, hidden `items` (15.3).
 - Button `add to basket`, and under it `delivery is quoted for your address in the basket. prices include no gst; the seller isn't registered for gst.`
 
-The form works without JavaScript and has no script. Submitting it lands on `/basket?items=…&add=<id>&size=<tier>&frame=<frame>`, which answers 303 to the canonical basket URL with the print appended (15.2). Buying a single print is a basket of one reached this way; there is no separate shortcut.
+The form works without JavaScript. The preview reads the radios through CSS `:has()` alone, so it follows them without a script; a browser without `:has()` shows the row without the preview. One small inline script only fills a visually hidden `role="status"` line with the caption on each change, for screen readers. The drawing is `aria-hidden`; the caption is its text. The drawing's per-family sizes live in `prints.css` by family class, because the CSP allows no style attributes, and a unit test holds them to `catalogue.ts`. Submitting it lands on `/basket?items=…&add=<id>&size=<tier>&frame=<frame>`, which answers 303 to the canonical basket URL with the print appended (15.2). Buying a single print is a basket of one reached this way; there is no separate shortcut.
 
 ### 15.2 The basket page, /basket
 
@@ -766,7 +767,7 @@ CREATE INDEX photo_grants_order ON photo_download_grants(order_id);
 
 ### 23.1 Budgets
 
-R11's method applies to `/photos/<id>` with the print row and to `/basket` with two prints: JavaScript before any interaction under 10KB gzipped (the beacon only; neither the print row nor the basket has a script), HTML under 30KB gzipped, CSS under 15KB gzipped, the same two fonts, cumulative layout shift under 0.01 at 1280px and 375px, and the basket's 240 previews eager (at most 10).
+R11's method applies to `/photos/<id>` with the print row and to `/basket` with two prints: JavaScript before any interaction under 10KB gzipped (the beacon and the print preview's announcement, both inline; the basket has no script), HTML under 30KB gzipped, CSS under 15KB gzipped, the same two fonts, cumulative layout shift under 0.01 at 1280px and 375px, and the basket's 240 previews eager (at most 10).
 
 ### 23.2 Tests
 

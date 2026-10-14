@@ -140,7 +140,7 @@ test("no layout shift while the page settles", async ({ page, browserName }) => 
   expect(cls).toBeLessThan(0.01);
 });
 
-// Prints spec 23.1, on the prints server: the print row and the basket add no script, so the beacon is all there is
+// Prints spec 23.1, on the prints server: the basket adds no script and the print row only its preview's small announcement, both inline
 for (const path of ["/photos/fixture-b-01", "/basket?items=fixture-b-01:medium:oak,fixture-b-02:small:unframed"]) {
   test(`${path} with prints open stays inside the page budgets`, async ({ page, browserName }) => {
     test.skip(browserName !== "chromium", "measured once, in Chromium");
