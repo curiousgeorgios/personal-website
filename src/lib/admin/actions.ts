@@ -3,8 +3,8 @@ import { checkPlace } from "../photos/place";
 import { deletePhoto } from "../photos/delete";
 import { photoCacheTag } from "../media";
 import { setPublished, type PublishDeps, type PublishOutcome } from "../photos/publish";
-import { insertGrant, revokeCatalogueLink } from "../photos/store";
-import { GRANT_ID, PHOTO_ID, photoSigningKey, signPhotoToken } from "../photos/tokens";
+import { revokeCatalogueLink } from "../photos/store";
+import { GRANT_ID, PHOTO_ID } from "../photos/tokens";
 import { REFUND_REASON } from "../prints/artelo-status";
 import { ORDER_ID } from "../prints/order-id";
 import { writeSetting } from "../prints/store";
@@ -16,14 +16,12 @@ import {
   checkBuffer,
   checkFact,
   checkItem,
-  checkLink,
   checkLogEntry,
   checkRecordMeta,
   checkTitle,
   checkUpload,
   FACT_FIELDS,
   ITEM_FIELDS,
-  LINK_FIELDS,
   LOG_FIELDS,
   PLACE_FIELDS,
   readFields,
@@ -32,7 +30,8 @@ import {
   type Fields,
 } from "./validate";
 
-export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs" | "links" | "orders";
+/** downloads is the approved addresses (spec 6.3 as amended), saved through /admin/photos/access rather than a form here */
+export type AdminSection = "now" | "before" | "log" | "lately" | "records" | "snapshots" | "photographs" | "links" | "downloads" | "orders";
 
 /** The snapshots Worker's RPC (workers/snapshots/src/index.ts) */
 export interface SnapshotsService {
@@ -136,7 +135,7 @@ export async function runAction(form: FormData, deps: ActionDeps): Promise<Actio
     case "photo.delete":
       return removePhoto(form, deps);
     case "link.issue":
-      return issueLink(form, deps);
+      return issueLink();
     case "link.revoke":
       return revokeLink(form, deps);
     case "prints.buffer":
@@ -484,26 +483,8 @@ async function removePhoto(form: FormData, { db }: ActionDeps): Promise<ActionRe
 
 // Links (spec 6.3)
 
-/** 16 random bytes in base64url, from the form: the same form sent twice makes one link */
-const NONCE = /^[A-Za-z0-9_-]{22}$/;
-
-async function issueLink(form: FormData, deps: ActionDeps): Promise<ActionResult> {
-  const fields = readFields(form, LINK_FIELDS);
-  const values = { days: fields.days, note: fields.note };
-  if (!NONCE.test(fields.nonce)) return fail(null, "", { form: "that form is out of date. reload the page and try again." });
-  const checked = checkLink(fields);
-  if (!checked.ok) return fail("links", "link-new", checked.errors, values);
-  try {
-    photoSigningKey(deps.photoLinkSecret);
-  } catch {
-    return fail("links", "link-new", { form: "links can't be made until PHOTO_LINK_SECRET is set." }, values);
-  }
-  const grant = { grantId: crypto.randomUUID(), photoId: null, expiresAt: Math.floor(Date.now() / 1000) + checked.value.days * 86400 };
-  const token = await signPhotoToken(deps.photoLinkSecret!, grant);
-  if (!(await insertGrant(deps.db, grant, { note: checked.value.note, nonce: fields.nonce }))) return { ok: true, section: "links", issued: { repeat: true } };
-  const url = new URL("/photos/downloads", deps.origin ?? "https://curiousgeorge.dev");
-  url.searchParams.set("token", token);
-  return { ok: true, section: "links", issued: { url: url.href } };
+async function issueLink(): Promise<ActionResult> {
+  return fail("links", "link-new", { form: "download links have been replaced by approved email sign-in. reload the page." });
 }
 
 async function revokeLink(form: FormData, { db }: ActionDeps): Promise<ActionResult> {

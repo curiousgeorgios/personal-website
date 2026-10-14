@@ -1,6 +1,7 @@
 # curiousgeorge.dev photo gallery and print ordering
 
 - Date: 2026-10-08
+- Human download access amended: 2026-10-14, [ADR-0033](../../adr/0033-photo-downloads-require-approved-email-codes.md).
 - Owner: George Vlachos
 - Status: Design agreed with George, revised after critical review and George's answers to its product questions; ready for two implementation plans (section 1.2)
 - Extends: [the logbook redesign spec](2026-10-03-personal-site-redesign-design.md). "R6.1" below means its section 6.1. Everything that spec says about the visual system (R3), motion (R4.3), architecture (R6), admin (R7), analytics (R10), budgets (R11), security headers and accessibility (R12) and deployment (R13) applies here unless this spec says otherwise.
@@ -10,7 +11,7 @@
 
 ## 1. Intent, scope and the two parts
 
-George's photographs get a home on the site, kept the way the logbook keeps everything else: dated entries, plain words, nothing moving unless the visitor moves it. Anyone can order prints of the photographs that print well, several in one order. People George chooses get every published photograph at full resolution through one private link.
+George's photographs get a home on the site, kept the way the logbook keeps everything else: dated entries, plain words, nothing moving unless the visitor moves it. Anyone can order prints of the photographs that print well, several in one order. People whose email addresses George approves get every published, undeleted photograph at full resolution after entering a single-use email code, with a fourteen-day session.
 
 The selection is 462 photographs from 32 Instagram posts (2 February 2025 to 27 September 2026), 370 portrait and 92 landscape; 363 are 2:3 and 96 are 3:4. 96 are RAW renders awaiting George's review (docs/photo-gallery-backend.md).
 
@@ -20,7 +21,7 @@ The selection is 462 photographs from 32 Instagram posts (2 February 2025 to 27 
 - The first batch of `/photos`, every `/photos/<id>` page and the basket work completely without JavaScript and meet the budgets in sections 10 and 23.
 - A buyer anywhere sees one delivered total for everything in their basket before paying, pays on Stripe's page and gets the prints without George touching anything; when something goes wrong, George finds out from `/admin` and an email, never from the buyer.
 - No buyer is ever charged without the order being tracked to a resolution: the cron, not only the webhook, guarantees a paid order is noticed (section 18.6).
-- `cookies: none. nothing to accept.` stays literally true of curiousgeorge.dev, and the privacy test's empty-storage assertion keeps passing (sections 9 and 21).
+- `cookies: none, except a sign-in cookie if you download photos. nothing to accept.` is literally true of curiousgeorge.dev: the only cookie is the essential downloads session (5.1), set only by signing in; analytics stays cookieless and the privacy test's empty-storage assertion keeps passing (sections 9 and 21).
 
 Non-goals: buyer accounts, saved addresses or order history beyond the private order page; discount codes or gift cards; print sizes other than the three in section 14.1; frames other than Artelo's standard oak, mats, canvas or metal prints; artistic titles or captions invented for photographs (titles start empty and only George writes them); maps, coordinates or anything finer than "area, city" (ADR-0022); new analytics events (the beacon keeps its four, R10).
 
@@ -45,8 +46,11 @@ Plan B: (1) the Worker entry probe (cron, `ratelimits` and `send_email` all surv
 | `/photos` | The gallery, newest entry first, two entries per page (section 3) | Edge, tag `photos`, as R6.1 (`maxAge: 300, swr: 86400`) |
 | `/photos?before=<seconds>` | The next two entries posted before that time; `noindex` | Same, per URL |
 | `/photos/<id>` | One photograph (section 4) | Edge, tag `photos` |
-| `/photos/downloads?token=<token>` | The private full-resolution list (section 5) | Private headers, never cached |
-| `/photos/downloads/<id>?token=<token>` | Existing full-resolution JPEG download, unchanged in part 1 | Private headers |
+| `/photos/downloads` | Approved email-code sign-in and private full-resolution list (section 5) | Private headers, never cached |
+| `/photos/downloads/<id>` | Full-resolution JPEG for an approved session; internal Artelo order tokens remain valid | Private headers |
+| `/api/photos/access/code` | Requests a browser-bound single-use code for an approved address | Private headers |
+| `/api/photos/access/session` | Session status, code verification and sign-out | Private headers |
+| `/admin/photos/access` | Owner approval list, approve and revoke | Private headers |
 | `/api/photos` | Existing catalogue, plus the entry mode in section 3.6 | 60s fresh, 300s stale, tag `photos` (unchanged) |
 | `/api/photos/<id>` | Existing, plus `date` and `place` | Unchanged |
 | `/admin` | Two new sections (section 6) | As R7 |
@@ -57,8 +61,8 @@ Plan B: (1) the Worker entry probe (cron, `ratelimits` and `send_email` all surv
 
 - **Public photo fields** gain `date` (the post's `YYYY-MM-DD`) and `place` (`"area, city"` or `null`) from `photo_posts` (section 7), in `/api/photos` and `/api/photos/<id>`. Purely additive.
 - **240 previews.** Every photograph gains a 240 preview in AVIF and WebP, so each has eight previews instead of six (3.3). `photos:prepare` encodes sizes 240, 480, 960 and 1600; a checkpoint that lacks the 240s gets them derived from its existing master JPEG without re-rendering, so masters, their SHA-256 and their publication state don't change. `photos:import` requires eight previews and accepts `/(240|480|960|1600)\.(avif|webp)$/`; the publish check verifies eight.
-- **Catalogue links** point at the page, `/photos/downloads?token=…`, instead of `/api/photos/downloads?token=…`. The JSON route stays for scripts.
-- **Photo-scoped links are no longer issued to people** (ADR-0020 as amended). `POST /admin/photos/links` refuses a `photoId` with 400 `photo links are internal`; `bun run photos:link` drops `--photo`.
+- **Approved email access** replaces human catalogue links (ADR-0033, amended 2026-10-14). `/photos/downloads` uses browser-bound single-use codes and fourteen-day sessions; the JSON catalogue requires the same session and exposes token-free URLs.
+- **New human links are retired.** `POST /admin/photos/links` returns 410 and `bun run photos:link` only revokes legacy catalogue grants. Internal photo-scoped grants carrying print orders remain valid for Artelo.
 - **Publication** moves from `src/pages/admin/photos/[id].ts` into `src/lib/photos/publish.ts` (`setPublished(deps, ids, published)`), shared by the JSON route and the admin forms. Verification is unchanged apart from eight previews; its R2 `head` calls (up to 180 for a 20-photo post: one master and eight previews each) run with a concurrency of 10, well within Workers Paid's subrequest limit, which the plan task confirms. A publication change purges both `photos` and `logbook` (the home page's photo line depends on whether anything is published).
 - **Titles survive re-import.** The import's photo upsert no longer touches `title` on conflict: titles come from the manifest only when a row is first inserted, and afterwards only from `/admin`.
 - **`Notebook.astro`** gains two optional props: `ogImage` (an absolute URL with its width and height; every other page keeps `/og.png`) and `referrer` (renders `<meta name="referrer" content="…">`).
@@ -154,40 +158,48 @@ The photograph is a `<picture>` with the 960 and 1600 previews in AVIF and WebP,
 
 A photograph's **name**, used wherever one photograph has to be named in a line of text (and, in part 2, at checkout, on the order page and in emails), is its title in quotes, or `photo 2 of 14 from 02.02.25` when it has none. `<title>` is `<h1 text> · photos · george vlachos`. The description is `a photo by george vlachos from 2 february 2025, bondi, sydney.` (place left out when unknown; "from" because the date is the post's, not the shutter's). `og:image` is the 1600 WebP with its real `og:image:width` and `og:image:height` (`ogImage` prop, 2.2). Known gap: a few link-preview services still don't read WebP and will show no image. Cached as 3.5. The beacon sends its `$pageview` as on `/`.
 
-## 5. Full-resolution links (ADR-0020 as amended)
+## 5. Full-resolution downloads (ADR-0020 as amended, ADR-0033)
 
 ### 5.1 Who gets full resolution
 
-People get full-resolution photographs only through a catalogue link: one link opens every published photograph, for as long as it lasts (7 days by default, 30 at most) or until George revokes it. George issues and revokes them in `/admin` (section 6.3) or with `bun run photos:link` (catalogue only). Part 2 adds photo-scoped grants used only inside print orders (section 18.2); no person ever receives one.
+Only people George approves: he adds their email address in `/admin` (section 6.3), and they sign in at `/photos/downloads` with a six-digit code sent to it. A signed-in browser holds one session (the `__Host-` cookie, HttpOnly and Secure) for 14 days, or until it signs out or George revokes the address; every published photograph is downloadable during it. No person ever receives a signed link: catalogue links are no longer issued, and those still live stay revocable until they expire. Part 2's photo-scoped grants used inside print orders (section 18.2) are unchanged.
 
-### 5.2 The downloads page, /photos/downloads?token=…
+### 5.2 The downloads page, /photos/downloads
 
-Server-rendered from D1 (`src/pages/photos/downloads/index.astro`); it verifies the token exactly as `/api/photos/downloads` does (`verifyPhotoToken`, a catalogue scope, `grantIsActive`).
+Server-rendered (`src/pages/photos/downloads/index.astro`) from `photoDownloadsView`, which is `ok` with the entries and the session's expiry, `signin` for any browser without a valid session (whatever the reason), or `down`.
 
 | Margin label | Content |
 |---|---|
-| `downloads` (head row) | `<h1>photos, full size</h1>`, then `every photo in the gallery as a full-resolution jpeg. this link works until 15.10.26, 2:30 pm sydney time. please keep it to yourself.` (the expiry from the token's `exp`, in `Australia/Sydney`) |
-| `entries` | Every published photograph, grouped into entries headed as 3.2, newest first, on one page. Each photograph: its 240 preview (lazy, alt as 3.2) and a link `download · 12.4 mb` (decimal megabytes, one decimal) to `/photos/downloads/<id>?token=<token>` with `download="<id>.jpg"` |
+| `downloads` (head row) | `<h1>photos, full size</h1>`. Signed in: `full-resolution jpegs of every photo in the gallery. this browser is signed in until 28.10.26, 2:30 pm sydney time. please keep them to yourself.` and a `sign out` button. Otherwise: `full-resolution jpegs of george's photos, for the people he has approved. sign in with your approved email address and a six-digit code will be sent to it.` |
+| `entries` (signed in) | Every published photograph, grouped as 3.2, newest first. Each: its 240 preview and a link `download jpeg · 12.4 mb` to `/photos/downloads/<id>` with `download="<id>.jpg"`; the session cookie is the only credential |
+
+The sign-in (`src/scripts/photo-access.ts`, messages in `src/lib/photos/access-ui.ts`):
+
+- **Email:** `email address`, `send a code`. A malformed address is caught before anything is sent (`type the email address george approved.`). `POST /api/photos/access/code` `{email}` answers 202 with the same message for every address, approved or not, and whether or not the email could be sent: `if this email address has been approved, a sign-in code will arrive shortly. it works for 10 minutes, once.`
+- **Code:** `six-digit code` (`autocomplete="one-time-code"`, numeric), `sign in`. `POST /api/photos/access/session` `{code}`: 200 reloads the page into its list; 403 says `that code didn't work. it may be mistyped, used or out of date. check it, or send a new one.` without saying which.
+- **Resend:** `send a new code`, disabled for the 60 seconds the 202 names (`send a new code in 42s`); a 429 names its `Retry-After` (`that's a lot of codes in a short time. try again in 2 minutes.`). `use a different address` returns to the first step.
+- **Sign out:** `DELETE /api/photos/access/session`, then a reload. A signed-in page checks its session again when shown and at its expiry, and reloads into the sign-in once it has ended.
+- Errors are `role="alert"` beside their field with `aria-invalid`; progress is announced in a `role="status"` region; every control is a 44px tap target and works from the keyboard. The forms need JavaScript; without it the page says `signing in needs javascript, which is off in this browser. turn it on for this page to sign in.` and shows no form.
+- The address lives only in the script's memory: never in a URL, storage or a cookie the page can read. No JWT, code or address is ever in a URL. Every write is a same-origin JSON `fetch` with `referrerPolicy: "same-origin"`, so the Origin check holds under the page's `no-referrer`.
 
 The page:
 
 - sends `PRIVATE_HEADERS` (the middleware already applies them to `/photos/downloads`): `Cache-Control: private, no-store`, `Cloudflare-CDN-Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex, nofollow`;
 - renders with `Notebook.astro`'s `noindex` (so no canonical is emitted) and `referrer="no-referrer"`;
-- never calls `Astro.cache.set`, includes no beacon or other script and loads nothing from any other origin;
-- never logs the request, its URL or the token (as `download.ts` already does); the Worker's `redact_query_string` keeps the token out of Workers Logs;
-- holds the token only in its own download links.
+- never calls `Astro.cache.set`, includes no beacon and loads nothing from any other origin; its only script is the sign-in's, bundled with the page;
+- never logs the request, its cookie or an address.
 
-### 5.3 When a link doesn't work
+### 5.3 When downloads don't work
 
-Invalid, expired and revoked links all show the same page, with status 403, the same private headers, `noindex` and `referrer="no-referrer"`, so the page never says which: head row `downloads`, `<h1>this link has run out</h1>` and `it may have expired or been switched off. if you were expecting photos, ask george for a fresh one: <a href="mailto:hello@curiousgeorge.dev">hello@curiousgeorge.dev</a>.` A missing `PHOTO_LINK_SECRET` or a D1 failure shows `downloads aren't working right now. try again in a bit.` with status 503.
+A browser without a valid session always gets the sign-in, status 200, never a reason. A backend or storage failure shows `downloads aren't working right now. try again in a bit.` with status 503 and the same private headers; a 503 from the sign-in's routes says `signing in isn't working right now. try again in a bit.`
 
 ## 6. The owner screen in /admin: photographs and links
 
 ### 6.1 Shared rules
 
-New sections follow R7 and the existing code in `src/lib/admin/` exactly: plain server-rendered forms posting to `/admin/` with an `intent`, the Origin check (ADR-0011), the Access check against `ADMIN_EMAIL` (ADR-0016), validation server side, 422 with the failed form reopened and its values, a page banner for failures that belong to no form, 500 for a throw and 303 to `/admin/?saved=<section>#<section>` on success (post, redirect, get). An identical repeat counts as saved (ADR-0012): publishing something already published, hiding something hidden, revoking something revoked. `AdminSection` gains `photographs` and `links`. Section order on the page: now, lately, log, records, before, snapshots, photographs, links.
+New sections follow R7 and the existing code in `src/lib/admin/` exactly: plain server-rendered forms posting to `/admin/` with an `intent`, the Origin check (ADR-0011), the Access check against `ADMIN_EMAIL` (ADR-0016), validation server side, 422 with the failed form reopened and its values, a page banner for failures that belong to no form, 500 for a throw and 303 to `/admin/?saved=<section>#<section>` on success (post, redirect, get). An identical repeat counts as saved (ADR-0012): publishing something already published, hiding something hidden, revoking something revoked. `AdminSection` gains `photographs`, `links` and `downloads`. Section order on the page: now, lately, log, records, before, snapshots, photographs, downloads.
 
-Saves in `photographs` purge `photos` and `logbook` through the existing `purgeLogbook` path (generalised to take tags); `links` purges nothing.
+Saves in `photographs` purge `photos` and `logbook` through the existing `purgeLogbook` path (generalised to take tags); `downloads` purges nothing.
 
 ### 6.2 Photographs
 
@@ -201,10 +213,13 @@ Inside:
 - **What hide does:** a hidden photograph leaves every page, list, feed and downloads page, and its previews stop being served: `/media/photos/previews/<id>/…` checks the photograph is published (one primary-key read in D1) and answers a hidden one's 404, `no-store`. Published previews keep `public, max-age=31536000, immutable` and carry the cache tag `photo-<id>`, and a hide purges that tag with `photos` and `logbook`, so the edge stops serving them too. Publishing again restores them. What hide can't do: a copy already in a visitor's browser cache (up to a year) or saved by someone stays theirs, so hide stops anyone new loading the photograph rather than recalling every copy (ADR-0020 as amended). The admin's thumbnails come through `/admin/media/…`, behind the admin gate and never cached, so hidden photographs still show there.
 - Saved line: `saved - the gallery may show the old version for a little while.` when the purge failed (after a hide, the edge may also keep serving its previews until the tag's purge runs), otherwise `saved - it's on the gallery now.`
 
-### 6.3 Links
+### 6.3 Downloads
 
-- **Issue a link:** fields `days` (a number from 1 to 30, default 7) and `note` (optional, at most 60 characters, hint `who it's for, so you know which to revoke`), plus a hidden `nonce` (16 random bytes, base64url, new on every render). Intent `link.issue`. This is the one write that answers 200 instead of 303, because the link exists only in that response: the page renders with `here's the link. copy it now - it can't be shown again.`, the URL in a read-only input and a `copy` button (`src/scripts/copy-link.ts`, `navigator.clipboard.writeText`; without JavaScript the text is selectable). The grant row stores the nonce (`photo_download_grants.request_nonce`, unique), so a repeated post with the same nonce (a double tap or a reload) creates nothing and shows `that link was already made. it's in the list below, but it can't be shown again.` The token itself is never stored.
-- **Active links:** catalogue grants (`photo_id IS NULL`) not revoked and not expired, newest first: `made 08.10.26 · works until 15.10.26 · <note>` and a revoke form with the `tick the box to remove it` confirmation used elsewhere in the admin (intent `link.revoke`).
+The section `downloads` (`src/components/admin/AccessAdmin.astro`, `src/scripts/access-admin.ts`) lists the approved addresses from `approvedEmails`, newest first, through the owner's private route `/admin/photos/access`:
+
+- **Approve an email address:** one `email address` field, hint `they sign in at /photos/downloads with a code sent to this address, for 14 days at a time. approving sends nothing: share the page with them yourself.` `POST {email}`, 201, then `/admin/?saved=downloads#downloads` with `saved - that address can sign in now.`
+- **Each address:** `mum@example.com · approved 08.10.26` and a revoke with the `yes, stop this address signing in` confirmation; nothing is sent unticked (`tick the box to revoke it`). `DELETE ?id=`, then `saved - that address can't sign in any more.` Revoking ends that address's open sessions at their next request.
+- The forms need JavaScript and say so without it. Issuing catalogue links from the admin is retired (`link.issue` answers 422, `POST /admin/photos/links` 410).
 
 ## 7. Places, dates and the import
 
@@ -248,10 +263,10 @@ CREATE UNIQUE INDEX photo_grants_nonce ON photo_download_grants(request_nonce);
 
 ## 9. Privacy and security (part 1)
 
-- The site still sets no cookies and uses no storage. The beacon (R10) runs on `/photos` and `/photos/<id>` and sends its `$pageview` with the path only (ADR-0013), so a `?before=` cursor is never sent. No new events.
+- The site sets no cookies and uses no storage, except the downloads session cookie set by signing in (5.1). The beacon (R10) runs on `/photos` and `/photos/<id>` and sends its `$pageview` with the path only (ADR-0013), so a `?before=` cursor is never sent. No new events.
 - `/photos/downloads` carries no beacon and is refused by the ingest proxy (2.2). Tokens never reach analytics, logs (`redact_query_string`, and no handler logs a URL or request) or referrers (`Referrer-Policy: no-referrer`).
 - Places: the import turns each post's GPS into "area, city" on George's Mac (section 7). The lookup itself sends one photo's coordinates per request to Apple's geocoding service, the same one Photos uses to name these places, once per photo at import, as ADR-0022 (amended) records; nothing else receives them, and only the place string reaches the manifest, D1 or the site. Coordinates are never stored in D1 or R2. George can edit or hide any place (6.2).
-- The privacy smoke test (R14) adds `/photos`, `/photos/<id>` and a downloads page: no `Set-Cookie`, empty storage, every request to the site's own origin.
+- The privacy smoke test (R14) adds `/photos`, `/photos/<id>` and the downloads sign-in: no `Set-Cookie`, empty storage, no beacon, every request to the site's own origin.
 
 ## 10. Performance budgets (part 1)
 
@@ -275,8 +290,9 @@ R11's method applies to `/photos` (the first page of two entries) and `/photos/<
 ### 11.2 End to end (Playwright)
 
 - **Gallery** (Chromium, WebKit, phone): entries, headings and frames from the fixture; no place shown for a post without one; the plain `older entries` link without JavaScript; nothing fetched until the visitor scrolls, then the next batch loading as the page nears the bottom; `that's every entry.`; `noindex` on a `?before=` page; a photograph page with previous and next; the 404 for an unpublished photograph; no layout shift.
-- **Downloads page:** a valid link lists every published photograph and downloads a JPEG whose bytes match the master; private headers and no `Set-Cookie`; no request carries a `Referer`; an expired link (a token the test signs with the fixture key and an already-expired grant row inserted with `wrangler d1 execute --command`), a revoked link and a garbled one each show the same 403 page; no beacon request.
-- **Admin** (on the admin server, 4333): publish and hide a post and a photograph; a verification failure publishes nothing; edit a place and a title; issue a link, see it once, reload without a second link, revoke it.
+- **Downloads sign-in, page behaviour** (`photo-access.spec.ts`, gallery server over HTTP, the two JSON routes answered by the test): keyboard flow, focus and announced messages, the wrong-code message, the resend's 60 seconds and a 429's wait (with `page.clock`), validation before sending, no JavaScript, phone tap targets; nothing in the URL or storage.
+- **Downloads sign-in, real backend** (`photo-access-session.spec.ts`, Chromium and WebKit, over HTTPS only because the session cookie is always Secure and `__Host-`; a local HTTPS fixture from `wrangler dev --local-protocol https`, never an insecure cookie or bypass): approve, read the code from the mail stand-in, sign in, download a JPEG by session alone, the cookie's flags and 14 days, sign out; an unapproved address reads the same and gets no email; revoking ends an open session.
+- **Admin** (on the admin server, 4333): publish and hide a post and a photograph; a verification failure publishes nothing; edit a place and a title; approve an address, then revoke it after the confirmation (`admin-access.spec.ts`).
 - **Privacy and budgets:** as sections 9 and 10.
 
 ### 11.3 Fixture
@@ -382,7 +398,7 @@ Shown when prints are open (16.5) and the photograph has at least one size (14.1
 - Hidden `add` (the photo id) and, when the page was reached with a basket, hidden `items` (15.3).
 - Button `add to basket`, and under it `delivery is quoted for your address in the basket. prices include no gst; the seller isn't registered for gst.`
 
-Under the delivery hint, an `about the print file` disclosure (`<details>`, closed) says: `full-resolution jpeg at quality 96, with an srgb colour profile and no colour subsampling. at least 200 pixels per inch at every available print size.` Each claim is in `scripts/prepare-photos.mjs` or `catalogue.ts`; the line under the intro rests on `place.ts`, which gives Artelo the master, never a preview. Then `want a high-resolution file to print yourself? ask george at hello@curiousgeorge.dev.`, an email link with the photograph's id in its subject. It asks; it is not a download, a licence or a promise of a file, and the master stays behind its signed links.
+Under the delivery hint, an `about the print file` disclosure (`<details>`, closed) says: `full-resolution jpeg at quality 96, with an srgb colour profile and no colour subsampling. at least 200 pixels per inch at every available print size.` Each claim is in `scripts/prepare-photos.mjs` or `catalogue.ts`; the line under the intro rests on `place.ts`, which gives Artelo the master, never a preview. Then `want the full-resolution jpeg to print yourself? ask george for access at hello@curiousgeorge.dev. already approved? sign in to download it.`: an email link with the subject `full-resolution jpeg access for <id>`, and a plain link to `/photos/downloads`. It asks or signs in; it is not a download, a licence or a RAW file, and the master stays behind the approved sign-in (5.1).
 
 The form works without JavaScript. The preview reads the radios through CSS `:has()` alone, so it follows them without a script; a browser without `:has()` shows the row without the preview. One small inline script only fills a visually hidden `role="status"` line with the caption on each change, for screen readers. The drawing is `aria-hidden`; the caption is its text. The drawing's per-family sizes live in `prints.css` by family class, because the CSP allows no style attributes, and a unit test holds them to `catalogue.ts`. Submitting it lands on `/basket?items=…&add=<id>&size=<tier>&frame=<frame>`, which answers 303 to the canonical basket URL with the print appended (15.2). Buying a single print is a basket of one reached this way; there is no separate shortcut.
 
@@ -464,7 +480,7 @@ After a successful quote the basket renders (status 200, `Cache-Control: no-stor
 - `prints $238 + delivery $49 = $287`, or with tax `prints $238 + delivery and destination taxes $56 = $294`
 - The breakdown, from the sealed figures: `artelo's freight us$30.00 for this address, converted at a$1.50 per us$1, plus 8% in case the exchange rate moves, rounded up to the dollar.` With tax: `artelo's freight us$30.00 and us sales tax us$4.20 for this address, converted at a$1.50 per us$1, plus 8% in case the exchange rate moves, rounded up to the dollar. artelo charges me that tax for posting to this address, so it's passed on at cost.` (each tax field named, the current buffer from `print_settings`)
 - `in australian dollars. prices include no gst; the seller isn't registered for gst.`
-- A second `<form method="post" action="/basket?items=…">` with `intent=checkout`, the address fields repeated as hidden inputs, the hidden `quote`, a `continue to payment` button and under it `payment happens on stripe's own checkout page, which sets its own cookies. this site sets none. your address is fixed there; to change it, change it here and quote again.`
+- A second `<form method="post" action="/basket?items=…">` with `intent=checkout`, the address fields repeated as hidden inputs, the hidden `quote`, a `continue to payment` button and under it `payment happens on stripe's own checkout page, which sets its own cookies. this site sets none for prints. your address is fixed there; to change it, change it here and quote again.`
 
 Editing any address field and pressing `quote delivery` again re-quotes. A POST render can't be redirected without putting the address in a URL or storing it, so these two posts answer 200 instead of the usual post, redirect, get; a reload asks the browser to resend, which re-quotes or re-checks harmlessly.
 
@@ -672,7 +688,7 @@ A third new section, `orders` (`AdminSection` gains it), after `links`, followin
 
 ### 21.1 Cookies and analytics
 
-- The site still sets no cookies and uses no storage. The basket is in the URL (15.2); the delivery address is only ever in a form body (15.4, 16.3). Stripe's Checkout is on Stripe's own domain, and the basket says so before the button. `visitor info` (R2) is unchanged and stays true of curiousgeorge.dev.
+- The site sets no cookies and uses no storage, except the downloads session cookie set by signing in (5.1). The basket is in the URL (15.2); the delivery address is only ever in a form body (15.4, 16.3). Stripe's Checkout is on Stripe's own domain, and the basket says so before the button. `visitor info` (R2) is unchanged and stays true of curiousgeorge.dev.
 - The beacon sends `/basket` and `/photos…` page views with the path only (ADR-0013), so a basket's `items` never reaches analytics, and a page showing an address (a POST render of the basket) carries no beacon at all. `/prints/` carries no beacon and is refused by the ingest proxy (13.3). View keys and order tokens never reach analytics, logs or referrers.
 - The privacy smoke test adds the print row and a basket with two prints quoted for a test address: no `Set-Cookie`, empty storage, every request to the site's own origin and the address in no URL, request line or `Referer` (the checkout redirect itself is not followed).
 

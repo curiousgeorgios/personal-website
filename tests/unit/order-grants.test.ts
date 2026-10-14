@@ -4,6 +4,7 @@ import { downloadPhoto } from "../../src/lib/photos/download";
 import { insertGrant, issueOrderGrant, ORDER_GRANT_SECONDS, revokeCatalogueLink, revokeOrderGrants } from "../../src/lib/photos/store";
 import { signPhotoToken, verifyPhotoToken } from "../../src/lib/photos/tokens";
 import { NOW, PHOTO_KEY, printDb } from "./prints-fakes";
+import { photoAccessFixture } from "./photo-access-fixture";
 
 const ORDER = "01k6x00000000000000000000a";
 let db: D1Database;
@@ -41,7 +42,9 @@ describe("order grants", () => {
     const grant = { grantId: crypto.randomUUID(), photoId: null, expiresAt: NOW + 3600 };
     await insertGrant(db, grant);
     const catalogue = await signPhotoToken(PHOTO_KEY, grant, NOW);
-    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(`https://curiousgeorge.dev/photos/downloads/fixture-b-01?token=${catalogue}`), NOW)).status).toBe(404);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(`https://curiousgeorge.dev/photos/downloads/fixture-b-01?token=${catalogue}`), NOW)).status).toBe(403);
+    const session = await photoAccessFixture(db, PHOTO_KEY, NOW);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", new Request("https://curiousgeorge.dev/photos/downloads/fixture-b-01", { headers: { Cookie: session.cookie } }), NOW)).status).toBe(404);
   });
 
   test("revoking an order's grants stops them, and the admin's revoke can't touch them", async () => {
@@ -54,7 +57,7 @@ describe("order grants", () => {
     expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(link.href), NOW)).status).toBe(403);
   });
 
-  test("revoking one order's grants leaves another order's and a catalogue link working", async () => {
+  test("revoking one order's grants leaves another order's and an approved session working", async () => {
     const mine = new URL(await issueOrderGrant(db, PHOTO_KEY, ORDER, "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW));
     const other = new URL(await issueOrderGrant(db, PHOTO_KEY, "01k6x00000000000000000000b", "fixture-b-01", 3600, "https://curiousgeorge.dev", NOW));
     const grant = { grantId: crypto.randomUUID(), photoId: null, expiresAt: NOW + 3600 };
@@ -63,7 +66,9 @@ describe("order grants", () => {
     expect(await revokeOrderGrants(db, ORDER, NOW)).toBe(1);
     expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(mine.href), NOW)).status).toBe(403);
     expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(other.href), NOW)).status).toBe(200);
-    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(catalogue), NOW)).status).toBe(200);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", get(catalogue), NOW)).status).toBe(403);
+    const session = await photoAccessFixture(db, PHOTO_KEY, NOW);
+    expect((await downloadPhoto(db, bucket(), PHOTO_KEY, "fixture-b-01", new Request("https://curiousgeorge.dev/photos/downloads/fixture-b-01", { headers: { Cookie: session.cookie } }), NOW)).status).toBe(200);
   });
 
   test("a grant lives at most 72 hours, and nothing is written for a refused one", async () => {

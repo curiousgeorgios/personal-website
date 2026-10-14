@@ -1,10 +1,11 @@
 # Photo gallery
 
-George's photographs on the site: `/photos`, a page for each photograph, a private downloads page behind catalogue links, the owner's photographs and links sections in `/admin` and a line on the home page while anything is published. Designed in [the photo gallery spec](superpowers/specs/2026-10-08-photo-gallery-and-prints-design.md) (part 1), built in [plan 6](superpowers/plans/2026-10-08-plan-6-photo-gallery.md) on Codex's backend of `a65ecc6`; what it left for later is in [the plan 6 follow-ups](superpowers/plans/2026-10-08-plan-6-followups.md).
+George's photographs on the site: `/photos`, a page for each photograph, a private downloads page for approved email addresses, the owner's photographs and downloads sections in `/admin` and a line on the home page while anything is published. Designed in [the photo gallery spec](superpowers/specs/2026-10-08-photo-gallery-and-prints-design.md) (part 1), built in [plan 6](superpowers/plans/2026-10-08-plan-6-photo-gallery.md) on Codex's backend of `a65ecc6`; what it left for later is in [the plan 6 follow-ups](superpowers/plans/2026-10-08-plan-6-followups.md). Human download access was amended on 14 October 2026 by ADR-0033.
 
 Decisions:
 
-- [ADR-0020](adr/0020-photo-downloads-use-revocable-signed-links.md) (amended): downloads use revocable signed links, and people only ever get catalogue links.
+- [ADR-0020](adr/0020-photo-downloads-use-revocable-signed-links.md) (amended): full-resolution files stay private and print orders retain internal, revocable supplier grants.
+- [ADR-0033](adr/0033-photo-downloads-require-approved-email-codes.md): people sign in with a single-use email code after George approves their address, with a fourteen-day session.
 - [ADR-0022](adr/0022-photo-places-are-area-and-city-only.md) (amended): a place is an area and a city, and coordinates never reach the site.
 - [ADR-0023](adr/0023-the-gallery-stays-light-on-phones.md): the gallery stays light on phones.
 - [ADR-0024](adr/0024-test-servers-never-hold-the-real-signing-key.md): test servers never hold the real signing key.
@@ -17,13 +18,18 @@ Decisions:
 | `/photos` | The gallery: one entry per Instagram post with a published photograph, newest first, two to a page. Works without JavaScript; `src/scripts/photo-sheet.ts` appends older entries (four at a time) once the visitor scrolls. Edge-cached, tag `photos`. |
 | `/photos?before=<seconds>` | The next two entries posted before that time; `noindex`. Anything but 1 to 10 digits is the notebook 404. |
 | `/photos/<id>` | One published photograph, its date and place, its neighbours in the post and its own share image (the 1600 WebP). Unpublished or unknown: the notebook 404. |
-| `/photos/downloads?token=<token>` | Every published photograph at full resolution, for a catalogue link. Private headers, no script, no referrer, never cached or counted. Invalid, expired and revoked links get the same 403 page. |
-| `GET` or `HEAD /photos/downloads/<id>?token=<token>` | One full-resolution JPEG attachment, with byte ranges and conditional requests. |
+| `/photos/downloads` | Email-code sign-in, or every published, undeleted photograph at full resolution for a valid approved session. Private headers, no referrer, never cached or counted. Service failures return 503. |
+| `GET` or `HEAD /photos/downloads/<id>` | One full-resolution JPEG attachment for an approved session, with byte ranges and conditional requests. Internal Artelo requests may instead supply a photo-scoped order token. Human catalogue tokens are refused. |
 | `GET /api/photos?after=-1&limit=24&collection=<optional>` | The published catalogue in position order, with a numeric `next` cursor. Limit 1 to 48. |
 | `GET /api/photos?by=entry&before=<seconds>&limit=4` | The entry mode: `{ entries: [{ collection, date, place, photos }], next }`, photos with only their 240 and 480 previews. Limit 1 to 12. |
 | `GET /api/photos/<id>` | One published photograph. |
-| `GET /api/photos/downloads?token=<token>` | The private catalogue as JSON, for scripts. |
-| `POST /admin/photos/links` | Issue a catalogue link through the owner gate (JSON; a `photoId` is refused with `photo links are internal`). |
+| `GET /api/photos/downloads` | The private catalogue as JSON for an approved session, with token-free attachment URLs. |
+| `POST /api/photos/access/code` | JSON `{ email }`; generic 202 response and a ten-minute browser challenge cookie. Only an approved address receives a code. |
+| `GET /api/photos/access/session` | Private session status and expiry. |
+| `POST /api/photos/access/session` | JSON `{ code }`; consumes the browser-bound code once and creates a fourteen-day session. |
+| `DELETE /api/photos/access/session` | Revokes the current session server-side and clears both sign-in cookies. |
+| `GET`, `POST` or `DELETE /admin/photos/access` | Owner-only approval list, approve JSON `{ email }` or revoke `?id=<uuid>`. Writes also require the exact same-origin Origin header. |
+| `POST /admin/photos/links` | Retired; returns 410 and never issues a grant. |
 | `DELETE /admin/photos/links?grantId=<uuid>` | Revoke a catalogue link through the owner gate. A photo-scoped grant (plan B's print orders) answers as an unknown link and keeps working. |
 | `PATCH /admin/photos/<id>` | Publish or hide one photograph through `setPublished` (JSON); a hide also purges its previews' tag. |
 | `DELETE /admin/photos/<id>` | Delete from the catalogue through the owner and same-origin gates; requires JSON `{ "confirm": true }`. Returns `{ id, deleted: true, cacheInvalidated }`. Repeats succeed; unknown IDs return 404. |
@@ -49,9 +55,9 @@ Measured on a store shaped like the real catalogue (two entries, 36 frames): 198
 - **photographs:** one post per row, newest first, with its counts and a `raw` pill for hidden photographs awaiting RAW review (publishing one is its review, so the pill goes). Inside: the post's place (the place rule: lowercase, at most 60 characters, printable Latin-1; saving marks it edited, so an import keeps it), `publish all` and `hide all`, each photograph's title and its own publish or hide. Publishing checks every photograph's private JPEG and eight previews first (`src/lib/photos/publish.ts`, ten R2 checks at a time) and publishes all or none, naming the master or preview that failed for each photograph. Saves purge `photos` and `logbook`.
 
   **What hide does:** a hidden photograph leaves every page, list and downloads page, and its previews stop being served to anyone new. `/media` checks in D1 that a preview's photograph is published and answers 404 otherwise; a hide also purges the photograph's `photo-<id>` tag, so the edge drops its cached previews (if that purge fails, the saved line says the gallery may show the old version for a little while). Publishing again brings them back. What hide can't recall: a copy already in a visitor's browser (previews are cached for a year), a saved or shared image, or a search engine's copy of one. It is the way to take a photograph down from the site, not a promise that no copy exists anywhere.
-- **links:** issue a catalogue link for 1 to 30 days with a note; it is shown once with a copy button and never stored (a nonce stops a repeated form making a second). Working links are listed with a revoke form, which switches off catalogue links only.
+- **downloads:** approve an email address, list approved addresses and revoke access after confirmation. Revocation removes pending codes and sessions immediately. No invitation is sent when approving an address; George shares the ordinary `/photos/downloads` URL himself.
 
-`bun run photos:link` issues and revokes catalogue links from the Mac without the admin; `--photo` is refused, because photo-scoped grants are made only inside print orders (plan B).
+`bun run photos:link` only revokes legacy catalogue grants. New human grants cannot be issued, and photo-scoped print-order grants cannot be revoked by this command.
 
 ### Deleting a photograph
 
@@ -86,34 +92,36 @@ For production the same import runs with `--remote` from the Mac, after the depl
 
 The import never purges cached pages, so after a re-import that hides a changed master, moves a post's time or changes an unedited place, `/photos` and `/photos/<id>` can show the old state until their cache goes stale (five minutes, then one revalidating request). A publish or hide in `/admin` purges at once.
 
-## Issuing links from the Mac
+## Approved download access
 
-`photos:key` generates an ignored local key in `.dev.vars`, preserves an existing key and never prints it. People only ever get catalogue links (ADR-0020 as amended): a catalogue link lists only published photographs.
+George approves the person's email address in `/admin` → downloads. The person opens `/photos/downloads`, requests a six-digit code and enters it in the same browser. The page exposes only published, undeleted full-resolution sRGB JPEGs; RAW source files remain outside this service. Existing human catalogue links no longer unlock downloads.
 
-```bash
-bun run photos:link --local \
-  --days 7 \
-  --output /Users/curiousgeorge/Documents/ChatGPT/photo-printing/recovery/private-link.json
-```
+Codes last ten minutes, allow five attempts and work once. Requests have a 60-second cooldown, limits of three per hour and ten per day per address, and twenty per hour per client. Unapproved addresses receive the same public response but no code or session. A code becomes usable only after the email service accepts its delivery.
 
-The link opens the downloads page, `/photos/downloads?token=…`. The private JSON file contains the URL, grant identifier and expiry; its mode is 0600, and the command refuses to save links into tracked areas of the website. George shares the link himself. To revoke it (catalogue links only: a print order's photo-scoped grant is refused and keeps working, as in the admin):
+The opaque session lasts fourteen days from sign-in, without sliding renewal. Its host-only Secure, HttpOnly, SameSite=Lax cookie is checked against the current approval on every attachment request. Sign-out revokes the session. Revoking the address removes its pending codes and sessions, erases the stored address and stops later downloads. Reapproval never revives old sessions. Daily cleanup removes expired records and retains revoked approval metadata for thirty days. Internal Artelo order grants keep their existing fulfilment behaviour, including hidden or deleted photographs.
+
+For legacy catalogue revocation only:
 
 ```bash
 bun run photos:link --local --revoke <grant-id>
 ```
 
-For production, use `--remote` and set `PHOTO_LINK_SECRET` in the process environment to the same key as the Worker, never in a command-line argument or a tracked file. The admin's links section issues production links without the signing key leaving the Worker.
+For production revocation, use `--remote`; never place secrets in command-line arguments or tracked files. `photos:key` remains a local development helper that creates an ignored key in `.dev.vars`, preserves an existing key and never prints it.
 
-## Launch steps (George's)
+### Email-access release
 
-In this order, because the branch binds a bucket and needs a migration the moment it deploys:
+Migration `0010_photo_email_access.sql` adds approvals, challenges, sessions and request limits. The main-only deploy job applies it before deploying the Workers. It approves no recipient and changes no photographs, masters or orders. Delivery uses the existing EMAIL binding, configured print sender and `PHOTO_LINK_SECRET`; no new provider credentials are required. Local acceptance uses synthetic addresses, a test-only mail sink and an actual HTTPS fixture, so the production cookie attributes are exercised.
+
+## Historical original gallery launch
+
+These steps document the original October 2026 launch and are not instructions to recreate existing production resources. Current releases use the main-only deployment job. Email access follows the section above.
 
 1. Create the `curiousgeorge-photo-prints` R2 bucket **before this branch deploys**, because `wrangler.jsonc` binds it: `bunx wrangler r2 bucket create curiousgeorge-photo-prints --location oc`. Confirm it has no `r2.dev` URL and no custom domain; the application has no public route for its objects.
-2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`), never `d1 execute --file`. The deploy job does this before it deploys, so merging is enough. Production has never had Codex's photo backend, so both migrations, the photo routes (the owner's JSON routes included) and the bucket binding all reach production with this merge. If step 1 was missed, the job applies both migrations and then `wrangler deploy` fails on the binding: the migrations are additive and harmless, so that is a failed deploy, not a failed migration; create the bucket and rerun the job.
-3. Set `PHOTO_LINK_SECRET` as a fresh Worker secret of 64 lowercase hex characters, not the local one: `bunx wrangler secret put PHOTO_LINK_SECRET`. Without it the downloads page answers 503.
+2. Apply migrations 0005 and 0006 with `wrangler d1 migrations apply` (`bun run db:migrate:remote`), never `d1 execute --file`. The original deploy job applied these before deploying the routes and bucket binding.
+3. Configure the production `PHOTO_LINK_SECRET` through the approved secret-management process, using a fresh key rather than the local development key.
 4. From the Mac, run `photos:prepare` (the manifest is now version 2; fill `scripts/photo-cities.json` wherever it stops), then `photos:import --remote` with the same manifest and selection.
 5. In `/admin`, review every post (places included) and publish what should be public, looking hardest at the 96 RAW candidates, which carry `raw` pills.
-6. Issue the first catalogue link from `/admin` and open it on a phone.
+6. The original launch checked a catalogue link on a phone. ADR-0033 replaces that human access check with approved email-code sign-in.
 
 After the first photographs are published (step 5), run the post-publish check against the live site. The deploy job's privacy test and Lighthouse run happened before anything was public, and Lighthouse never weighs images, so this is the first time the real photographs are measured:
 
@@ -126,5 +134,6 @@ The first command runs the 250KB image gate (at 1× and 3×) on the real `/photo
 
 ## Tests
 
-- Unit (Vitest, `node:sqlite` over the real migrations): the entry mode and its cursor, the post join, publication all or nothing at a concurrency of ten, the admin's photo and link actions, the place rule and naming with recorded placemarks, prepare on synthetic photos with a recorded geocoder, the import's writes and one real import into a temporary local store.
-- End to end (Playwright): the gallery with and without JavaScript, a photograph's page, the downloads page and its 403s, the admin's photographs and links sections, and privacy, budgets and layout shift on the photo pages. A gallery server (4335) gets the six-post photo fixture afresh on every run (spec 11.3), its 240 and 480 previews noise-filled so they weigh what real ones do; the admin server (4333) gets its own copy every run, and each spec there keeps to its own photographs. Every test server passes the fixture signing key explicitly (ADR-0024).
+- Unit (Vitest, `node:sqlite` over the real migrations): the entry mode and its cursor, the post join, publication all or nothing at a concurrency of ten, owner actions, code and session expiry, request limits, delivery failure, revocation, reapproval, private downloads and supplier grants. Real local D1 tests exercise concurrent code consumption and cooldown acquisition. Preparation and import checks use synthetic photos and recorded geocoding.
+- End to end (Playwright): the gallery with and without JavaScript, photograph pages, approved email-code sign-in, session expiry and sign-out, owner approval and revocation, privacy, budgets and layout shift. The HTTPS access server (4341) tests the actual Secure cookie flow with synthetic mail; the gallery (4335) and admin (4333) retain separate seeded stores. Every fixture pins its signing key (ADR-0024).
+- Integrated local acceptance on 14 October 2026 passed 1190 unit tests and 40 targeted browser checks across Chromium, WebKit and phone projects. Fourteen backend HTTP checks intentionally run once rather than repeating across browser engines. Required release CI remains a separate gate.

@@ -1,15 +1,17 @@
 import { PRIVATE_HEADERS, photoError, requestToken } from "./http";
 import { activeGrant, photoById, photoMaster } from "./store";
 import { verifyPhotoToken } from "./tokens";
+import { photoSession } from "./access";
 
 export async function downloadPhoto(db: D1Database, bucket: R2Bucket, secret: string | undefined, id: string, request: Request, now = Math.floor(Date.now() / 1000)): Promise<Response> {
   try {
-    const token = await verifyPhotoToken(secret, requestToken(request), now);
-    const grant = token && (token.photoId === null || token.photoId === id) ? await activeGrant(db, token, now) : null;
-    if (!token || !grant) return photoError("This download link is invalid or expired.", 403);
-    // A print order's grant serves its photo's current master whether or not it is published (spec 13.3); a catalogue
-    // link still needs publication
-    const photo = grant.orderId !== null && token.photoId === id ? await photoMaster(db, id) : await photoById(db, id);
+    const text = requestToken(request);
+    const token = text ? await verifyPhotoToken(secret, text, now) : null;
+    const candidate = token?.photoId === id ? await activeGrant(db, token, now) : null;
+    const orderGrant = candidate?.orderId ? candidate : null;
+    const session = orderGrant ? null : await photoSession(db, request, now);
+    if (!orderGrant && !session) return photoError("Sign in with an approved email address to download photos.", 403);
+    const photo = orderGrant ? await photoMaster(db, id) : await photoById(db, id);
     if (!photo || !/^prints\/[A-Za-z0-9_-]+\/[a-f0-9]{64}\.jpg$/.test(photo.print_key)) return photoError("Photo unavailable.", 404);
     const object = await bucket.head(photo.print_key);
     if (!object) return photoError("Photo unavailable.", 404);

@@ -1,0 +1,39 @@
+/* The downloads page's sign-in (spec 5.2 as amended), in the basket's field style. Hidden forms stay hidden: the grid
+   below would otherwise override the hidden attribute the script lifts */
+.access-form { display: grid; gap: 12px; max-width: 26rem; margin-top: 18px; }
+.access-form[hidden] { display: none; }
+.access-form.inline { margin-top: 14px; }
+.access-form .field { display: grid; gap: 4px; min-width: 0; }
+.access-form label { font: 12px/1.5 var(--mono); color: var(--muted); }
+/* 16px keeps iOS from zooming into a focused field; the edge is 3:1 against the paper (WCAG 1.4.11) */
+.access-form input {
+  font: inherit; font-size: 16px; line-height: 1.4; color: var(--ink); background: var(--mat);
+  border: 1px solid #85857d; border-radius: 4px; padding: 8px 10px; width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box;
+}
+.access-form input[name="code"] { font-family: var(--mono); letter-spacing: .2em; max-width: 12rem; }
+.access-form input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.access-form input[aria-invalid="true"] { border-color: #a83a24; }
+/* The basket's darker red, 5.6:1 on paper */
+.access-error { font-size: 14px; color: #a83a24; }
+.access-sent { font-size: 14px; color: var(--muted); text-wrap: pretty; }
+.access-error:empty, .access-sent:empty { display: none; }
+.access-button {
+  justify-self: start; min-height: 44px; padding: 0 16px; cursor: pointer;
+  font: 12.5px/1 var(--mono); color: var(--ink); background: var(--mat); border: 1px solid var(--rule); border-radius: 999px;
+}
+.access-button:disabled { cursor: progress; color: var(--muted); }
+/* notebook.css squares every focused button to 3px, which would turn the pill square under the keyboard */
+.access-button:focus-visible { border-radius: 999px; }
+.access-more { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; font: 12.5px/1.55 var(--mono); color: var(--muted); }
+/* Buttons that read as the notebook's links, each a full 44px tap target */
+.access-link {
+  min-height: 44px; padding: 0; cursor: pointer; background: none; border: 0; font: inherit; color: var(--ink);
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--faint);
+}
+.access-link:disabled { cursor: default; color: var(--muted); text-decoration: none; }
+.access-noscript { margin-top: 18px; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) {
+  .access-button { transition: border-color 200ms ease; }
+  .access-button:hover:not(:disabled) { border-color: color-mix(in oklab, var(--ink) 55%, transparent); }
+  .access-link:hover:not(:disabled) { text-decoration-color: var(--red); }
+}

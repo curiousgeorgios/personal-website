@@ -27,8 +27,8 @@ const medium = previewOf(photo, 960, "webp");
 const sizes = photoSizes(photo.width, photo.height);
 // The master's own pixel size (publicPhoto's width and height are the print file's): 3,648 × 5,472
 const pixels = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-// A request, not a download: George decides each one himself
-const fileRequest = `mailto:hello@curiousgeorge.dev?subject=${encodeURIComponent(`a high-resolution file of ${photo.id}`)}`;
+// A request, not a download: George approves each address himself, and approved people sign in at /photos/downloads
+const fileRequest = `mailto:hello@curiousgeorge.dev?subject=${encodeURIComponent(`full-resolution jpeg access for ${photo.id}`)}`;
 ---
 <form method="get" action="/basket" id="prints" class="print-form">
   <p>a print of this photo, made by artelo on archival matte paper and posted from the us.</p>
@@ -78,7 +78,7 @@ const fileRequest = `mailto:hello@curiousgeorge.dev?subject=${encodeURIComponent
     <summary>about the print file</summary>
     <p>full-resolution jpeg at quality 96, with an srgb colour profile and no colour subsampling. at least 200 pixels per inch at every available print size.</p>
   </details>
-  <p class="print-contact">want a high-resolution file to print yourself? ask george at <a href={fileRequest}>hello@curiousgeorge.dev</a>.</p>
+  <p class="print-contact">want the full-resolution jpeg to print yourself? ask george for access at <a href={fileRequest}>hello@curiousgeorge.dev</a>. already approved? <a href="/photos/downloads">sign in to download it</a>.</p>
 </form>
 <script>
   import "../../scripts/print-preview";

@@ -1,0 +1,65 @@
+---
+import Field from "./Field.astro";
+import { formatLogDate } from "../../lib/text";
+import { sydneyDate } from "../../lib/time";
+
+// Who may sign in to the downloads page (spec 6.3 as amended): George approves an address, and that person signs in at
+// /photos/downloads with a code emailed to it, for 14 days in one browser. Approving sends nothing; George shares the page
+// himself. Writes go to the owner's JSON route, /admin/photos/access, through access-admin.ts, which shows these forms;
+// without JavaScript the list still shows and a line says changing it needs JavaScript.
+export interface Approval {
+  id: string;
+  email: string;
+  /** Seconds, or D1's CURRENT_TIMESTAMP (UTC, written 2026-10-08 05:30:00) */
+  createdAt: number | string;
+}
+
+interface Props {
+  /** null when the list couldn't be read */
+  approvals: Approval[] | null;
+}
+
+const { approvals } = Astro.props;
+const approvedOn = (createdAt: number | string) => {
+  const when = typeof createdAt === "number" ? new Date(createdAt * 1000) : new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(createdAt) ? createdAt : `${createdAt.replace(" ", "T")}Z`);
+  return Number.isNaN(when.getTime()) ? null : formatLogDate(sydneyDate(when), "day");
+};
+---
+<noscript><p class="error">approving and revoking need javascript, which is off in this browser.</p></noscript>
+<form id="access-new" class="admin-form" method="post" action="/admin/photos/access" data-access-approve novalidate hidden>
+  <h3>approve an email address</h3>
+  <Field form="access-new" name="email" kind="email" label="email address" required maxlength={254} hint="they sign in at /photos/downloads with a code sent to this address, for 14 days at a time. approving sends nothing: share the page with them yourself." />
+  <p class="error" id="access-new-error" role="alert" hidden></p>
+  <button type="submit" class="button">approve</button>
+</form>
+{approvals === null ? (
+  <p class="error">the approved addresses couldn't load. reload the page to try again.</p>
+) : approvals.length === 0 ? (
+  <p class="empty">no one is approved yet.</p>
+) : (
+  <ol class="entries access-admin">
+    {approvals.map((approval) => {
+      const id = `access-${approval.id}`;
+      const on = approvedOn(approval.createdAt);
+      return (
+        <li class="entry" id={id}>
+          <div>
+            <p><span class="mono">{approval.email}</span>{on && ` · approved ${on}`}</p>
+            {/* Revoking ends this address's sessions and codes at once, so it asks first, as every removal here does */}
+            <form class="admin-form remove" method="post" action="/admin/photos/access" data-access-revoke={approval.id} data-email={approval.email} novalidate hidden>
+              <label class="confirm">
+                <input type="checkbox" name="confirm" value="yes" required aria-describedby={`${id}-error`} />
+                yes, stop this address signing in
+              </label>
+              <p class="error" id={`${id}-error`} role="alert" hidden></p>
+              <button type="submit" class="button quiet">revoke</button>
+            </form>
+          </div>
+        </li>
+      );
+    })}
+  </ol>
+)}
+<script>
+  import "../../scripts/access-admin";
+</script>

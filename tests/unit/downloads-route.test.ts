@@ -1,37 +1,51 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
-import { signPhotoToken } from "../../src/lib/photos/tokens";
+import type { DownloadsView } from "../../src/lib/photos/gallery";
 
-// The page reads the Worker's env; a missing key and a D1 that throws stand in for a Worker that can't verify or read
-const env = vi.hoisted(() => ({ PHOTO_LINK_SECRET: "1".repeat(64) as string | undefined, DB: undefined as unknown as D1Database }));
-vi.mock("cloudflare:workers", () => ({ env }));
+// The page's one decision is photoDownloadsView's (downloads-view.ts): stood in here, so these check the page around it,
+// its status, headers and log line, whatever the session logic does
+const view = vi.hoisted(() => ({ next: (): Promise<DownloadsView> => Promise.resolve({ state: "signin" }) }));
+vi.mock("cloudflare:workers", () => ({ env: { DB: {} } }));
+vi.mock("../../src/lib/photos/downloads-view", () => ({ photoDownloadsView: () => view.next() }));
 const { default: page } = await import("../../src/pages/photos/downloads/index.astro");
 
 afterEach(() => vi.restoreAllMocks());
 
-const get = async (token = "secret-token") => {
+const get = async () => {
   const container = await AstroContainer.create();
-  return container.renderToResponse(page, { request: new Request(`https://curiousgeorge.dev/photos/downloads?token=${encodeURIComponent(token)}`) });
+  return container.renderToResponse(page, { request: new Request("https://curiousgeorge.dev/photos/downloads", { headers: { cookie: "__Host-photo-session=secret-session" } }) });
 };
-
-test("a Worker without its signing key answers 503 with private headers, and logs nothing that could hold the token", async () => {
-  const log = vi.spyOn(console, "error").mockImplementation(() => {});
-  env.PHOTO_LINK_SECRET = undefined;
-  const response = await get();
-  expect(response.status).toBe(503);
+const privately = (response: Response) => {
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-  expect(await response.text()).toContain("downloads aren't working right now");
-  expect(JSON.stringify(log.mock.calls)).not.toContain("secret-token");
+  expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+};
+
+test("a browser without a session gets the sign-in at 200, privately, whatever the reason", async () => {
+  view.next = () => Promise.resolve({ state: "signin" });
+  const response = await get();
+  expect(response.status).toBe(200);
+  privately(response);
+  const html = await response.text();
+  expect(html).toContain('id="access-email"');
+  expect(html).not.toContain("download-list");
 });
 
-test("a D1 that fails on a valid link answers the same 503, and logs a fixed line", async () => {
+test("a signed-in browser gets its list at 200, privately", async () => {
+  view.next = () => Promise.resolve({ state: "ok", entries: [], expiresAt: 1793158200 });
+  const response = await get();
+  expect(response.status).toBe(200);
+  privately(response);
+  // Intl's time can carry a narrow no-break space before pm
+  expect((await response.text()).replace(/\s+/g, " ")).toContain("this browser is signed in until 28.10.26, 2:30 pm sydney time.");
+});
+
+test("a failure answers 503 with private headers, and logs a fixed line that names no session", async () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
-  env.PHOTO_LINK_SECRET = "1".repeat(64);
-  env.DB = { prepare: () => { throw new Error("D1_ERROR: down"); } } as unknown as D1Database;
-  const token = await signPhotoToken(env.PHOTO_LINK_SECRET, { grantId: crypto.randomUUID(), photoId: null, expiresAt: Math.floor(Date.now() / 1000) + 600 });
-  const response = await get(token);
+  view.next = () => Promise.reject(new Error("D1_ERROR: down for secret-session"));
+  const response = await get();
   expect(response.status).toBe(503);
-  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  privately(response);
+  expect(await response.text()).toContain("downloads aren't working right now");
   expect(log.mock.calls).toEqual([["photos: the downloads page is unavailable"]]);
 });

@@ -2,10 +2,12 @@ import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
 import { SignJWT } from "jose";
 import { sqliteD1 } from "./sqlite-d1";
 import { downloadPhoto } from "../../src/lib/photos/download";
-import { grantIsActive, insertGrant, photoPage, revokeCatalogueLink } from "../../src/lib/photos/store";
+import { insertGrant, photoPage } from "../../src/lib/photos/store";
 import { signPhotoToken, verifyPhotoToken, photoSigningKey, MAX_LINK_SECONDS } from "../../src/lib/photos/tokens";
 import { pageOptions } from "../../src/lib/photos/http";
 import { isMediaKey } from "../../src/lib/media";
+import { photoAccessFixture } from "./photo-access-fixture";
+import { SESSION_COOKIE, SESSION_SECONDS, revokeEmail } from "../../src/lib/photos/access";
 
 const KEY = "a1".repeat(32), OTHER_KEY = "b2".repeat(32);
 const NOW = 1800000000;
@@ -34,12 +36,11 @@ function bucket() {
     })),
   } as unknown as R2Bucket & { head: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
 }
-async function issue(db: D1Database, photoId: string | null = ID) {
-  const grant = { grantId: crypto.randomUUID(), photoId, expiresAt: NOW + 3600 };
-  await insertGrant(db, grant);
-  return { grant, token: await signPhotoToken(KEY, grant, NOW) };
+async function issue(db: D1Database) {
+  const session = await photoAccessFixture(db, KEY, NOW);
+  return { grant: session.approval, token: session.token };
 }
-const request = (token: string, headers: Record<string, string> = {}, method = "GET") => new Request(`https://curiousgeorge.dev/photos/downloads/${ID}?token=${token}`, { headers, method });
+const request = (token: string, headers: Record<string, string> = {}, method = "GET") => new Request(`https://curiousgeorge.dev/photos/downloads/${ID}`, { headers: { Cookie: `${SESSION_COOKIE}=${token}`, ...headers }, method });
 const alter = (token: string) => { const [head, body, signature] = token.split("."); return `${head}.${body}.${signature[0] === "a" ? "b" : "a"}${signature.slice(1)}`; };
 
 describe("signed photo tokens", () => {
@@ -84,38 +85,39 @@ describe("private R2 download delivery", () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(BYTES);
     expect(Object.fromEntries(response.headers)).toMatchObject({ "content-type": "image/jpeg", "content-length": "1000", "cache-control": "private, no-store", "cloudflare-cdn-cache-control": "no-store", "content-disposition": 'attachment; filename="fixture-01.jpg"', "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" });
   });
-  test("rejects missing, duplicate, altered and expired tokens without touching R2", async () => {
+  test("rejects missing, duplicate, altered and expired session cookies without touching R2", async () => {
     const { token } = await issue(db);
     const b = bucket();
-    for (const req of [request(""), request(alter(token)), request(token + "&token=" + token)]) expect((await downloadPhoto(db, b, KEY, ID, req, NOW)).status).toBe(403);
-    expect((await downloadPhoto(db, b, KEY, ID, request(token), NOW + 3600)).status).toBe(403);
+    for (const req of [request(""), request("f".repeat(64)), request(token, { Cookie: `${SESSION_COOKIE}=${token}; ${SESSION_COOKIE}=${token}` })]) expect((await downloadPhoto(db, b, KEY, ID, req, NOW)).status).toBe(403);
+    expect((await downloadPhoto(db, b, KEY, ID, request(token), NOW + SESSION_SECONDS)).status).toBe(403);
     expect(b.head).not.toHaveBeenCalled();
     expect(b.get).not.toHaveBeenCalled();
   });
-  test("enforces scope and allows catalogue grants on multiple published photos", async () => {
-    const scoped = await issue(db), all = await issue(db, null);
+  test("legacy catalogue and non-order photo links cannot bypass email login; approved sessions cover published photos", async () => {
+    for (const photoId of [null, ID]) {
+      const grant = { grantId: crypto.randomUUID(), photoId, expiresAt: NOW + 600 };
+      await insertGrant(db, grant);
+      const token = await signPhotoToken(KEY, grant, NOW);
+      expect((await downloadPhoto(db, bucket(), KEY, ID, new Request(`https://curiousgeorge.dev/photos/downloads/${ID}?token=${token}`), NOW)).status).toBe(403);
+    }
+    const all = await issue(db);
     const b = bucket();
-    expect((await downloadPhoto(db, b, KEY, OTHER, request(scoped.token), NOW)).status).toBe(403);
-    expect(b.head).not.toHaveBeenCalled();
     for (const id of [ID, OTHER]) expect((await downloadPhoto(db, b, KEY, id, request(all.token), NOW)).status).toBe(200);
   });
   test("revocation applies before even a conditional 304 or HEAD response", async () => {
-    const { grant, token } = await issue(db, null);
-    expect(await revokeCatalogueLink(db, grant.grantId, NOW)).toBe("revoked");
+    const { grant, token } = await issue(db);
+    expect(await revokeEmail(db, grant.id, NOW)).toBe(true);
     const b = bucket();
     for (const method of ["GET", "HEAD"]) expect((await downloadPhoto(db, b, KEY, ID, request(token, { "If-None-Match": ETAG }, method), NOW)).status).toBe(403);
     expect(b.head).not.toHaveBeenCalled();
   });
-  test("a token without a recorded grant or with changed stored scope is refused", async () => {
+  test("a session without its recorded approval is refused", async () => {
     const { grant, token } = await issue(db);
-    await db.prepare("UPDATE photo_download_grants SET photo_id = ? WHERE id = ?").bind(OTHER, grant.grantId).run();
-    expect(await grantIsActive(db, grant, NOW)).toBe(false);
-    expect((await downloadPhoto(db, bucket(), KEY, ID, request(token), NOW)).status).toBe(403);
-    await db.prepare("DELETE FROM photo_download_grants WHERE id = ?").bind(grant.grantId).run();
+    await db.prepare("DELETE FROM photo_access_approvals WHERE id = ?").bind(grant.id).run();
     expect((await downloadPhoto(db, bucket(), KEY, ID, request(token), NOW)).status).toBe(403);
   });
   test("draft and unpublished photos stay unavailable even to catalogue tokens", async () => {
-    const { token } = await issue(db, null);
+    const { token } = await issue(db);
     const b = bucket();
     expect((await downloadPhoto(db, b, KEY, DRAFT, request(token), NOW)).status).toBe(404);
     await db.prepare("UPDATE photos SET published = 0 WHERE id = ?").bind(ID).run();
@@ -154,10 +156,8 @@ describe("private R2 download delivery", () => {
     expect((await downloadPhoto(db, bucket(), KEY, ID, request(token, { Range: "bytes=0-9", "If-Range": '"old"' }), NOW)).status).toBe(200);
     expect((await downloadPhoto(db, bucket(), KEY, ID, request(token, { "If-Match": '"old"' }), NOW)).status).toBe(412);
   });
-  test("unconfigured key and R2 failures fail closed without logging the token", async () => {
+  test("R2 failures fail closed without logging the session token", async () => {
     const { token } = await issue(db), b = bucket();
-    expect((await downloadPhoto(db, b, undefined, ID, request(token), NOW)).status).toBe(503);
-    expect(b.head).not.toHaveBeenCalled();
     b.head.mockRejectedValue(new Error(`failure at ?token=${token}`));
     expect((await downloadPhoto(db, b, KEY, ID, request(token), NOW)).status).toBe(503);
     expect(errors.mock.calls.flat().join(" ")).not.toContain(token);

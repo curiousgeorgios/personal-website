@@ -21,7 +21,7 @@ const run = (path: string, next: () => Promise<Response>) => {
 afterEach(() => vi.restoreAllMocks());
 
 test("private photo paths cannot inherit public cache headers or leak a token as a referrer", async () => {
-  for (const path of ["/photos/downloads/fixture-01?token=private", "/photos/downloads?token=private", "/api/photos/downloads?token=private"]) {
+  for (const path of ["/photos/downloads/fixture-01?token=private", "/photos/downloads?token=private", "/api/photos/downloads?token=private", "/api/photos/access/code", "/api/photos/access/session"]) {
     const response = await run(path, () => Promise.resolve(new Response("ok", { headers: { "Cache-Control": "public, max-age=999", "Cache-Tag": "photos" } })));
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(response.headers.get("Cloudflare-CDN-Cache-Control")).toBe("no-store");
@@ -31,7 +31,7 @@ test("private photo paths cannot inherit public cache headers or leak a token as
 });
 
 test("the private paths are the downloads page, its files and the JSON catalogue, and nothing else", () => {
-  for (const path of ["/photos/downloads", "/photos/downloads/", "/photos/downloads/fixture-01", "/api/photos/downloads", "/api/photos/downloads/"]) expect(isPrivatePath(path)).toBe(true);
+  for (const path of ["/photos/downloads", "/photos/downloads/", "/photos/downloads/fixture-01", "/api/photos/downloads", "/api/photos/downloads/", "/api/photos/access/code", "/api/photos/access/session"]) expect(isPrivatePath(path)).toBe(true);
   for (const path of ["/photos", "/photos/fixture-01", "/photos/downloadsx", "/api/photos", "/api/photos/downloadsx"]) expect(isPrivatePath(path)).toBe(false);
 });
 

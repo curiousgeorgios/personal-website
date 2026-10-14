@@ -17,6 +17,8 @@ const PURGES: Record<AdminSection, string[]> = {
   snapshots: ["logbook"],
   photographs: ["photos", "logbook"],
   links: [],
+  // Approvals change no cached page: the downloads page is never cached (spec 6.3 as amended)
+  downloads: [],
   // The buffer is read by the next quote and retry now changes no page: nothing cached shows either (spec 20)
   orders: [],
 };

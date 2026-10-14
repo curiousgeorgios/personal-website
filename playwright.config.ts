@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { FIXTURE_STRIPE_KEY, PRINTS, PRINTS_NO_RATE, PRINTS_STRIPE, STAND_IN, printStore, printVars } from "./tests/e2e/prints-site";
 import { Agent, setGlobalDispatcher } from "undici";
+import { PHOTO_ACCESS } from "./tests/e2e/photo-access-site";
 
 // Set PLAYWRIGHT_BASE_URL to run specs against a deployed site (CI runs the privacy spec after deploy)
 const remote = process.env.PLAYWRIGHT_BASE_URL;
@@ -27,7 +28,7 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
-    { name: "phone", use: { ...devices["iPhone 13 Mini"] }, testMatch: /\/(smoke|logbook|labels|layout|log|deck-list|admin-layout|admin-links-view|gallery|photo-page|prints-preview)\.spec\.ts$/ },
+    { name: "phone", use: { ...devices["iPhone 13 Mini"] }, testMatch: /\/(smoke|logbook|labels|layout|log|deck-list|admin-layout|admin-access|photo-access|photo-access-session|gallery|photo-page|prints-preview)\.spec\.ts$/ },
   ],
   webServer: remote
     ? undefined
@@ -79,6 +80,14 @@ export default defineConfig({
         },
         // The print providers' stand-in: Artelo, the exchange rate, Stripe's three endpoints and the mail sink (spec 23.3)
         { command: "node tests/fixtures/artelo-site.mjs", url: `${STAND_IN}/__requests`, reuseExistingServer: false, timeout: 30_000 },
+        // Secure host-only sign-in cookies are exercised on actual HTTPS in both browser engines.
+        {
+          command: `${printStore(".wrangler/photo-access")} && WRANGLER_REGISTRY_PATH=.wrangler/photo-access/registry wrangler dev -c dist/server/wrangler.json --port 4341 --local-protocol https --persist-to .wrangler/photo-access ${PHOTO_KEY_VAR} ${printVars(PHOTO_ACCESS)} --var STRIPE_SECRET_KEY:${FIXTURE_STRIPE_KEY} --var STRIPE_API_BASE:${STAND_IN}/stripe`,
+          url: PHOTO_ACCESS,
+          ignoreHTTPSErrors: true,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
         // A sixth server for the print specs, every provider stood in, recreated every run like the admin server. Stripe
         // points at the stand-in too, so the money specs run on every run; a first failed order goes straight to
         // needs_attention (PRINT_RETRY_WINDOW=0, spec 19). Specs trigger the cron through wrangler's local explorer (runCron). Its own dev registry, as the snapshots server has
