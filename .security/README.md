@@ -8,7 +8,7 @@ major and commit exact versions with their lockfiles and download checksums.
 Run locally with a supported Node and Bun 1.4.3 or later:
 
 ```
-node --test .security/check-runtime.test.ts
+node --test .security/runtime-selfcheck.ts
 node .security/check-runtime.ts
 ```
 
