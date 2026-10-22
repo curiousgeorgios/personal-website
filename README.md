@@ -79,3 +79,7 @@ The analytics proxy drops events locally, because the PostHog key is a Worker se
 - Scene long tasks (opt-in, on a GPU): `SCENE_PERF=1 bun run test:e2e tests/e2e/scene-perf.spec.ts --project=chromium --headed`. It allows one task over 50ms, the environment map's (ADR-0017), and skips itself under software rendering. It was last measured after plan 5's Task 8, when one cold first press showed a long task of about 64ms (none on the next run), so it can still fail on that press; no run since. It needs Playwright's own Chromium (`bunx playwright install chromium`) for `--headed`.
 - The admin specs write, so they run against a third server on port 4333 whose store is deleted and migrated afresh on every run, in Chromium only. If a run stops part way, `pkill -f "port 4333"` before the next.
 - Run one end-to-end suite at a time: two at once oversubscribe the CPU, and headless renderers then stall for seconds (plan 5 measured up to 6.6s).
+
+## Security maintenance
+
+Runtime and dependency checks, update PRs and new-service enrolment are documented in [.security/README.md](.security/README.md). Register every independently locked package root in `.security/policy.json`.

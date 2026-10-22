@@ -10,3 +10,5 @@ playwright-report/
 # brainstorming mockups and browser scratch
 .superpowers/
 .playwright-mcp/
+
+/security-report.json
