@@ -32,7 +32,7 @@ def inspect(root, prepare=False):
     if not manifest.exists():
         return {'state': 'checked', 'downloads': [], 'changed': []}
     releases = json.loads(get('https://nodejs.org/dist/index.json'))
-    floors = {}
+    floors = {'22':'22.23.4', '24':'24.22.1', '26':'26.12.1'}
     for release in releases:
         if not isinstance(release.get('security'), bool):
             raise ValueError('Node release coverage incomplete')
