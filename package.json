@@ -49,7 +49,7 @@
     "music-metadata": "12.2.3",
     "sharp": "0.35.5",
     "subset-font": "2.9.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "undici": "7.30.1",
     "vitest": "5.0.5",
     "wrangler": "4.151.3"
