@@ -61,6 +61,25 @@
       "dependencyDashboardApproval": false,
       "automerge": false,
       "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Keep GitHub Actions Node downloads on the registered Node 24 major, including the actions/node-versions datasource.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "node",
+        "actions/node-versions"
+      ],
+      "allowedVersions": ">=24.22.1 <25",
+      "groupName": "Node 24 runtime"
+    },
+    {
+      "description": "Astro check does not support TypeScript 7; retain its supported compiler until an upstream-compatible migration is reviewed.",
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<7"
     }
   ],
   "customManagers": [
