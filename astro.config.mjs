@@ -28,7 +28,11 @@ export default defineConfig({
     // Astro inlines a page script below this limit when it has no imports and no dynamic imports. 24KB keeps the
     // deck runner inside the HTML, so a cached page never needs a hashed file to play a record. Other assets keep
     // Vite's default, so nothing else becomes a data: URL the CSP would block.
-    build: { assetsInlineLimit: (file, content) => (file.endsWith(".js") ? content.length < 24 * 1024 : undefined) },
+    build: {
+      assetsInlineLimit: (file, content) => (file.endsWith(".js") ? content.length < 24 * 1024 : undefined),
+      // Keep stack mappings without copying uncompiled test-only branches into production artifacts.
+      rolldownOptions: { output: { sourcemapExcludeSources: !testBuild } },
+    },
   },
   security: {
     // The middleware checks Origin on every write instead, so its 403s carry the security headers (Astro's skip them)
