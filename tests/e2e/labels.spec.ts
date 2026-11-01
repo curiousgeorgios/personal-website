@@ -403,10 +403,24 @@ test("a closer look closed while it is still growing goes back to its frame, not
     const box = (rect: DOMRect) => ({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
     link.click();
     while (!dialog.open) await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 100)); // part-way through the 420ms grow
-    const landed = new Promise<DOMRect>((resolve) => big.addEventListener("transitionend", () => resolve(big.getBoundingClientRect()), { once: true }));
+    const transformTransition = () => big.getAnimations().find(
+      (animation): animation is CSSTransition => animation instanceof CSSTransition && animation.transitionProperty === "transform",
+    );
+    let growing = transformTransition();
+    while (!growing) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      growing = transformTransition();
+    }
+    // Sample a real part-grown frame even when the runner delays animation frames.
+    growing.pause();
+    growing.currentTime = 100;
+    big.getBoundingClientRect();
     big.click();
-    return { landed: box(await landed), frame: box(link.querySelector("img")!.getBoundingClientRect()) };
+    const returning = transformTransition();
+    if (!returning || returning === growing) throw new Error("Closing did not create its return transition");
+    // Inspect the actual return target before the dialog's close cleanup runs.
+    returning.finish();
+    return { landed: box(big.getBoundingClientRect()), frame: box(link.querySelector("img")!.getBoundingClientRect()) };
   });
   for (const key of ["left", "top", "width", "height"] as const) expect(Math.abs(landed[key] - frame[key])).toBeLessThan(1);
 });
